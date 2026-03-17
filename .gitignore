@@ -7,3 +7,9 @@ venv/
 voice_prep/downloads/
 
 *.wav
+
+*.wav
+
+*.mp3
+
+*.deb
