@@ -3,3 +3,7 @@
 __pycache__/
 node_modules/
 venv/
+
+voice_prep/downloads/
+
+*.wav
