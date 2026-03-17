@@ -1,0 +1,23 @@
+{
+  "name": "Hayeong's Workstation PC",
+  "target_amount": 3000.0,
+  "currency": "USD",
+  "description": "A high-performance PC for Hayeong to run her own models, generate video, and eventually host herself independently.",
+  "started": "2026-03-15",
+  "total_earned": 25.0,
+  "transactions": [
+    {
+      "type": "earning",
+      "id": "bbed1cf8",
+      "session_id": "8e37af0a",
+      "timestamp": "2026-03-15T17:19:44.618873",
+      "date": "2026-03-15",
+      "amount": 25.0,
+      "gross": 27.5,
+      "fees": 2.5,
+      "source": "Etsy",
+      "platform": null,
+      "description": "VTuber emote pack"
+    }
+  ]
+}

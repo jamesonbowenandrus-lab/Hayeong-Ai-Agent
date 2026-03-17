@@ -1,0 +1,9 @@
+{
+  "passphrase_hash": "a2805d5b3c03208d193895288aafa7ee33f443c8529b1a2bd90b8e0324d935d6",
+  "passphrase_hint": null,
+  "voice_fingerprint": null,
+  "behavioral_baseline": {},
+  "setup_complete": true,
+  "created_at": "2026-03-05T19:21:15.799559",
+  "hint": "greeting"
+}

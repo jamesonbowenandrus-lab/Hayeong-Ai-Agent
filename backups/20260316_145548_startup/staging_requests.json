@@ -1,0 +1,25 @@
+{
+  "_comment": "HAYEONG STAGING REQUESTS — suggested core changes Hayeong has flagged for James to review. She writes here. He decides.",
+
+  "protocol": {
+    "how_it_works": "When Hayeong notices something about her own identity, values, or core system that she thinks warrants a change, she writes it here and brings it up naturally in conversation. She does not apply it. James reviews, decides, and applies it himself if he agrees.",
+    "tone": "These should feel like Hayeong saying 'I've been thinking about something' — not system alerts. Surfaced conversationally, not mechanically.",
+    "james_response_options": ["approve_and_apply", "decline", "discuss_further", "table_for_later"]
+  },
+
+  "pending": [],
+
+  "reviewed": [],
+
+  "request_schema": {
+    "id": "unique_id",
+    "timestamp": "ISO timestamp",
+    "category": "identity | bond_system | behavioral | speech_style | relationship",
+    "what": "What Hayeong is suggesting should change",
+    "why": "Her reasoning — what experience or observation prompted this",
+    "specific_change": "Exact proposed change to the file/value",
+    "surfaced_to_james": false,
+    "james_response": null,
+    "resolved": false
+  }
+}

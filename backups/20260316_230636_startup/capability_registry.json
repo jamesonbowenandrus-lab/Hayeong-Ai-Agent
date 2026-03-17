@@ -1,0 +1,59 @@
+{
+  "_comment": "HAYEONG CAPABILITY REGISTRY — living record of every tool and skill Hayeong has built or learned.",
+  "version": "1.1",
+  "last_updated": "",
+  "built_in_capabilities": {
+    "description": "Core capabilities present from the start.",
+    "capabilities": [
+      {"id": "llm_core", "name": "Core Language Model", "description": "Primary reasoning and conversation via Ollama", "status": "active", "approved_by": "built_in", "model": "qwen2.5:7b"},
+      {"id": "memory_long", "name": "Long Term Memory", "description": "Semantic memory retrieval via ChromaDB", "status": "active", "approved_by": "built_in"},
+      {"id": "memory_short", "name": "Short Term Memory", "description": "Session memory via memory.json", "status": "active", "approved_by": "built_in"},
+      {"id": "voice_in", "name": "Voice Input", "description": "Speech to text via faster-whisper. Launch with: open your mic", "status": "active", "approved_by": "built_in"},
+      {"id": "voice_out", "name": "Voice Output", "description": "Text to speech via F5-TTS. Active in voice mode.", "status": "active", "approved_by": "built_in"},
+      {"id": "discord", "name": "Discord Integration", "description": "Discord bot bridge. Auto-launches on startup.", "status": "active", "approved_by": "built_in", "script": "discord_hayeong.py"},
+      {"id": "email", "name": "Email Bridge", "description": "Send and receive email via hayeong.agent@gmail.com. Say: email me, send me a summary, check your email.", "status": "active", "approved_by": "built_in", "script": "email_bridge.py"},
+      {"id": "tasks", "name": "Task Manager", "description": "Personal task log. Say: show tasks, add a task, what are you working on.", "status": "active", "approved_by": "built_in", "script": "task_manager.py"},
+      {"id": "self_mod", "name": "Self-Modification Manager", "description": "Write new capability scripts, propose core changes. Say: what did you change, show proposals.", "status": "active", "approved_by": "built_in", "script": "self_mod_manager.py"},
+      {"id": "screen_observer", "name": "Screen Observer", "description": "Screenshot capture and vision analysis. Teaching mode. Launch with: start observer", "status": "active", "approved_by": "built_in", "script": "screen_observer.py"},
+      {"id": "minecraft", "name": "Minecraft Bridge", "description": "In-game presence. Launch with: load minecraft", "status": "active", "approved_by": "built_in", "script": "minecraft_bridge.py"},
+      {"id": "backup", "name": "Backup Manager", "description": "Automatic and manual backups. Runs on startup.", "status": "active", "approved_by": "built_in", "script": "backup_manager.py"},
+      {"id": "identity_verification", "name": "Identity Verification", "description": "Passphrase-based session trust to verify it is James.", "status": "active", "approved_by": "built_in", "script": "identity_verification.py"},
+      {"id": "code_consultant", "name": "Code Consultant", "description": "Local code generation via DeepSeek Coder. Used for capability writing.", "status": "inactive", "approved_by": "built_in", "note": "Requires: ollama pull deepseek-coder-v2:16b", "script": "code_consultant.py"}
+    ]
+  },
+  "planned_capabilities": {
+    "description": "Capabilities not yet implemented.",
+    "capabilities": [
+      {"id": "model_switching", "name": "Dynamic Model Switching", "description": "Auto-switch between 14b/32b based on VRAM and task complexity", "status": "planned", "priority": "high"},
+      {"id": "tool_calling", "name": "Tool-Use / Function Calling", "description": "AI-driven capability invocation instead of pattern matching", "status": "planned", "priority": "high"},
+      {"id": "voice_xtts", "name": "XTTS v2 Voice", "description": "Cloned voice with emotional variation", "status": "planned", "priority": "high"},
+      {"id": "image_generation", "name": "Local Image Generation", "description": "ComfyUI for generating images including self-representation", "status": "planned", "priority": "high"},
+      {"id": "vision_model", "name": "Vision Model", "description": "See and interpret images, screenshots, camera feeds", "status": "planned", "priority": "high"},
+      {"id": "live2d_vrm", "name": "Live2D / VRM Visual Presence", "description": "Animated visual presence with dynamic expressions", "status": "planned", "priority": "medium"},
+      {"id": "music_generation", "name": "Music Generation", "description": "Local music generation via MusicGen", "status": "planned", "priority": "low"}
+    ]
+  },
+  "self_generated_capabilities": {
+    "description": "Tools Hayeong has built herself. Starts inactive — James notified by email on each addition.",
+    "capabilities": []
+  },
+  "notification_rules": {
+    "on_new_capability": {"notify_email": true, "initial_status": "inactive", "james_must_approve": true, "log": true},
+    "on_core_change_proposal": {"notify_email": true, "blocks_until_approved": true, "log": true},
+    "on_minor_memory_update": {"notify_email": false, "log": true}
+  },
+  "capability_schema": {
+    "template": {
+      "id": "unique_snake_case_id",
+      "name": "Human readable name",
+      "description": "What this does and how to invoke it",
+      "created": "ISO timestamp",
+      "created_reason": "Why Hayeong built this",
+      "script_path": "capabilities/scripts/generated/filename.py",
+      "status": "inactive",
+      "approved_by": "pending_james",
+      "dependencies": [],
+      "notes": ""
+    }
+  }
+}

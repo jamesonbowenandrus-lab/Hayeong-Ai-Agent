@@ -1,0 +1,38 @@
+[2026-03-16 13:52:44] WebSearch ready.
+[2026-03-16 14:06:23] Searching: 'hey im trying to test a some code that gave web searching skill. Can you lookup specs for my GPU? I have an AMD 7900 XTX.'
+[2026-03-16 14:06:24] Found 0 results for 'hey im trying to test a some code that gave web searching skill. Can you lookup specs for my GPU? I have an AMD 7900 XTX.'
+[2026-03-16 14:55:48] WebSearch ready.
+[2026-03-16 14:57:46] LLM extracted query: 'AMD RX 9070 XT specs comparison 7900 XTX' (from: 'yeah, hey can you look up the specs for the AMD RX 9070 XT? ')
+[2026-03-16 14:57:46] Searching: 'AMD RX 9070 XT specs comparison 7900 XTX'
+[2026-03-16 14:57:46] Found 0 results for 'AMD RX 9070 XT specs comparison 7900 XTX'
+[2026-03-16 15:05:03] LLM extracted query: 'AMD RX 9070 XT specs comparison 7900 XTX' (from: 'hey can you look up the specs for the AMD RX 9070 XT? im cur')
+[2026-03-16 15:05:03] Searching: 'AMD RX 9070 XT specs comparison 7900 XTX'
+[2026-03-16 15:05:03] Search error: DDGS.text() missing 1 required positional argument: 'query'
+[2026-03-16 15:17:01] LLM extracted query: 'AMD 7900 XTX NVIDIA RTX 6000 Ada Generation comparison' (from: 'hey  hayeong can you compare my GPU amd 7900 xtx with the NV')
+[2026-03-16 15:17:01] Searching: 'AMD 7900 XTX NVIDIA RTX 6000 Ada Generation comparison'
+[2026-03-16 15:17:01] Search error: DDGS.text() missing 1 required positional argument: 'query'
+[2026-03-16 21:58:46] WebSearch ready.
+[2026-03-16 22:00:37] LLM extracted query: 'AMD 7900 XTX NVIDIA RTX 6000 Ada Generation comparison' (from: 'hey hayeong, can you do me a favor trying to test some code ')
+[2026-03-16 22:00:37] Searching: 'AMD 7900 XTX NVIDIA RTX 6000 Ada Generation comparison'
+[2026-03-16 22:00:38] Found 4 results for 'AMD 7900 XTX NVIDIA RTX 6000 Ada Generation comparison'
+[2026-03-16 22:00:38] Fetching: https://www.gpu-monkey.com/en/compare_gpu-amd_radeon_rx_7900_xtx-vs-nvidia_rtx_6000_ada
+[2026-03-16 22:00:39] Fetch error (https://www.gpu-monkey.com/en/compare_gpu-amd_radeon_rx_7900_xtx-vs-nvidia_rtx_6000_ada): 403 Client Error: Forbidden for url: https://www.gpu-monkey.com/en/compare_gpu-amd_radeon_rx_7900_xtx-vs-nvidia_rtx_6000_ada
+[2026-03-16 22:26:27] LLM extracted query: 'NVIDIA RTX 6000 Ada Generation vs AMD RX 7900 XTX performance difference' (from: 'hey hayeong. Can you do another search for me on the NVIDIA ')
+[2026-03-16 22:26:27] Searching: 'NVIDIA RTX 6000 Ada Generation vs AMD RX 7900 XTX performance difference'
+[2026-03-16 22:26:29] Found 4 results for 'NVIDIA RTX 6000 Ada Generation vs AMD RX 7900 XTX performance difference'
+[2026-03-16 22:26:29] Fetching: https://technical.city/en/video/Radeon-RX-7900-XTX-vs-RTX-6000-Ada-Generation
+[2026-03-16 22:26:30] Fetched 4000 chars from https://technical.city/en/video/Radeon-RX-7900-XTX-vs-RTX-6000-Ada-Generation
+[2026-03-16 22:27:57] LLM extracted query: 'test web functionality' (from: "Yeah this is me, why? What makes you think this isn't me? I'")
+[2026-03-16 22:27:57] Searching: 'test web functionality'
+[2026-03-16 22:27:58] Found 4 results for 'test web functionality'
+[2026-03-16 22:27:58] Fetching: https://luxequality.com/blog/website-functionality-testing/
+[2026-03-16 22:28:00] Fetched 4000 chars from https://luxequality.com/blog/website-functionality-testing/
+[2026-03-16 23:06:36] WebSearch ready.
+[2026-03-17 08:46:54] WebSearch ready.
+[2026-03-17 09:26:37] WebSearch ready.
+[2026-03-17 09:50:50] WebSearch ready.
+[2026-03-17 09:59:53] LLM extracted query: 'information gathered' (from: 'Did you gather the information?')
+[2026-03-17 09:59:53] Searching: 'information gathered'
+[2026-03-17 09:59:54] Found 4 results for 'information gathered'
+[2026-03-17 09:59:54] Fetching: https://en.wikipedia.org/wiki/Information_Gathering_Satellite
+[2026-03-17 09:59:55] Fetched 4000 chars from https://en.wikipedia.org/wiki/Information_Gathering_Satellite

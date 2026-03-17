@@ -1,0 +1,2 @@
+{"type": "image_generation", "id": "1592bd3a", "session_id": "8e37af0a", "timestamp": "2026-03-15T17:19:44.617365", "workflow_type": "txt2img", "model": "ponyDiffusionV6XL", "prompt": "score_9, anime girl, orange frog jacket, blue hair", "output_path": "H:/ComfyUI/output/Hayeong_00001.png", "outcome": "success", "feedback": null, "generation_time_seconds": 8.5, "settings": {}}
+{"type": "image_feedback", "image_id": "1592bd3a", "session_id": "8e37af0a", "timestamp": "2026-03-15T17:19:44.617869", "feedback": "Hood was up again but face looks great!", "rating": "close"}

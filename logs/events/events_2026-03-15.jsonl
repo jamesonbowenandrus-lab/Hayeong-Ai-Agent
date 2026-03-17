@@ -1,0 +1,9 @@
+{"type": "session_start", "session_id": "8e37af0a", "timestamp": "2026-03-15T17:19:44.614840", "date": "2026-03-15"}
+{"type": "conversation", "session_id": "8e37af0a", "timestamp": "2026-03-15T17:19:44.616861", "role": "james", "content": "Hey Hayeong, how are you doing?", "intent": null, "mood": null, "model_used": null}
+{"type": "conversation", "session_id": "8e37af0a", "timestamp": "2026-03-15T17:19:44.617365", "role": "hayeong", "content": "Doing well! Ready to work on some images.", "intent": null, "mood": "cheerful", "model_used": null}
+{"type": "image_generation", "id": "1592bd3a", "session_id": "8e37af0a", "timestamp": "2026-03-15T17:19:44.617365", "workflow_type": "txt2img", "model": "ponyDiffusionV6XL", "prompt": "score_9, anime girl, orange frog jacket, blue hair", "output_path": "H:/ComfyUI/output/Hayeong_00001.png", "outcome": "success", "feedback": null, "generation_time_seconds": 8.5, "settings": {}}
+{"type": "image_feedback", "image_id": "1592bd3a", "session_id": "8e37af0a", "timestamp": "2026-03-15T17:19:44.617869", "feedback": "Hood was up again but face looks great!", "rating": "close"}
+{"type": "capability_used", "session_id": "8e37af0a", "timestamp": "2026-03-15T17:19:44.617869", "capability": "comfyui", "action": "txt2img", "outcome": "success", "details": {}, "error": null}
+{"type": "milestone", "id": "e5cb7937", "session_id": "8e37af0a", "timestamp": "2026-03-15T17:19:44.618873", "date": "2026-03-15", "category": "creative", "description": "First successful Hayeong character image generated!", "details": {}}
+{"type": "earning", "id": "bbed1cf8", "session_id": "8e37af0a", "timestamp": "2026-03-15T17:19:44.618873", "date": "2026-03-15", "amount": 25.0, "gross": 27.5, "fees": 2.5, "source": "Etsy", "platform": null, "description": "VTuber emote pack"}
+{"type": "session_end", "session_id": "8e37af0a", "timestamp": "2026-03-15T17:20:00.861001", "started": "2026-03-15T17:19:44.614840", "summary": "Test session complete."}

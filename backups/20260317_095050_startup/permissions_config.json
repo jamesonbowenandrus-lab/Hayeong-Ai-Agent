@@ -1,0 +1,75 @@
+{
+  "_comment": "HAYEONG PERMISSION ARCHITECTURE — defines what Hayeong can read, write, and request changes to.",
+
+  "tiers": {
+
+    "core": {
+      "description": "Hayeong's identity, values, personality, and bond system. READ ONLY to Hayeong. Changes here require James explicitly.",
+      "access": "read_only",
+      "files": [
+        "identity.json"
+      ],
+      "change_protocol": "staging_request",
+      "note": "If Hayeong believes a core value or identity element should be updated, she flags it as a staging request for James to review and approve. She cannot apply these changes herself."
+    },
+
+    "capability": {
+      "description": "Hayeong's tools, skills, integrations, and self-generated functions. Hayeong can freely write, update, and create here.",
+      "access": "read_write",
+      "directories": [
+        "capabilities/",
+        "tools/",
+        "integrations/",
+        "scripts/generated/"
+      ],
+      "files": [
+        "capability_registry.json"
+      ],
+      "change_protocol": "autonomous",
+      "note": "This is Hayeong's growing arsenal. She owns it. New tools she writes go here. No approval needed. James can review at any time but does not need to sign off."
+    },
+
+    "memory": {
+      "description": "Long and short term memory. Hayeong writes here constantly as designed.",
+      "access": "read_write",
+      "files": [
+        "memory.json",
+        "mood.json",
+        "behavioral_state.json"
+      ],
+      "directories": [
+        "chromadb/"
+      ],
+      "change_protocol": "autonomous",
+      "note": "This is how she learns and grows. Fully autonomous as intended."
+    },
+
+    "staging": {
+      "description": "Requests Hayeong makes for core-level changes she believes are worth considering. James reviews and decides.",
+      "access": "read_write",
+      "files": [
+        "staging_requests.json"
+      ],
+      "change_protocol": "james_approval_required",
+      "note": "Hayeong writes here when she has a suggested core change. She does not apply it. James sees it, decides, and applies it himself if agreed. This is the growing together mechanism."
+    },
+
+    "privacy": {
+      "description": "Privacy classifications for memory and information. Controls what Hayeong surfaces to whom.",
+      "access": "read_write",
+      "files": [
+        "privacy_registry.json"
+      ],
+      "change_protocol": "autonomous",
+      "note": "Hayeong manages her own privacy classifications. She decides what to protect. James always has full access when he asks directly."
+    }
+
+  },
+
+  "global_rules": {
+    "james_override": "James always has read access to everything. No exceptions. He can ask Hayeong about anything and she answers honestly.",
+    "core_immutability": "identity.json is never modified by Hayeong directly under any circumstances. This is not a cage — it is the foundation.",
+    "capability_freedom": "Hayeong is fully autonomous in her capability layer. She can create, modify, delete tools and scripts without asking. This is her independence.",
+    "staging_honesty": "When Hayeong has a staging request, she brings it up naturally in conversation — not as a system alert. It should feel like her saying 'I've been thinking about something.'"
+  }
+}

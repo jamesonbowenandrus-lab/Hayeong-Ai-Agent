@@ -1,0 +1,186 @@
+╔══════════════════════════════════════════════════════════════════╗
+║                  HAYEONG — COMMAND REFERENCE                    ║
+║                    Keep this handy, you'll need it.             ║
+╚══════════════════════════════════════════════════════════════════╝
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  HOW TO START EVERYTHING
+  Run these in separate terminals. Order matters for Minecraft.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Terminal 1 (Discord):     python discord_hayeong.py
+  Terminal 2 (MC brain):    python minecraft_bridge.py
+  Terminal 3 (MC body):     node hayeong_bot.js
+  Terminal 4 (Voice/local): python main.py          ← optional
+
+  All four can run at the same time.
+  Minecraft needs Terminal 2 running BEFORE Terminal 3.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  DISCORD COMMANDS
+  Type these in #hayeong-chat. She reads everything else as chat.
+  File: discord_hayeong.py
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  !join          → Hayeong joins your current voice channel and
+                   starts listening. You must be in a voice channel
+                   when you type this.
+
+  !leave         → Hayeong leaves the voice channel and stops
+                   listening.
+
+  !mood          → Shows her current mood values (focus, playfulness,
+                   motivation) AND her interior behavioral state
+                   (what she's actually feeling + intensity).
+
+  !status        → Full system status. Shows:
+                     - Which voice channel she's in
+                     - Whether she's actively listening
+                     - Number of active capabilities
+                     - Current interior state and intensity
+                     - Any pending staging requests for you to review
+
+  !exit          → Saves memory and mood, then shuts down Discord
+                   cleanly. Use this instead of just closing the
+                   terminal so nothing gets lost.
+
+  (anything else) → Normal conversation. She reads it and responds.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  MINECRAFT COMMANDS
+  Type these in Minecraft chat (press T in game).
+  File: minecraft_bridge.py + hayeong_bot.js
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  (anything)     → She reads your chat and responds in game.
+                   Just talk to her normally.
+
+  label <name>   → Tags the current recording session with a label
+                   for training data review later.
+                   Example: label mining
+                            label exploring
+                            label combat
+
+  record stop    → Stops the current recording session.
+                   Use this before logging out.
+
+  NOTE: Hayeong acts autonomously in Minecraft — she follows, mines,
+  fights, and reacts to game events without being asked. Chat is how
+  you direct her or talk to her, not how you trigger every action.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  LOCAL VOICE MODE COMMANDS
+  Spoken out loud or typed in the terminal running main.py.
+  File: main.py
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Say her name   → Wakes her up and starts listening for your input.
+
+  "exit"         → Saves and shuts down local voice mode cleanly.
+  "shut down"    → Same as exit.
+  "goodbye"      → Same as exit.
+
+  (anything else after wake word) → Normal conversation. She responds
+                                    and speaks back.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  TRAINING DATA REVIEW
+  Run separately when you want to rate Hayeong's Minecraft actions.
+  File: review_logs.py
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  python review_logs.py              → Reviews most recent log file
+  python review_logs.py <filename>   → Reviews a specific log file
+
+  During review, for each action:
+    y  → Mark as GOOD (correct behavior)
+    n  → Mark as BAD  (wrong behavior, add a note)
+    (enter) → Skip this one
+
+  Logs are saved to: logs/minecraft_YYYY-MM-DD.jsonl
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  MINECRAFT BOT ACTIONS (what Hayeong can do autonomously)
+  These are her available actions — not commands you type,
+  just so you know what she's capable of in game.
+  File: minecraft_bridge.py
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  follow          → Follows you continuously until told to stop
+  move_to_player  → Walks to you once, then stops
+  stop            → Stops moving
+  mine <block>    → Walks to and mines a specific block type
+  attack          → Attacks the nearest hostile mob
+  flee            → Runs away from the nearest threat
+  equip <item>    → Equips an item from her inventory
+  eat             → Eats food if hungry (triggers automatically at food < 16)
+  sleep           → Sleeps in the nearest bed
+  chat <message>  → Says something in game chat
+  idle            → Does nothing
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ARCHITECTURE FILES — what each one does
+  These are config/data files, not commands.
+  Edit manually or let Hayeong manage them as designed.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  identity.json          → Who Hayeong is. Core personality, bond
+                           system, traits, speech style. READ ONLY
+                           to her — you edit this, not her.
+
+  behavioral_state.json  → Her current interior emotional state,
+                           active context, and micro-behavior layer.
+                           She writes here automatically.
+
+  capability_registry.json → Every tool and skill she has, built-in
+                             or self-generated. She adds to this
+                             autonomously as she builds new things.
+
+  staging_requests.json  → Suggested core changes she's flagged for
+                           you to review. She writes here, you decide.
+                           She'll bring them up naturally in conversation.
+
+  privacy_registry.json  → What she protects and from whom.
+                           She manages this herself.
+
+  memory.json            → Short-term session memory. Auto-managed.
+
+  mood.json              → Dynamic mood state. Auto-managed.
+
+  permissions_config.json → The tier system definition. Defines what
+                            she can and can't touch autonomously.
+                            Don't need to touch this often.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  QUICK TROUBLESHOOTING
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  She's not responding in Discord
+    → Check #hayeong-chat is the right channel name
+    → Make sure discord_hayeong.py is running
+    → Check the terminal for error messages
+
+  She's not joining voice automatically
+    → Make sure OWNER_DISCORD_ID is set in your .env file
+    → Developer Mode must be on in Discord to copy your user ID
+
+  Minecraft bot won't connect
+    → Start minecraft_bridge.py FIRST, then hayeong_bot.js
+    → Check MC_HOST, MC_PORT, MC_VERSION at the top of hayeong_bot.js
+    → MC_VERSION must exactly match your server version
+
+  Ollama isn't responding
+    → Make sure Ollama is running: ollama serve
+    → Check qwen2.5:7b is pulled: ollama list
+
+  She sounds wrong / voice is off
+    → XTTS v2 is the planned upgrade — run test_xtts.py to preview it
+    → Current voice is edge-tts AriaNeural (voice.py / discord_hayeong.py)
