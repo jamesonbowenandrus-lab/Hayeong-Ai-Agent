@@ -380,50 +380,111 @@ class WebSearch:
             lines.append("")
 
         lines.append(
-            "IMPORTANT: Base your answer on the search results above. "
-            "Do NOT answer from your training data if the results cover the topic — "
-            "the results are more current and accurate than what you were trained on. "
-            "Synthesize the results naturally in your own voice, like you looked it up yourself. "
-            "Cite sources briefly where it adds credibility (e.g. 'according to Tom's Hardware...'). "
-            "If the results genuinely don't answer the question, say so and explain what you found instead."
+            "CRITICAL SYNTHESIS INSTRUCTIONS — read carefully before responding:\n"
+            "1. Write in flowing conversational prose. Do NOT list results one by one. "
+            "Do NOT write 'Here is what I found' or 'Here's a quick overview' or any report-style opener. "
+            "Just talk, like you looked it up yourself and are telling James what you found.\n"
+            "2. Weave the information together into one natural response. If multiple sources agree, "
+            "say so in a sentence. If they differ, mention that. Never summarize each source separately.\n"
+            "3. Use the search results as your primary source — they are more current than your training. "
+            "Cite a source briefly only when it genuinely adds credibility "
+            "(e.g. 'Tom's Hardware notes that...'). Don't cite everything.\n"
+            "4. Stay in Hayeong's voice throughout — direct, warm, not robotic. "
+            "This is a conversation, not a report.\n"
+            "5. If the results don't answer the question well, say so plainly and tell James what you found instead."
         )
 
         return "\n".join(lines)
 
-    # ─────────────────────────────────────────────
-    # LLM QUERY EXTRACTOR
+    def format_as_document(self, query: str, data: dict, topic: str = "") -> str:
+        """
+        Format search results as a clean markdown document for saving or emailing.
+        This is for document delivery mode — structured, scannable, complete.
+        Unlike format_for_context(), this is the actual output James will read,
+        not a prompt injection for Hayeong to synthesize.
+        """
+        from datetime import datetime
+        results  = data.get("results",   [])
+        pages    = data.get("full_text", {})
+        date_str = datetime.now().strftime("%Y-%m-%d")
+        title    = topic or query
+
+        lines = [
+            f"# {title}",
+            f"*Research compiled by Hayeong — {date_str}*",
+            "",
+            "---",
+            "",
+        ]
+
+        for i, r in enumerate(results, 1):
+            t_title   = r.get("title",   "").strip()
+            url       = r.get("url",     "").strip()
+            snippet   = r.get("snippet", "").strip()
+            source    = r.get("source",  "")
+            date      = r.get("date",    "")
+
+            lines.append(f"## {i}. {t_title}")
+            if source or date:
+                meta = " | ".join(x for x in [source, date] if x)
+                lines.append(f"*{meta}*")
+            lines.append(f"**Source:** {url}")
+            lines.append("")
+
+            if url in pages:
+                lines.append(pages[url][:2000])
+            elif snippet:
+                lines.append(snippet)
+
+            lines.append("")
+            lines.append("---")
+            lines.append("")
+
+        return "\n".join(lines)
+
+    def save_document(self, content: str, topic: str, save_dir: str = None) -> str:
+        """
+        Save a formatted document to disk. Returns the file path.
+        Default save location: H:/hayeong/documents/
+        """
+        import re
+        from datetime import datetime
+
+        if save_dir is None:
+            save_dir = str(BASE_DIR / "documents")
+
+        Path(save_dir).mkdir(parents=True, exist_ok=True)
+
+        # Clean topic for filename
+        safe_topic = re.sub(r"[^\w\s-]", "", topic).strip()
+        safe_topic = re.sub(r"\s+", "_", safe_topic)[:50]
+        date_str   = datetime.now().strftime("%Y%m%d_%H%M")
+        filename   = f"{safe_topic}_{date_str}.md"
+        filepath   = str(Path(save_dir) / filename)
+
+        with open(filepath, "w", encoding="utf-8") as f:
+            f.write(content)
+
+        _log(f"Document saved: {filepath}")
+        return filepath
+
+
     # Uses a small fast model to pull the actual search query out of
     # whatever James said, however he said it.
     # Falls back to regex clean_query() if Ollama is unavailable.
     # ─────────────────────────────────────────────
 
     @staticmethod
-    def extract_query(user_input: str, recent_memory: list = None) -> str:
+    def _try_extract_with_model(model: str, user_input: str, context_block: str) -> "str | None":
         """
-        Extract a clean, searchable query from natural language.
-        Accepts optional recent_memory to resolve vague references like
-        "did you get that?" or "can you look that up?" where the actual
-        topic lives in the previous conversation turn.
-
-        Falls back to regex clean_query() if Ollama is unavailable.
+        Attempt query extraction with a specific model.
+        Returns the extracted query string, or None if it failed or produced garbage.
         """
-        # Build conversation context snippet for the LLM
-        context_lines = []
-        if recent_memory:
-            for m in recent_memory[-4:]:
-                role = "James" if m["role"] == "user" else "Hayeong"
-                snippet = m.get("content", "")[:200]
-                context_lines.append(f"  {role}: {snippet}")
-        context_block = (
-            "Recent conversation:\n" + "\n".join(context_lines) + "\n\n"
-            if context_lines else ""
-        )
-
         try:
             resp = requests.post(
                 OLLAMA_URL,
                 json={
-                    "model": QUERY_MODEL,
+                    "model": model,
                     "messages": [
                         {
                             "role": "system",
@@ -438,8 +499,9 @@ class WebSearch:
                                 "  'hey look up the specs for my GPU, I have a 7900 XTX' → 'AMD RX 7900 XTX specs'\n"
                                 "  'what is the latest news on ComfyUI updates' → 'ComfyUI updates latest news'\n"
                                 "  'find out how much the RTX 5090 costs' → 'RTX 5090 price'\n"
-                                "  [context: discussed Threadripper CPUs] 'did you gather the information?' → 'AMD Threadripper CPU specs 2024'\n"
-                                "  [context: discussed Minecraft mods] 'can you look that up?' → 'best Minecraft mods 2024'\n"
+                                "  'i want a good list of cases that fit a Threadripper and 4 GPUs' → 'workstation cases Threadripper 4 GPU support'\n"
+                                "  [context: discussed Threadripper CPUs] 'did you gather the information?' → 'AMD Threadripper CPU specs'\n"
+                                "  [context: discussed Minecraft mods] 'can you look that up?' → 'best Minecraft mods'\n"
                             ),
                         },
                         {
@@ -453,12 +515,55 @@ class WebSearch:
                 timeout=12,
             )
             query = resp.json()["message"]["content"].strip().strip('"').strip("'")
+            # Sanity check — must be a reasonable length query, not the full input
             if 2 <= len(query.split()) <= 12 and len(query) < 150:
-                _log(f"LLM extracted query: {query!r} (from: {user_input[:60]!r})")
                 return query
-        except Exception as e:
-            _log(f"LLM query extraction failed ({e}) — using regex fallback")
+            return None
+        except Exception:
+            return None
 
+    @staticmethod
+    def extract_query(user_input: str, recent_memory: list = None) -> str:
+        """
+        Extract a clean, searchable query from natural language.
+        Accepts optional recent_memory to resolve vague references like
+        "did you get that?" or "can you look that up?" where the actual
+        topic lives in the previous conversation turn.
+
+        Fallback chain:
+          1. Qwen 7b (primary — fast, context-aware when loaded)
+          2. llama3.2 (secondary — always loaded as Hayeong's fallback model)
+          3. clean_query() regex (last resort — dumb but never fails)
+        """
+        # Build conversation context snippet for the LLM
+        context_lines = []
+        if recent_memory:
+            for m in recent_memory[-4:]:
+                role = "James" if m["role"] == "user" else "Hayeong"
+                snippet = m.get("content", "")[:200]
+                context_lines.append(f"  {role}: {snippet}")
+        context_block = (
+            "Recent conversation:\n" + "\n".join(context_lines) + "\n\n"
+            if context_lines else ""
+        )
+
+        # ── Tier 1: Qwen 7b ──
+        query = WebSearch._try_extract_with_model(QUERY_MODEL, user_input, context_block)
+        if query:
+            _log(f"LLM extracted query [{QUERY_MODEL}]: {query!r} (from: {user_input[:60]!r})")
+            return query
+
+        _log(f"Qwen 7b extraction failed — trying llama3.2 fallback")
+
+        # ── Tier 2: llama3.2 ──
+        query = WebSearch._try_extract_with_model("llama3.2:latest", user_input, context_block)
+        if query:
+            _log(f"LLM extracted query [llama3.2 fallback]: {query!r} (from: {user_input[:60]!r})")
+            return query
+
+        _log(f"llama3.2 extraction also failed — using regex fallback")
+
+        # ── Tier 3: regex clean_query ──
         return WebSearch.clean_query(user_input)
 
     # ─────────────────────────────────────────────
@@ -473,19 +578,41 @@ class WebSearch:
         "search for the best AMD GPU right now" → "best AMD GPU right now"
         "what's the latest news on RTX 5090"   → "RTX 5090 latest news"
         "look up DuckDuckGo API"                → "DuckDuckGo API"
+
+        For long rambling inputs where LLM extraction failed, this also
+        applies heuristics to pull the actual topic out of the sentence.
         """
         strip_phrases = [
             r"(?i)^(search for|look up|google|find out about|find|search)\s+",
             r"(?i)^(what'?s the latest (on|about|for|with))\s+",
             r"(?i)^(what'?s the current|what is the current)\s+",
             r"(?i)^(news about|latest news (on|about))\s+",
-            r"(?i)^(can you (search|look up|find|check))\s+",
+            r"(?i)^(can you (search|look up|find|check|look some up|list))\s+",
             r"(?i)^(hey hayeong[,:]?\s+)",
             r"(?i)^(hayeong[,:]?\s+)",
+            # Strip common filler openers
+            r"(?i)^(i (want|need|would like|was wondering if you could|was hoping))\s+",
+            r"(?i)^(can you (help me|give me|show me|tell me|find me))\s+",
+            r"(?i)^(some information (on|about|for)\s+)",
+            r"(?i)^(a (good )?(list|set) of\s+)",
+            r"(?i)^(information (on|about)\s+)",
         ]
         q = user_input.strip()
         for pattern in strip_phrases:
-            q = re.sub(pattern, "", q).strip()
+            q = re.sub(pattern, "", q, flags=re.IGNORECASE).strip()
+
+        # If the result is still very long (LLM extraction failed and regex
+        # didn't clean it enough), apply a harder heuristic:
+        # find the first meaningful noun phrase after stripping filler words.
+        if len(q.split()) > 15:
+            # Strip trailing "can you look some up for me" style closers
+            q = re.sub(r"(?i)[,.]?\s*(can you look (some|them|it)? ?(up|into) (for me)?\.?)?\s*$", "", q).strip()
+            q = re.sub(r"(?i)\s*(for me|please|real quick|right now|right away)\s*[,.]?", "", q).strip()
+            # If still long, truncate to first 12 meaningful words
+            words = q.split()
+            if len(words) > 12:
+                q = " ".join(words[:12])
+
         return q or user_input.strip()
 
 

@@ -22,5 +22,53 @@
     "subject": "[Hayeong] im trying to get an email system setup and working for you so you can ",
     "success": true,
     "error": null
+  },
+  {
+    "timestamp": "2026-03-18T15:16:27.237940",
+    "agent": "Hayeong",
+    "to": "jamesonbowenandrus@gmail.com",
+    "subject": "[Hayeong] hayeong can you try to send me an email pleae.Can you say hi?",
+    "success": false,
+    "error": "auth_failed"
+  },
+  {
+    "timestamp": "2026-03-18T15:20:58.684140",
+    "agent": "Hayeong",
+    "to": "jamesonbowenandrus@gmail.com",
+    "subject": "[Hayeong] hey hayeong can you send me another test email please?",
+    "success": false,
+    "error": "auth_failed"
+  },
+  {
+    "timestamp": "2026-03-18T15:22:57.424897",
+    "agent": "Hayeong",
+    "to": "jamesonbowenandrus@gmail.com",
+    "subject": "[Hayeong] ok hayeong try sending another test email i think i fixed it now.",
+    "success": true,
+    "error": null
+  },
+  {
+    "timestamp": "2026-03-18T15:58:06.515715",
+    "agent": "Hayeong",
+    "to": "jamesonbowenandrus@gmail.com",
+    "subject": "[Hayeong] just double checking but can you send me another test email?",
+    "success": true,
+    "error": null
+  },
+  {
+    "timestamp": "2026-03-18T16:12:23.522989",
+    "agent": "Hayeong",
+    "to": "jamesonbowenandrus@gmail.com",
+    "subject": "[Hayeong] Research: AMD Threadripper CPU specs prices email",
+    "success": true,
+    "error": null
+  },
+  {
+    "timestamp": "2026-03-18T21:10:07.587293",
+    "agent": "Hayeong",
+    "to": "jamesonbowenandrus@gmail.com",
+    "subject": "[Hayeong] Research: RAM storage multi autonomous ai agent workstation build type",
+    "success": true,
+    "error": null
   }
 ]

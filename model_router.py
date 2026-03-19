@@ -286,20 +286,32 @@ class ModelRouter:
             decision["reasoning"]  = "Vision intent — capped at 14b, vision_bridge handles the analysis."
 
         # ── HEAVY REASONING ──
-        # Only upgrade to 32b if the message is long AND contains genuine
-        # complexity signals (planning, analysis, comparison, etc.).
-        # A long greeting or a long search query should NOT trigger 32b.
+        # 32b routing is currently DISABLED.
+        #
+        # VRAM budget on RX 7900 XTX (24GB):
+        #   qwen2.5:7b  ≈  8GB  (router + query extraction)
+        #   qwen2.5:14b ≈ 14GB  (main brain)
+        #   ─────────────────────────────
+        #   Total        ≈ 22GB  (~2GB headroom)
+        #
+        # qwen2.5:32b needs ~20GB alone — loading it evicts the other models,
+        # causes 60s+ load times, and risks timeouts like we saw in testing.
+        # 14b is the ceiling until Hayeong has her own dedicated workstation
+        # with more VRAM headroom to spare.
+        #
+        # To re-enable later: uncomment the block below and remove the pass.
         elif len(message) > 300:
-            has_complexity = any(
-                re.search(p, message, re.IGNORECASE)
-                for p in COMPLEXITY_PATTERNS
-            )
-            if has_complexity and self.is_available("reasoning"):
-                decision["model"]      = "reasoning"
-                decision["model_name"] = MODELS["reasoning"]["ollama_name"]
-                decision["reasoning"]  = "Long message with complexity signals — routing to Qwen 32b."
-            else:
-                decision["reasoning"] = "Long message but no complexity signals — staying on Qwen 14b."
+            # has_complexity = any(
+            #     re.search(p, message, re.IGNORECASE)
+            #     for p in COMPLEXITY_PATTERNS
+            # )
+            # if has_complexity and self.is_available("reasoning"):
+            #     decision["model"]      = "reasoning"
+            #     decision["model_name"] = MODELS["reasoning"]["ollama_name"]
+            #     decision["reasoning"]  = "Long message with complexity signals — routing to Qwen 32b."
+            # else:
+            #     decision["reasoning"] = "Long message but no complexity signals — staying on Qwen 14b."
+            decision["reasoning"] = "Long message — 32b disabled (VRAM budget), staying on Qwen 14b."
 
         # ── IDENTITY / GENERAL CONVERSATION ──
         # "how are you", personality questions, casual chat — all stay on 14b.

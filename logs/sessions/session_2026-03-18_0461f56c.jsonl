@@ -1,0 +1,3 @@
+{"type": "session_start", "session_id": "0461f56c", "timestamp": "2026-03-18T15:20:24.917843", "date": "2026-03-18"}
+{"type": "conversation", "session_id": "0461f56c", "timestamp": "2026-03-18T15:20:58.188085", "role": "james", "content": "hey hayeong can you send me another test email please?", "intent": "email", "mood": null, "model_used": null}
+{"type": "session_end", "session_id": "0461f56c", "timestamp": "2026-03-18T15:21:09.723446", "started": "2026-03-18T15:20:24.917843", "summary": ""}

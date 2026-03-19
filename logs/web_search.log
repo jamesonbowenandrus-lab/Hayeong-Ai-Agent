@@ -36,3 +36,64 @@
 [2026-03-17 09:59:54] Found 4 results for 'information gathered'
 [2026-03-17 09:59:54] Fetching: https://en.wikipedia.org/wiki/Information_Gathering_Satellite
 [2026-03-17 09:59:55] Fetched 4000 chars from https://en.wikipedia.org/wiki/Information_Gathering_Satellite
+[2026-03-17 16:01:12] WebSearch ready.
+[2026-03-17 16:10:01] LLM extracted query: 'AMD Threadripper new series differences from earlier series' (from: 'Im need your help searching the web. Im trying to build you ')
+[2026-03-17 16:10:01] Searching: 'AMD Threadripper new series differences from earlier series'
+[2026-03-17 16:10:02] Found 4 results for 'AMD Threadripper new series differences from earlier series'
+[2026-03-17 16:10:02] Fetching: https://en.wikipedia.org/wiki/Threadripper
+[2026-03-17 16:10:03] Fetched 4000 chars from https://en.wikipedia.org/wiki/Threadripper
+[2026-03-17 23:07:10] WebSearch ready.
+[2026-03-18 12:43:32] WebSearch ready.
+[2026-03-18 13:23:51] LLM extracted query: 'different pc specs top ai builders local ai projects' (from: 'i still want to test or fix you search function. Im trying t')
+[2026-03-18 13:23:51] Searching: 'different pc specs top ai builders local ai projects'
+[2026-03-18 13:23:53] Found 4 results for 'different pc specs top ai builders local ai projects'
+[2026-03-18 13:23:53] Fetching: https://www.theregister.com/2024/08/25/ai_pc_buying_guide/
+[2026-03-18 13:23:53] Fetched 4000 chars from https://www.theregister.com/2024/08/25/ai_pc_buying_guide/
+[2026-03-18 13:52:44] WebSearch ready.
+[2026-03-18 14:07:22] LLM extracted query: 'AMD Threadripper CPU pair with Nvidia 6000 Ada Series GPU' (from: 'hey hayeong, can i get your help testing the search function')
+[2026-03-18 14:07:22] Searching: 'AMD Threadripper CPU pair with Nvidia 6000 Ada Series GPU'
+[2026-03-18 14:07:24] Found 4 results for 'AMD Threadripper CPU pair with Nvidia 6000 Ada Series GPU'
+[2026-03-18 14:07:24] Fetching: https://bottleneckcalculatoronline.com/nvidia-rtx-6000-ada-48gb-bottleneck-calculator/
+[2026-03-18 14:07:24] Fetched 4000 chars from https://bottleneckcalculatoronline.com/nvidia-rtx-6000-ada-48gb-bottleneck-calculator/
+[2026-03-18 14:59:00] WebSearch ready.
+[2026-03-18 15:02:06] LLM extracted query: 'AMD Threadripper 9000 series vs 7000 series full breakdown' (from: 'Hey hayeong, im back can you help me with another search req')
+[2026-03-18 15:02:06] Searching: 'AMD Threadripper 9000 series vs 7000 series full breakdown'
+[2026-03-18 15:02:07] Found 6 results for 'AMD Threadripper 9000 series vs 7000 series full breakdown'
+[2026-03-18 15:02:07] Fetching: https://boxx.com/blog/hardware/amd-ryzen-9000-series-vs-7000-series-processors-enhancements-for-your-workflow
+[2026-03-18 15:02:08] Fetched 4000 chars from https://boxx.com/blog/hardware/amd-ryzen-9000-series-vs-7000-series-processors-enhancements-for-your-workflow
+[2026-03-18 15:02:08] Fetching: https://gadgetversus.com/processor/comparisons-list-between-amd-ryzen-9000-and-amd-ryzen-threadripper-7000/
+[2026-03-18 15:02:09] Fetched 2169 chars from https://gadgetversus.com/processor/comparisons-list-between-amd-ryzen-9000-and-amd-ryzen-threadripper-7000/
+[2026-03-18 15:02:09] Document saved: H:\hayeong\documents\AMD_Threadripper_9000_series_vs_7000_series_full_b_20260318_1502.md
+[2026-03-18 15:20:24] WebSearch ready.
+[2026-03-18 15:22:31] WebSearch ready.
+[2026-03-18 15:26:09] Searching: 'can you look up some information for me real quick. im want a good list of computer cases that can house a mother board that can take a threadripper chip, as well as having enough space for 4 or more nvidia 6000 ada cards. Can you look some up for me?'
+[2026-03-18 15:26:11] Found 4 results for 'can you look up some information for me real quick. im want a good list of computer cases that can house a mother board that can take a threadripper chip, as well as having enough space for 4 or more nvidia 6000 ada cards. Can you look some up for me?'
+[2026-03-18 15:26:11] Fetching: https://www.tomshardware.com/best-picks/best-pc-builds-gaming
+[2026-03-18 15:26:12] Fetched 4000 chars from https://www.tomshardware.com/best-picks/best-pc-builds-gaming
+[2026-03-18 15:48:17] WebSearch ready.
+[2026-03-18 15:52:00] LLM extracted query [qwen2.5:7b]: 'local ai builders GPUs comparison NVIDIA 6000 Ada series' (from: 'hey hayeong. I hope your doing alright. I was wondering if y')
+[2026-03-18 15:52:00] Searching: 'local ai builders GPUs comparison NVIDIA 6000 Ada series'
+[2026-03-18 15:52:03] Found 6 results for 'local ai builders GPUs comparison NVIDIA 6000 Ada series'
+[2026-03-18 15:52:03] Fetching: https://or.stackexchange.com/questions/1024/which-gpus-to-get-for-mathematical-optimization-if-any
+[2026-03-18 15:52:04] Fetched 4000 chars from https://or.stackexchange.com/questions/1024/which-gpus-to-get-for-mathematical-optimization-if-any
+[2026-03-18 15:52:04] Fetching: https://www.techpowerup.com/news-tags/NVIDIA?page=7
+[2026-03-18 15:52:04] Fetched 4000 chars from https://www.techpowerup.com/news-tags/NVIDIA?page=7
+[2026-03-18 15:52:04] Document saved: H:\hayeong\documents\local_ai_builders_GPUs_comparison_NVIDIA_6000_Ada__20260318_1552.md
+[2026-03-18 16:08:37] WebSearch ready.
+[2026-03-18 16:12:19] LLM extracted query [qwen2.5:7b]: 'AMD Threadripper CPU specs prices email' (from: 'hey hayeong, i hope your doing alright. Im sorry i keep both')
+[2026-03-18 16:12:19] Searching: 'AMD Threadripper CPU specs prices email'
+[2026-03-18 16:12:21] Found 6 results for 'AMD Threadripper CPU specs prices email'
+[2026-03-18 16:12:21] Fetching: https://www.amd.com/en/products/processors/workstations/ryzen-threadripper.html
+[2026-03-18 16:12:21] Fetched 4000 chars from https://www.amd.com/en/products/processors/workstations/ryzen-threadripper.html
+[2026-03-18 16:12:21] Fetching: https://www.newegg.com/p/pl?N=100007671+601350560
+[2026-03-18 16:12:22] Fetched 4000 chars from https://www.newegg.com/p/pl?N=100007671+601350560
+[2026-03-18 16:12:22] Document saved: H:\hayeong\documents\AMD_Threadripper_CPU_specs_prices_email_20260318_1612.md
+[2026-03-18 20:26:22] WebSearch ready.
+[2026-03-18 21:10:02] LLM extracted query [qwen2.5:7b]: 'RAM storage multi autonomous ai agent workstation build type storage email info' (from: 'Thanks hayeong! I know its gonna be a struggle getting thing')
+[2026-03-18 21:10:02] Searching: 'RAM storage multi autonomous ai agent workstation build type storage email info'
+[2026-03-18 21:10:03] Found 6 results for 'RAM storage multi autonomous ai agent workstation build type storage email info'
+[2026-03-18 21:10:03] Fetching: https://localai.computer/learn/ai-workstation-guide
+[2026-03-18 21:10:04] Fetched 4000 chars from https://localai.computer/learn/ai-workstation-guide
+[2026-03-18 21:10:04] Fetching: https://blogs.nvidia.com/blog/storage-leaders-ai-data-platform-agents/
+[2026-03-18 21:10:04] Fetched 4000 chars from https://blogs.nvidia.com/blog/storage-leaders-ai-data-platform-agents/
+[2026-03-18 21:10:04] Document saved: H:\hayeong\documents\RAM_storage_multi_autonomous_ai_agent_workstation__20260318_2110.md

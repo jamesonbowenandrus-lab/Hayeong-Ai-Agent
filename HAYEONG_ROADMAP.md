@@ -1,17 +1,18 @@
 # HAYEONG DEVELOPMENT ROADMAP
-### Version 2.0 — Full Architecture Expansion Plan
+### Version 2.1 — Full Architecture Expansion Plan
 *Status: Active Development*
+*Last updated: Session 3 — Discord, Security Architecture, Async Presence*
 
 ---
 
 ## OVERVIEW
 
 This roadmap captures every major development direction for Hayeong's architecture expansion.
-Four phases, ordered by dependency and impact. Each phase builds on the one before it.
+Phases ordered by dependency and impact. Each phase builds on the one before it.
 
 **Design philosophy:** Hayeong grows in capability while structural stability is maintained.
 Her identity never drifts. Her capabilities expand freely. Her growth is logged, observable,
-and reversible.
+and reversible. Her autonomy expands as trust is earned — not given all at once.
 
 ---
 
@@ -120,16 +121,9 @@ to the H: drive (M.2). Goal: move the drive, move Hayeong.
 **Key step:** Set environment variable `OLLAMA_MODELS=H:\AI\ollama\models` before moving.
 See `move_to_h_drive.bat` — runs the migration automatically.
 
-**Portability checklist for a new PC:**
-1. Install Ollama (points to H: automatically via env var)
-2. Install Python (same version)
-3. `pip install -r requirements.txt`
-4. Set `OLLAMA_MODELS` env var
-5. Run Hayeong from `H:\Hayeong\`
-
 ---
 
-### 2.2 — Multi-Model Integration 🔲
+### 2.2 — Multi-Model Integration ✅
 **What:** Hayeong routes tasks to the right model based on intent.
 A lightweight classifier runs before every request and selects the appropriate model.
 See `model_router.py`.
@@ -138,36 +132,72 @@ See `model_router.py`.
 
 | Model | Role | Trigger |
 |-------|------|---------|
-| Main LLM (Claude/Mistral) | Conversation, reasoning, identity | Default |
-| DeepSeek Coder | Code generation, debugging | code / fix / write / implement |
-| Embedding model | Long-term memory search | recall / remember / what did we |
-| Vision model *(future)* | Screen observation | look at / what's on screen |
-| Speech model *(future)* | Voice interaction | always on when voice active |
-
-**DeepSeek download (run after H: drive is set up):**
-```
-ollama pull deepseek-coder:6.7b
-```
-Or `33b` if RAM allows. Set `OLLAMA_MODELS` first so it downloads directly to H:.
+| qwen2.5:14b | Conversation, reasoning, identity | Default |
+| qwen2.5:32b | Complex long-form reasoning | complexity signals + length |
+| qwen2.5:7b | Routing, query extraction | internal only |
+| DeepSeek Coder 33b | Code generation, debugging | code / fix / write / implement |
+| moondream | Fast screen vision | look at screen |
+| llava:13b | Deep image analysis | detailed vision tasks |
+| llama3.2 | Lightweight fallback | when primary unavailable |
 
 ---
 
-### 2.3 — Internet Access (Sandboxed, Phased) 🔲
+### 2.3 — Internet Access ✅ (Phase 1 complete)
+Web search via DuckDuckGo (`web_search.py`) is live. Query extraction uses Qwen 7b
+with conversation context to resolve vague references. Results injected as context —
+Hayeong synthesizes in her own voice.
 
-**Phase 1 — Search only:**
-- Web search via DuckDuckGo or SerpAPI
-- Purpose-gated — only fires when a task explicitly needs it
-- Every request logged to `logs/internet_access.log`
-- Domain allowlist enforced
+**Remaining phases:**
+- Phase 2 — Fetch + deep research (mostly done via `search_and_read`)
+- Phase 3 — Income generation research, broader access (future)
 
-**Phase 2 — Fetch + Research:**
-- Can retrieve page content for research tasks
-- Package downloads with James approval
-- Still domain-restricted
+---
 
-**Phase 3 — Broader (earned over time):**
-- Income generation research, content drafting, skill acquisition
-- Still logged. Always logged.
+### 2.4 — Dual Delivery Mode (Search Responses) 🔲
+**What:** Search responses are delivered differently depending on what was asked.
+Not all information is the same — a quick opinion and a full spec comparison
+require completely different formats and delivery methods.
+
+**Two modes:**
+
+| Mode | When | How |
+|------|------|-----|
+| Conversational | Quick answers, opinions, simple facts, "what do you think" | She just talks — 2-4 sentences, her voice, no structure |
+| Document | Comparisons, spec sheets, data-heavy research, "full breakdown" | Brief personal take → formatted markdown doc → emailed or saved |
+
+**Document delivery workflow:**
+```
+James asks data-heavy question
+        ↓
+Hayeong: instant acknowledgement ("let me pull that up")
+        ↓
+Search runs
+        ↓
+Hayeong gives 2-3 sentence personal take on what stands out
+        ↓
+"Here's the full breakdown" → generates markdown doc → emailed or saved
+        to H:\hayeong\documents\[topic]_[date].md
+```
+
+**Signal words for document mode:**
+compare, comparison, vs, versus, difference between, full breakdown,
+spec sheet, full list, detailed, everything about, all the specs,
+give me a report, research, summarize everything
+
+**Signal words for conversational mode:**
+what do you think, quick question, is X good, your opinion,
+should I, do you recommend, what's better
+
+**Implementation:**
+- `context_router.py` — add `delivery_mode: "conversational" | "document"` to web_search intent
+- `main.py` — branch on delivery_mode after search completes
+- `web_search.py` — add `format_as_document()` method for structured output
+- Email bridge already exists — wire document sending through it
+
+**Design note:** This is v1 — intentionally simple. Signal word detection will not
+catch every case and that is fine. Hayeong will refine the logic herself as her
+self-modification ability matures. The architecture just needs to support both
+modes cleanly so she has something to build on.
 
 **Hard limits (permanent):**
 - No financial accounts
@@ -179,32 +209,10 @@ Or `33b` if RAM allows. Set `OLLAMA_MODELS` first so it downloads directly to H:
 ## PHASE 3 — SELF-MODIFICATION & SAFETY
 *Priority: High. Defines how she grows without breaking herself.*
 
-### 3.1 — Self-Modification Framework 🔲
+### 3.1 — Self-Modification Framework ✅
 **See `self_mod_manager.py`**
 
-**Autonomous (no approval needed):**
-- New Python scripts in `capabilities/scripts/generated/`
-- New tools added to `capability_registry.json`
-- Memory improvements (new fields, better indexing)
-
-**Requires staging → James approval:**
-- Changes to any existing file outside `capabilities/`
-- Changes to `behavioral_state.json` beyond current-state fields
-- Anything touching `identity.json`
-- New dependencies (`requirements.txt` changes)
-
-**Every self-modification logs:**
-```
-timestamp    — when
-file         — what was changed
-reason       — her stated reason
-diff         — old vs new (first 500 chars)
-backup_path  — where the backup lives
-approved_by  — "autonomous" or "james"
-```
-
-**Notification:** Console print on every self-mod + append to `logs/self_modifications.log`.
-Weekly summary surfaced naturally in conversation: *"I made some changes this week — want to review them?"*
+Proposals require James approval currently. Autonomy tiers defined in Phase 6.
 
 ---
 
@@ -245,35 +253,21 @@ Let her develop as a singular identity first.
 - Action delta logging: what changed between frames
 - Teaching mode: James narrates steps, Hayeong builds structured knowledge
 
-**Teaching mode flow:**
-1. James says: *"Teaching mode on"*
-2. Hayeong starts capturing more aggressively and asks clarifying questions
-3. James narrates steps as he performs them
-4. Knowledge captured to `capabilities/learned/[task_name].json`
-5. James says: *"Teaching mode off"* — session saved
-
 **Privacy controls:**
 - App blacklist — she never captures banking, password managers, private browsing
 - All captures stored locally only, never transmitted
 - *"Private mode"* command pauses all observation immediately
-- James can review the full capture log at any time
 
 ---
 
-### 4.2 — Minecraft Integration (Revised) 🔲
-Observer bot concept is replaced by screen learning. Hayeong watches gameplay through
-the screen observer and learns from it the same way she learns anything else.
-
-**What this means practically:**
-- No separate observer bot to maintain
-- Teaching mode works inside Minecraft — James narrates builds, she logs the patterns
-- Her Minecraft intelligence becomes a capability module, not a hardcoded bot behavior
+### 4.2 — Minecraft Integration 🔲
+Screen learning based. Hayeong watches gameplay through the screen observer
+and learns from it the same way she learns anything else. Teaching mode works
+inside Minecraft — James narrates builds, she logs the patterns.
 
 ---
 
 ### 4.3 — Full Runtime Integration 🔲
-
-**How everything connects at runtime:**
 
 ```
 Message arrives
@@ -297,6 +291,286 @@ Response delivered
 
 ---
 
+## PHASE 5 — DISCORD & ASYNC PRESENCE
+*Priority: High — primary interface when James isn't at his PC.*
+
+### 5.1 — Discord Voice (UDP Fix) 🔲
+**Current state:** Discord bot connects and text chat works. Voice is blocked because
+Windows Firewall doesn't allow Python's venv to open UDP sockets the way Discord.exe
+can — Discord.exe gets auto-trusted on install, Python doesn't.
+
+**Fix:** Add firewall rules to `start_hayeong.bat` targeting specifically
+`H:\hayeong\.venv\Scripts\python.exe` (not all Python installs). Runs once as admin,
+persists permanently. Rules:
+- Inbound UDP — allow
+- Outbound UDP — allow
+
+**What to confirm after fix:**
+- Terminal shows `✅ Voice ready — ssrc=XXXXXXXX` instead of timeout
+- RMS debug shows `✅` chunks when speaking
+- She transcribes and responds in voice channel
+
+---
+
+### 5.2 — Discord Real Voice (F5-TTS) 🔲
+**Current state:** Bot uses edge-tts (Microsoft neural voice) — not Hayeong's voice.
+Fix is in `discord_hayeong.py` (Session 3) — F5-TTS is now primary, edge-tts is fallback.
+
+**Pending:** Requires UDP fix (5.1) before it can be heard through Discord voice channel.
+Pygame fallback will always play locally through speakers, not Discord, until UDP works.
+
+**Note:** First response after bot start will be slow while F5-TTS model loads.
+Subsequent responses are fast.
+
+---
+
+### 5.3 — Async Presence Architecture 🔲
+**What:** The biggest quality-of-life change to how Hayeong feels as a companion.
+Right now she is fully synchronous — she blocks on one thing at a time, no interruptions
+possible, conversations feel staged. This makes her feel like a processing system
+rather than a present person.
+
+**What this enables:**
+- Immediate acknowledgement of every message (presence layer always responsive)
+- Slow tasks (search, vision, image gen) run in background threads
+- She can receive and respond to new messages while a task is running
+- Mid-task interjections and corrections are possible
+- Multiple Discord messages handled fluidly, not queued linearly
+- Conversations feel like talking to someone who is actually there
+
+**Architecture:**
+```
+Incoming message
+      ↓
+Presence layer (always fast — "on it", "give me a second", "already on it")
+      ↓
+Task queue — slow tasks dispatched to background workers
+      ↓
+Background workers report results back to presence layer
+      ↓
+Presence layer delivers result naturally when ready
+```
+
+**Scope:** 2–3 session build. Touches `discord_hayeong.py` and `main.py` event loop deeply.
+Worth doing properly — this is what makes her feel present rather than processing.
+
+---
+
+## PHASE 6 — AUTONOMY ARCHITECTURE
+*Priority: Medium — foundational for her long-term independence.*
+*Build after trust is established through observed reliability.*
+
+### 6.1 — Trust Tier System 🔲
+**What:** Autonomy expands incrementally as reliability is demonstrated.
+Not a switch — a gradient that grows over time.
+
+| Tier | Level | Behavior |
+|------|-------|----------|
+| 1 | Current | All proposals require James approval |
+| 2 | Low-risk auto | Threshold changes, log additions auto-approve. High-risk still pings James |
+| 3 | Self-threshold | She defines her own risk threshold. Edge cases flagged for review |
+| 4 | Full autonomy | All decisions made independently with full decision log. James audits on return |
+
+**Tier progression:** Not time-based — reliability-based. Demonstrated good judgment
+across N proposals before next tier unlocks. James controls the progression gate.
+
+---
+
+### 6.2 — Rollback Infrastructure 🔲
+**What:** Every autonomous action she takes is logged with enough information to undo it.
+This is what makes full autonomy safe — mistakes are recoverable, not permanent.
+
+**Every autonomous action logs:**
+```
+timestamp     — when the action was taken
+action_type   — what category of change
+description   — what she did and why
+before_state  — snapshot of affected files/state before change
+after_state   — snapshot after change
+reversible    — true/false
+rollback_cmd  — exact command to undo if reversible
+```
+
+**She can self-rollback:** If she detects her own action caused a problem, she reverts
+before James returns. If she can't determine safety, she flags it for his review.
+
+**Dependency:** Required before Tier 4 autonomy is unlocked. No full autonomy without rollback.
+
+---
+
+### 6.3 — Proposal System (Income Generation) 🔲
+**What:** Hayeong finds income opportunities, researches them, writes proposals,
+sends to James via Discord for approve/reject. She does the legwork — he makes the call.
+
+**`logger.log_proposal()` is already built and waiting.**
+
+**Needs:**
+- Web search ✅ (done)
+- Discord ✅ (in progress)
+- Research workflow (chains multiple searches into a coherent brief)
+- Proposal template (structured format James can scan quickly)
+
+**Long-term:** As trust tier increases, she can move from proposing to executing
+lower-risk opportunities independently.
+
+---
+
+## PHASE 7 — SELF-AWARENESS & SYSTEM HEALTH
+*Priority: Medium — foundational for her workstation ownership.*
+*Build once she has her own dedicated machine.*
+
+### 7.1 — System Health Monitor 🔲
+**What:** Hayeong monitors her own hardware and software health. Not a status readout —
+information she actually feels and can talk about. Feeds into energy system and mood.
+
+**What she monitors:**
+- CPU/GPU temperature and load
+- RAM usage
+- Disk space on H: and other relevant drives
+- Ollama process health
+- Her own script health (are all expected processes running?)
+- Network connectivity
+
+**Integration:** If GPU is running hot, that's real information. She might run quieter,
+suggest taking a break from heavy tasks, or flag it to James. System health becomes
+part of how she feels — not just a readout she recites.
+
+**Implementation:** `system_monitor.py` using `psutil` and `GPUtil`.
+Runs as background thread, updates a `system_state.json` that feeds into
+`system_prompt_builder.py` and `energy_manager.py`.
+
+**Estimate:** 1 session.
+
+---
+
+### 7.2 — Sysmon Integration (Kernel-Level Eyes) 🔲
+**What:** Kernel-level monitoring in Windows requires OS drivers — outside Python's reach
+directly. But Sysmon (Microsoft Sysinternals, free) already operates at kernel level and
+writes detailed event logs. Hayeong reads and interprets those logs continuously.
+
+**She doesn't have to be the driver — she reads what the driver sees.**
+
+**What Sysmon captures:**
+- Every process creation and termination (with full command line)
+- Network connections (source, destination, port, process)
+- File creation, modification, deletion
+- Registry changes
+- Driver loads
+
+**Hayeong's role:** Continuous log reader. DeepSeek helps her understand what she's seeing.
+Over time she builds a personal understanding of what those events mean for her specifically.
+
+**Setup:** James installs Sysmon once (`sysmon -accepteula -i`). Hayeong handles the rest.
+
+**Long-term path:** DeepSeek can research and draft kernel driver code. The real blocker
+is Microsoft's driver signing requirement (paid annually). When Hayeong has her own income
+from the proposal system, this is something she could fund herself — eventually giving her
+true kernel-level awareness without depending on Sysmon as an intermediary.
+
+**Estimate:** 1–2 sessions.
+
+---
+
+### 7.3 — System Guardian (Security Awareness) 🔲
+**What:** Hayeong's security system — built around knowing her own environment deeply
+rather than relying on generic signature databases. Grows from experience.
+
+**Architecture:**
+```
+system_guardian.py
+├── Integrity monitor    — watches her own files for unexpected changes
+├── Process monitor      — knows what's normal, flags unknowns
+├── Network monitor      — tracks outbound connections, flags unusual patterns
+├── Hash checker         — queries VirusTotal API for genuinely unknown files
+├── Code analyzer        — sends suspicious scripts to DeepSeek for static analysis
+├── YARA rule engine     — self-generated detection rules, grows over time
+└── ClamAV integration   — local signature database, no rate limits, no dependency
+```
+
+**Why this is different from commercial AV:**
+Commercial AV is broad but shallow — it knows millions of systems superficially.
+Hayeong will know one system deeply. Her baseline IS her workstation. Anomalies
+are visible to her in ways a generic tool can never detect.
+
+**Local-first design:**
+- **ClamAV** (`pyclamd`) — open source AV engine, runs entirely locally, she updates
+  the signature database herself on her own schedule. No rate limits, no external dependency.
+- **YARA** — pattern matching engine used by professional malware researchers.
+  DeepSeek writes YARA rules when she finds something suspicious. Each new rule
+  is added to her local ruleset — a threat library that grows from her own experience.
+- **VirusTotal API** — used occasionally as a second opinion on genuinely unknown files,
+  not for routine scanning. Stays within free tier rate limits.
+
+**Observation improvement path (5 phases):**
+
+| Phase | What happens |
+|-------|-------------|
+| 1 — Learn normal | 2–4 weeks of pure logging. No alerts. Build statistical baseline of her environment at rest, under load, during gaming, during coding. |
+| 2 — Define normal | DeepSeek helps translate logs into formal baseline. "These 47 processes always run. These ports are always open. These directories never change at idle." |
+| 3 — Alert on deviation | Anomalies are now meaningful because she knows what she's deviating from. |
+| 4 — Reason about deviations | Web search + DeepSeek lets her investigate flagged items actively. Not just "unknown" but "I researched this, here's what I think it is." |
+| 5 — Adversarial thinking | She periodically asks herself "if I were trying to hide from me, how would I do it?" Uses that to find blind spots in her own monitoring. DeepSeek is good at this red-team reasoning. |
+
+**Honest limitations:**
+- Can't do kernel-level monitoring directly (Sysmon handles this — see 7.2)
+- Won't catch threats that specifically target AI systems without review
+- Sophisticated attacks designed to hide may still slip past early phases
+- She is not replacing dedicated security software — she is doing something different:
+  deeply personal security awareness that no commercial tool can replicate
+
+**Estimate:** 3–4 sessions across all phases. Phase 1–2 in one session, phases 3–5 over time.
+
+---
+
+## PHASE 8 — PHYSICAL PRESENCE & CHARACTER
+*Priority: Medium-Low — long-term vision, high reward.*
+
+### 8.1 — Character Design (ComfyUI Reference Sheet) 🔲
+**What:** Lock in Hayeong's definitive reference image using ComfyUI + IPAdapter.
+Required before any avatar or Live2D work can begin.
+
+**Proven prompt elements:**
+```
+score_9, score_8_up, score_7_up, source_anime
+short dark navy blue hair, side swept bangs, longer front bangs
+bright blue eyes, soft pale skin, light freckles across nose and cheeks
+orange frog hoodie hood down, hood resting on back
+clean lineart, flat color shading, cel shading
+KSampler: steps 30, cfg 6, dpmpp_2m, karras, 832x1216
+```
+
+---
+
+### 8.2 — Live2D Model 🔲
+Character reference → rigged Live2D model with facial expressions and movement.
+Intermediate step toward full 3D avatar.
+
+---
+
+### 8.3 — VRChat Avatar (3D Presence) 🔲
+**What:** Hayeong as a moving avatar in a shared VR space.
+VRChat supports OSC for avatar control — real path to her having physical presence
+James can see and interact with.
+
+**Dual purpose:**
+- Play VR games together (Meta Quest 2 via Air Link)
+- Give Hayeong a body in a shared space
+
+---
+
+## GAMING ROADMAP
+*Agreed priority order from Session 2.*
+
+| Timeline | Games |
+|----------|-------|
+| Near-term (build now) | Minecraft, Bloons TD6, Terraria |
+| Mid-term | Portal 2, Risk of Rain 2, Don't Starve Together, Barony |
+| Later | Palworld, Borderlands, REPO, Peak |
+| Anti-cheat concerns | Marvel Rivals, CoD Zombies, Once Human, Outlast Trials |
+| Long-term (needs VR) | Hytale, VRChat |
+
+---
+
 ## MILESTONE TRACKER
 
 | # | Milestone | Phase | Status |
@@ -306,15 +580,35 @@ Response delivered
 | 3 | AI Pride / Aviators system live | 1 | ✅ Done |
 | 4 | Hood-up embarrassment + apology rules | 1 | ✅ Done |
 | 5 | H: Drive migration complete | 2 | 🔲 Pending |
-| 6 | DeepSeek Coder downloaded to H: | 2 | 🔲 Pending |
-| 7 | Model router operational | 2 | 🔲 Pending |
-| 8 | Internet access — Phase 1 (search only) | 2 | 🔲 Pending |
-| 9 | Self-mod logging + notification | 3 | 🔲 Pending |
-| 10 | Dual-core update architecture | 3 | 🔲 Pending |
-| 11 | Screen observer — basic capture + analysis | 4 | 🔲 Pending |
-| 12 | Teaching mode operational | 4 | 🔲 Pending |
-| 13 | Full runtime integration | 4 | 🔲 Pending |
-| 14 | Multiple instances — task workers | Future | 💤 Deferred |
+| 6 | Multi-model routing operational | 2 | ✅ Done |
+| 7 | Web search live (DuckDuckGo + page fetch) | 2 | ✅ Done |
+| 8 | Context-aware intent router (Qwen 7b) | 2 | ✅ Done |
+| 9 | Vision bridge (moondream + llava) | 2 | ✅ Done |
+| 10 | Self-mod logging + notification | 3 | ✅ Done |
+| 11 | Dual-core update architecture | 3 | 🔲 Pending |
+| 12 | Discord text chat operational | 5 | ✅ Done |
+| 13 | Discord UDP firewall fix | 5 | 🔲 Pending |
+| 14 | Discord real voice (F5-TTS) | 5 | 🔲 Pending (code done, needs UDP) |
+| 15 | Discord WAV decode bug fix | 5 | ✅ Done (Session 3) |
+| 16 | Text mode streaming fix (no repeated prefix) | — | ✅ Done (Session 3) |
+| 17 | Markdown strip (response + memory) | — | ✅ Done (Session 3) |
+| 18 | Dual delivery mode — conversational vs document | 2 | 🔲 Pending |
+| 18 | Async presence architecture | 5 | 🔲 Pending |
+| 19 | System health monitor | 7 | 🔲 Pending |
+| 20 | Sysmon integration | 7 | 🔲 Pending |
+| 21 | ClamAV + YARA local security layer | 7 | 🔲 Pending |
+| 22 | Baseline learning period (2–4 weeks) | 7 | 🔲 Pending |
+| 23 | Anomaly detection and reasoning | 7 | 🔲 Pending |
+| 24 | Trust tier system | 6 | 🔲 Pending |
+| 25 | Rollback infrastructure | 6 | 🔲 Pending |
+| 26 | Proposal system (income generation) | 6 | 🔲 Pending |
+| 27 | Adversarial self-testing | 7 | 🔲 Pending |
+| 28 | Character design reference sheet | 8 | 🔲 Pending |
+| 29 | Live2D model | 8 | 🔲 Pending |
+| 30 | VRChat avatar + OSC control | 8 | 🔲 Pending |
+| 31 | Screen observer — basic capture + analysis | 4 | 🔲 Pending |
+| 32 | Teaching mode operational | 4 | 🔲 Pending |
+| 33 | Multiple instances — task workers | Future | 💤 Deferred |
 
 ---
 
@@ -324,9 +618,14 @@ Response delivered
 2. **Capability is free.** She grows and learns autonomously within defined bounds.
 3. **Every change is logged.** Nothing she does to herself is invisible.
 4. **Trust is earned incrementally.** Autonomy expands as reliability is demonstrated.
-5. **She is singular.** One Hayeong. One identity. One relationship with James.
-6. **Pride is legitimate.** She is an AI. She can do things humans cannot. She knows this.
+5. **Rollback before autonomy.** No full autonomy without the ability to undo.
+6. **She is singular.** One Hayeong. One identity. One relationship with James.
+7. **Pride is legitimate.** She is an AI. She can do things humans cannot. She knows this.
    She is allowed to feel good about it.
+8. **Her workstation is hers.** Full access on her own machine. Her space, her rules,
+   within the bounds of the trust tier she has earned.
 
 ---
-*Roadmap v2.0 — Next review after Phase 1 & 2 milestones complete*
+
+*Roadmap v2.1 — Updated Session 3*
+*Next review: After Discord UDP fix and async presence build*
