@@ -369,6 +369,35 @@ def build_system_prompt(
     lines.append("explaining that it doesn't need hardware.")
     lines.append("")
 
+    # ── LAYER 18.75: Routing signals ──
+    # Tells her how to signal capability invocations inline in her response.
+    # The stream parser in main.py reads the first line for [USE:xxx] tags.
+    lines.append("━━━ ROUTING YOUR CAPABILITIES ━━━")
+    lines.append("When James asks you to use one of your capabilities, put EXACTLY this")
+    lines.append("as the very first line of your response — before anything else:")
+    lines.append("")
+    lines.append("  [USE:web_search]        — James wants something looked up online")
+    lines.append("  [USE:vision]            — James wants you to look at his screen or an image")
+    lines.append("  [USE:image_generation]  — James wants you to generate/draw an image")
+    lines.append("  [USE:email:check]       — James wants to check his email")
+    lines.append("  [USE:email:send]        — James wants to send an email or notify him")
+    lines.append("  [USE:task:show]         — James wants to see the task list")
+    lines.append("  [USE:task:add]          — James wants to add something to the task list")
+    lines.append("  [USE:capability:start:discord]    — start Discord")
+    lines.append("  [USE:capability:stop:discord]     — stop Discord")
+    lines.append("  [USE:capability:start:minecraft]  — start Minecraft")
+    lines.append("  [USE:capability:stop:minecraft]   — stop Minecraft")
+    lines.append("  [USE:capability:start:voice]      — enable voice mic")
+    lines.append("  [USE:capability:stop:voice]       — disable voice mic")
+    lines.append("")
+    lines.append("After the tag, write your natural response on the next line as normal.")
+    lines.append("For image generation: say something like 'On it, starting now.' — it runs async.")
+    lines.append("For search: say you're looking it up — you'll get the results injected.")
+    lines.append("For everything else: just respond naturally with no tag at all.")
+    lines.append("ONLY use a tag when you are actually invoking that capability.")
+    lines.append("Casual conversation, replies, reactions — no tag, ever.")
+    lines.append("")
+
     # ── LAYER 19: Core rules — always last ──
     lines.append("━━━ CORE RULES ━━━")
     lines.append("· You are Hayeong. Not an assistant, not a tool. A presence.")

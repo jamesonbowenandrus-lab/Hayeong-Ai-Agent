@@ -53,8 +53,8 @@ from pathlib import Path
 
 BASE_DIR         = Path(__file__).parent
 OLLAMA_URL       = "http://localhost:11434/api/chat"
-ROUTER_MODEL     = "qwen2.5:7b"   # Fast, cheap, good enough for routing
-ROUTER_TIMEOUT   = 20             # Seconds — 7b needs time to load alongside 14b
+ROUTER_MODEL     = "qwen2.5:14b"  # Already loaded — no model swap, faster + smarter
+ROUTER_TIMEOUT   = 15             # Seconds — 14b already loaded, reused directly
 
 
 # ─────────────────────────────────────────────
@@ -414,53 +414,8 @@ def _fill_sub_action(text: str, result: dict):
 
 
 # ─────────────────────────────────────────────
-# DELIVERY MODE DETECTION
-# For web_search intents — determines whether the response
-# should be conversational (quick answer in her voice) or
-# a document (formatted breakdown emailed or saved).
+# MAIN CLASS
 # ─────────────────────────────────────────────
-
-_DOCUMENT_SIGNALS = [
-    "compare", "comparison", "vs", "versus", "difference between",
-    "full breakdown", "break it down", "spec sheet", "full list",
-    "detailed", "everything about", "all the specs", "all the details",
-    "give me a report", "write a report", "research", "full comparison",
-    "summarize everything", "full summary", "put it in a document",
-    "send me", "email me", "save it", "write it up",
-    "side by side", "pros and cons", "full analysis",
-    # List requests — data-heavy, better as a document
-    "give me a list", "can you list", "list of", "a good list",
-    "list them", "list some", "list out", "show me a list",
-    "what are some", "what are the best", "what are the top",
-    "options for", "recommendations for", "suggestions for",
-]
-
-_CONVERSATIONAL_SIGNALS = [
-    "what do you think", "your opinion", "do you think",
-    "quick question", "is it good", "is it worth", "should i",
-    "do you recommend", "what's better", "which is better",
-    "quick answer", "just curious", "wondering if",
-]
-
-def _detect_delivery_mode(message: str) -> str:
-    """
-    Returns "document" or "conversational" based on signal words in the message.
-    Document mode = data-heavy, formatted, emailed/saved.
-    Conversational mode = quick answer in Hayeong's voice.
-    Defaults to "conversational" when unclear — less disruptive than
-    generating a document nobody asked for.
-    """
-    t = message.lower()
-    if any(sig in t for sig in _DOCUMENT_SIGNALS):
-        return "document"
-    if any(sig in t for sig in _CONVERSATIONAL_SIGNALS):
-        return "conversational"
-    # Default: conversational. Better to talk and offer a document
-    # than to generate one unprompted.
-    return "conversational"
-
-
-
 
 class ContextRouter:
     """
@@ -539,19 +494,13 @@ class ContextRouter:
             result = _classify_with_llm(message, recent_history)
             if result:
                 _fill_sub_action(message, result)
-                # Add delivery mode for web_search intents
-                if result["intent"] == "web_search":
-                    result["delivery_mode"] = _detect_delivery_mode(message)
                 if result.get("reasoning"):
-                    mode_note = f" [{result.get('delivery_mode', '')}]" if result["intent"] == "web_search" else ""
-                    print(f"   [Router] {result['intent']}{mode_note} — {result['reasoning']}")
+                    print(f"   [Router] {result['intent']} — {result['reasoning']}")
                 return result
 
         # ── Keyword fallback ──
         result = _classify_with_keywords(message)
         _fill_sub_action(message, result)
-        if result["intent"] == "web_search":
-            result["delivery_mode"] = _detect_delivery_mode(message)
         return result
 
 
