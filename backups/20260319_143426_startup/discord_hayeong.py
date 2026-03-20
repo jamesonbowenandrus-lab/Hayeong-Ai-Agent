@@ -14,12 +14,28 @@ import asyncio
 import tempfile
 import io
 import wave
-import edge_tts
 import miniaudio
 import pygame
 import numpy as np
 from faster_whisper import WhisperModel
 from dotenv import load_dotenv
+
+# ── TTS: F5-TTS (Hayeong's real voice) with edge-tts as fallback ──
+try:
+    from f5_tts.api import F5TTS as _F5TTS
+    _F5_MODEL       = None   # loaded lazily on first use
+    _F5_VOICE_REF   = os.path.join(os.path.dirname(__file__),
+                                   "voice_prep", "samples", "source_5secs.wav")
+    _F5_REF_TEXT    = "Before the video starts, I want to make a quick announcement."
+    F5TTS_AVAILABLE = os.path.exists(_F5_VOICE_REF)
+    if not F5TTS_AVAILABLE:
+        print("⚠️  F5-TTS voice ref file not found — will fall back to edge-tts")
+except ImportError:
+    F5TTS_AVAILABLE = False
+    print("⚠️  f5_tts not installed — using edge-tts fallback")
+
+if not F5TTS_AVAILABLE:
+    import edge_tts
 
 # ── Safe import — no audio/voice stack ──
 from hayeong_core import (
@@ -69,10 +85,10 @@ ALLOWED_TEXT_CHANNELS = ["hayeong-chat"]
 # ── Whisper — runs in a thread executor, never blocks the event loop ──
 whisper = WhisperModel("base", compute_type="int8")
 
-# ── TTS config (edge-tts) ──
-VOICE        = "en-US-AriaNeural"
-SPEECH_RATE  = "-4%"
-SPEECH_PITCH = "+5Hz"
+# ── edge-tts fallback config ──
+EDGE_VOICE       = "en-US-AriaNeural"
+EDGE_SPEECH_RATE = "-4%"
+EDGE_PITCH       = "+5Hz"
 
 pygame.mixer.init()
 
@@ -203,16 +219,67 @@ async def play_locally(mp3_path: str):
 # TTS GENERATION
 # ─────────────────────────────────────────────
 
+def _generate_f5_blocking(text: str) -> "str | None":
+    """Generate audio using Hayeong's real F5-TTS voice. Runs in a thread executor."""
+    global _F5_MODEL
+    try:
+        if _F5_MODEL is None:
+            print("🔊 Loading F5-TTS model (first use — takes a moment)...")
+            _F5_MODEL = _F5TTS()
+            print("✅ F5-TTS model loaded")
+
+        wav, sr, _ = _F5_MODEL.infer(
+            ref_file = _F5_VOICE_REF,
+            ref_text = _F5_REF_TEXT,
+            gen_text = text,
+            nfe_step = 32,    # Faster than main.py's 64 — acceptable quality for Discord
+            speed    = 0.95,
+        )
+
+        audio = np.array(wav, dtype=np.float32)
+        peak  = np.abs(audio).max()
+        if peak > 1.0:
+            audio = audio / peak
+
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
+        tmp.close()
+        from scipy.io.wavfile import write as wav_write
+        wav_write(tmp.name, sr, audio)
+        return tmp.name
+
+    except Exception as e:
+        print(f"⚠️  F5-TTS error: {e}")
+        return None
+
+
 async def generate_tts(text: str) -> "str | None":
+    """
+    Generate TTS audio and return path to temp file.
+    Uses Hayeong's F5-TTS voice when available, edge-tts as fallback.
+    MiniaudioSource handles both WAV and MP3, so either works fine.
+    """
+    if not text.strip():
+        return None
+
+    if F5TTS_AVAILABLE:
+        loop     = asyncio.get_event_loop()
+        wav_path = await loop.run_in_executor(None, _generate_f5_blocking, text)
+        if wav_path:
+            return wav_path
+        print("⚠️  F5-TTS failed — falling back to edge-tts")
+
+    # edge-tts fallback
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
     tts_path = tmp.name
     tmp.close()
     try:
-        communicate = edge_tts.Communicate(text, VOICE, rate=SPEECH_RATE, pitch=SPEECH_PITCH)
+        communicate = edge_tts.Communicate(
+            text, EDGE_VOICE, rate=EDGE_SPEECH_RATE, pitch=EDGE_PITCH
+        )
         await communicate.save(tts_path)
         return tts_path
     except Exception as e:
-        print(f"⚠️  TTS generation error: {e}")
+        print(f"⚠️  edge-tts error: {e}")
         try:
             os.remove(tts_path)
         except Exception:
@@ -355,26 +422,45 @@ async def voice_listen_loop(vc: discord.VoiceClient, text_channel):
                     if not raw or len(raw) < 200:
                         continue
 
-                    samples = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
+                    # ── WAV extraction fix ──
+                    # py-cord's WaveSink stores audio as a WAV file (with header)
+                    # in the BytesIO. We must read the PCM frames out of it properly
+                    # before passing to Whisper — writing raw WAV bytes as PCM frames
+                    # produces a double-wrapped corrupted file Whisper can't decode.
+                    try:
+                        with wave.open(io.BytesIO(raw), "rb") as probe:
+                            n_ch      = probe.getnchannels()
+                            framerate = probe.getframerate()
+                            raw_pcm   = probe.readframes(probe.getnframes())
+                    except Exception:
+                        # BytesIO didn't have a WAV header — treat as raw PCM
+                        raw_pcm   = raw
+                        n_ch      = DISCORD_CHANNELS
+                        framerate = DISCORD_SAMPLE_RATE
+
+                    if not raw_pcm or len(raw_pcm) < 100:
+                        continue
+
+                    samples = np.frombuffer(raw_pcm, dtype=np.int16).astype(np.float32) / 32768.0
                     rms     = float(np.sqrt(np.mean(samples ** 2)))
-                    print(f"   [rms={rms:.4f}]", end="\r")
+
+                    # Show rms even for silent chunks so threshold can be calibrated
+                    threshold_indicator = "✅" if rms >= SILENCE_RMS else "🔇"
+                    print(f"   [{threshold_indicator} rms={rms:.5f} | threshold={SILENCE_RMS}]", end="\r")
 
                     if rms < SILENCE_RMS:
                         continue
 
                     print(f"\n   [voice! rms={rms:.4f}] transcribing...")
 
-                    # Write WAV for Whisper
-                    # ── FIX: Discord always sends 48000 Hz stereo PCM.
-                    #    The old code used sink.vc.decoder.CHANNELS/SAMPLING_RATE
-                    #    which doesn't exist on WaveSink in current py-cord versions.
+                    # Write clean WAV for Whisper (PCM only, no double header)
                     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
                     tmp.close()
                     with wave.open(tmp.name, "wb") as wf:
-                        wf.setnchannels(DISCORD_CHANNELS)
+                        wf.setnchannels(n_ch)
                         wf.setsampwidth(2)
-                        wf.setframerate(DISCORD_SAMPLE_RATE)
-                        wf.writeframes(raw)
+                        wf.setframerate(framerate)
+                        wf.writeframes(raw_pcm)
 
                     loop    = asyncio.get_event_loop()
                     wav_path = tmp.name

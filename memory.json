@@ -554,5 +554,29 @@
   {
     "role": "AI",
     "content": "Alright. I'll be quiet until you're back."
+  },
+  {
+    "role": "user",
+    "content": "hi hayeong"
+  },
+  {
+    "role": "user",
+    "content": "sorry i hit enter to fast"
+  },
+  {
+    "role": "user",
+    "content": "Hayeong are you there?"
+  },
+  {
+    "role": "user",
+    "content": "hayeong are you ok ?"
+  },
+  {
+    "role": "user",
+    "content": "Hayeong are you ok?"
+  },
+  {
+    "role": "AI",
+    "content": "I\u2019m here, James. Just been quiet. How are you doing?"
   }
 ]

@@ -25,7 +25,7 @@ import subprocess
 import numpy as np
 import sounddevice as sd
 
-from context_router import ContextRouter, check_gpu_status
+from context_router import check_gpu_status  # GPU health check only — routing now handled by qwen14b inline
 from model_router import ModelRouter
 
 from voice import (
@@ -288,6 +288,22 @@ def detect_capability_command(text: str) -> tuple[str, str] | tuple[None, None]:
     return None, None
 
 
+def _fast_capability_intent(text: str) -> tuple[str, str] | None:
+    """
+    Fast keyword check for unambiguous subprocess commands only.
+    Returns (action, target) or None.
+    Everything else goes to qwen14b to route itself via [USE:xxx].
+    """
+    t = text.lower().strip()
+    for cap, patterns in _START_PATTERNS.items():
+        if any(p in t for p in patterns):
+            return ("start", cap)
+    for cap, patterns in _STOP_PATTERNS.items():
+        if any(p in t for p in patterns):
+            return ("stop", cap)
+    return None
+
+
 # ─────────────────────────────────────────────
 # GPU CHECK
 # ─────────────────────────────────────────────
@@ -389,7 +405,7 @@ def _strip_markdown(text: str) -> str:
     return text.strip()
 
 
-def stream_response_and_speak(system_prompt: str, memory: list, emotion: str = "neutral", text_mode: bool = False, model: str = None) -> str:
+def stream_response_and_speak(system_prompt: str, memory: list, emotion: str = "neutral", text_mode: bool = False, model: str = None) -> tuple:
     messages = [{"role": "system", "content": system_prompt}]
     for entry in memory[-10:]:
         role = "user" if entry["role"] == "user" else "assistant"
@@ -399,6 +415,14 @@ def stream_response_and_speak(system_prompt: str, memory: list, emotion: str = "
     full_response  = []
     token_buffer   = []
     tts_done       = threading.Event()
+
+    # ── Route detection ──
+    # qwen14b may emit [USE:intent] as its very first line.
+    # We buffer until we see \n or 80 chars, then check.
+    _route_buffer     = []
+    _route_resolved   = False
+    _detected_route   = ""
+    _ROUTE_WINDOW     = 80   # chars before giving up on route detection
 
     def _is_sentence_end(text: str) -> bool:
         """
@@ -505,7 +529,7 @@ def stream_response_and_speak(system_prompt: str, memory: list, emotion: str = "
     if response is None:
         sentence_queue.put(None)
         tts_done.wait()
-        return ""
+        return "", ""
 
     # In text mode: print "Hayeong: " once, then stream tokens inline.
     # In voice mode: print each sentence chunk on its own line for TTS sync.
@@ -522,7 +546,53 @@ def stream_response_and_speak(system_prompt: str, memory: list, emotion: str = "
 
         token = chunk.get("message", {}).get("content", "")
         if not token:
+            if chunk.get("done", False) and not _route_resolved:
+                # Stream ended before we resolved — flush whatever we buffered
+                _route_resolved = True
+                _buf = "".join(_route_buffer)
+                _tag_match = re.match(r'^\[USE:([a-z_:]+)\]\s*\n?', _buf.strip())
+                if _tag_match:
+                    _detected_route = _tag_match.group(1)
+                    _buf = _buf[_tag_match.end():].lstrip("\n")
+                if _buf.strip():
+                    full_response.append(_buf)
+                    token_buffer.append(_buf)
             continue
+
+        # ── Route detection: peek at the very first line only ──
+        # Buffer tokens until we see a newline or hit _ROUTE_WINDOW chars.
+        # Once resolved, fall through to normal processing immediately.
+        if not _route_resolved:
+            _route_buffer.append(token)
+            _buf = "".join(_route_buffer)
+            if "\n" in _buf or len(_buf) >= _ROUTE_WINDOW:
+                # We have enough to decide
+                _route_resolved = True
+                _tag_match = re.match(r'^\[USE:([a-z_:]+)\]\s*\n?', _buf.strip())
+                if _tag_match:
+                    _detected_route = _tag_match.group(1)
+                    _buf = _buf[_tag_match.end():].lstrip("\n")
+                # Flush the buffer into normal processing right now
+                token = _buf  # treat buffered content as the current token
+                if not token.strip():
+                    if chunk.get("done", False):
+                        break
+                    continue
+            else:
+                # Haven't seen enough yet — keep buffering, don't print anything
+                if chunk.get("done", False):
+                    # Stream ended — flush whatever we have
+                    _route_resolved = True
+                    _buf = "".join(_route_buffer)
+                    _tag_match = re.match(r'^\[USE:([a-z_:]+)\]\s*\n?', _buf.strip())
+                    if _tag_match:
+                        _detected_route = _tag_match.group(1)
+                        _buf = _buf[_tag_match.end():].lstrip("\n")
+                    if _buf.strip():
+                        full_response.append(_buf)
+                        token_buffer.append(_buf)
+                    break
+                continue
 
         full_response.append(token)
         token_buffer.append(token)
@@ -557,7 +627,8 @@ def stream_response_and_speak(system_prompt: str, memory: list, emotion: str = "
 
     sentence_queue.put(None)
     tts_done.wait(timeout=120)
-    return _strip_markdown("".join(full_response).strip())
+    clean_response = _strip_markdown("".join(full_response).strip())
+    return clean_response, _detected_route
 
 # ─────────────────────────────────────────────
 # MOOD / BEHAVIORAL STATE
@@ -718,7 +789,6 @@ def main(text_mode: bool = False):
     check_first_time_setup()
 
     # ── STEP 4: Load everything ──
-    detector = ContextRouter()
     router   = ModelRouter()
     memory     = load_memory()
     mood_state = load_mood()
@@ -832,17 +902,17 @@ def main(text_mode: bool = False):
             break
 
         
-        # ── UNIFIED INTENT ROUTING ──
-        # Context-aware — passes recent memory so the router understands
-        # what's actually happening in the conversation, not just keywords.
-        intent = detector.route(user_input, memory[-4:])
+        # ── FAST-PATH: subprocess capability commands ──
+        # "open discord", "start minecraft" etc. — so clear they don't need LLM routing.
+        # Everything else falls through to qwen14b which routes itself via [USE:xxx] tags.
+        _fast_cap = _fast_capability_intent(user_input)
 
         # ── Log user input ──
         if LOGGER_AVAILABLE:
             logger.log_conversation(
                 role="james",
                 content=user_input,
-                intent=intent.get("intent") if intent else None
+                intent=_fast_cap[1] if _fast_cap else None
             )
  
         # ── Rest command — "take a rest", "go rest", "recharge" ──
@@ -873,13 +943,12 @@ def main(text_mode: bool = False):
             continue
 
         # ── Capability: start/stop a subprocess ──
-        if intent["intent"] == "capability" and intent["action"] and intent["target"]:
-            cap    = intent["target"]
-            action = intent["action"]
+        if _fast_cap:
+            action, cap = _fast_cap
             response_text = CAPABILITY_RESPONSES.get((action, cap), f"{action}ing {cap}.")
             print(f"\nHayeong: {response_text}")
             _speak(response_text, emotion="neutral")
- 
+
             if action == "start":
                 result = procs.start(cap)
                 if procs.is_running(cap):
@@ -888,202 +957,20 @@ def main(text_mode: bool = False):
             else:
                 result = procs.stop(cap)
                 print(f"   [{result}]")
- 
+
             memory.append({"role": "user", "content": user_input})
             memory.append({"role": "AI",   "content": response_text})
             save_memory(memory)
             print()
             continue
  
-        # ── Task commands ──
-        if intent["intent"] == "task" and tasks:
-            task_action = intent["action"]
- 
-            if task_action == "show":
-                resp = tasks.format_list()
-                print(f"\nHayeong:\n{resp}")
-                _speak("Here's what's on my list.", emotion="neutral")
- 
-            elif task_action == "show_completed":
-                resp = tasks.format_list(state="completed")
-                print(f"\nHayeong:\n{resp}")
-                _speak("Here's what I've finished.", emotion="neutral")
- 
-            elif task_action == "show_blocked":
-                resp = tasks.format_list(state="blocked")
-                print(f"\nHayeong:\n{resp}")
-                _speak("Here's what's blocked.", emotion="neutral")
- 
-            elif task_action == "add":
-                # Strip the command portion so only the task description remains
-                raw = re.sub(
-                    r'(?i)(add a task|add task|remember to|i need to|put on the list)[:\s]*',
-                    '', user_input
-                ).strip() or user_input
-                kwargs   = parse_task_from_text(raw, origin="james")
-                new_task = tasks.add_task(**kwargs)
-                resp     = f"Added to backlog: {new_task['title']}"
-                print(f"\nHayeong: {resp}")
-                _speak(resp, emotion="neutral")
- 
-            else:
-                # Unrecognised task sub-action — let LLM handle it naturally
-                resp = None
- 
-            if resp is not None:
-                memory.append({"role": "user", "content": user_input})
-                memory.append({"role": "AI",   "content": resp})
-                save_memory(memory)
-                print()
-                continue
- 
-        # ── Email commands ──
-        if intent["intent"] == "email" and email:
-            email_action = intent["action"]
- 
-            if email_action == "send_summary":
-                task_sum  = tasks.summary() if tasks else None
-                proc_stat = procs.status()
-                ok   = hayeong_email.send_daily_summary(
-                    task_summary=task_sum, process_status=proc_stat
-                )
-                resp = "Sent you a summary." if ok else "Couldn't send — check email config."
- 
-            elif email_action == "check_inbox":
-                messages_inbox = hayeong_email.check_inbox(unread_only=True)
-                if messages_inbox:
-                    resp = f"{len(messages_inbox)} new message{'s' if len(messages_inbox) != 1 else ''}."
-                    for m in messages_inbox[:3]:
-                        print(f"  From: {m['from']}")
-                        print(f"  Subject: {m['subject']}")
-                        print(f"  {m['body'][:150]}\n")
-                else:
-                    resp = "Nothing new."
- 
-            else:  # notify — default email action
-                msg_text = re.sub(
-                    r'(?i)(email me|send me a message|notify me|send me a note|ping me)[:\s]*',
-                    '', user_input
-                ).strip() or "Hello from Hayeong!"
-                ok   = hayeong_email.notify(msg_text)
-                resp = "Done, sent." if ok else "Couldn't send — check email config."
- 
-            print(f"\nHayeong: {resp}")
-            _speak(resp, emotion="neutral")
-            memory.append({"role": "user", "content": user_input})
-            memory.append({"role": "AI",   "content": resp})
-            save_memory(memory)
-            print()
-            continue
+        # ── Task / email / image / search are now handled POST-stream ──
+        # qwen14b signals intent via [USE:xxx] in her response.
+        # Dispatching happens below after stream_response_and_speak returns.
 
-        # ── Image generation ──
-        if intent["intent"] == "image_generation" and COMFYUI_AVAILABLE:
-            u = user_input.lower()
-            if any(x in u for x in ["realistic", "make it real", "real photo", "turn this into"]):
-                _speak("Which image should I make realistic?", emotion="neutral")
-                image_path = input("Image path: ").strip()
-                result = comfyui.make_realistic(image_path)
-            elif any(x in u for x in ["screen", "on my screen"]):
-                _speak("Let me look at your screen.", emotion="neutral")
-                result = comfyui.generate_from_screen(user_input)
-            elif any(x in u for x in ["this image", "this photo", "reference"]):
-                _speak("Which image should I use as a reference?", emotion="neutral")
-                image_path = input("Image path: ").strip()
-                result = comfyui.generate_from_image(image_path, user_input)
-            else:
-                _speak("On it, let me generate that.", emotion="neutral")
-                result = comfyui.generate(user_input)
-
-            if result["success"]:
-                resp = f"Done! Saved to {result['image_path']}"
-                if LOGGER_AVAILABLE:
-                    logger.log_image_generation(
-                        prompt=result.get("prompt_used", ""),
-                        output_path=result.get("image_path"),
-                        model="ponyDiffusionV6XL",
-                        outcome="success"
-                    )
-                    logger.log_capability_used("comfyui", action="generate", outcome="success")
-            else:
-                resp = result.get("message", "Something went wrong with image generation.")
-                if LOGGER_AVAILABLE:
-                    logger.log_capability_used("comfyui", action="generate", outcome="failed",
-                                               error=result.get("message"))
-
-            print(f"\nHayeong: {resp}")
-            _speak(resp, emotion="neutral")
-            memory.append({"role": "user", "content": user_input})
-            memory.append({"role": "AI",   "content": resp})
-            save_memory(memory)
-            print()
-            continue
-
-        # ── Goal / progress report trigger ──
-        if LOGGER_AVAILABLE and any(p in user_input.lower() for p in [
-            "goal", "progress report", "workstation", "how much have we saved",
-            "how are we doing", "weekly report"
-        ]):
-            goal = logger.goal_status()
-            resp = (
-                f"We've saved ${goal['earned']:.2f} of ${goal['target']:.2f} — "
-                f"{goal['percent']:.1f}% of the workstation goal. "
-                f"${goal['remaining']:.2f} to go."
-            )
-            # Feed data to memory so Hayeong can respond naturally and add her own thoughts
-            memory.append({"role": "user", "content": user_input})
-            memory.append({"role": "AI",   "content": resp})
-            save_memory(memory)
-            # Don't continue — fall through to LLM so she can elaborate naturally
-
-        # ── Web search ──
-        # Acknowledge immediately, run search in parallel, synthesize when done.
-        _web_context = ""
-        if intent["intent"] == "web_search" and SEARCH_AVAILABLE:
-            import threading
-            _is_news = any(kw in user_input.lower() for kw in ["news", "latest", "current"])
-
-            # Step 1 — acknowledge instantly so James isn't staring at silence
-            _speak("Let me look that up.", emotion="neutral")
-            print("   [searching...]")
-
-            # Step 2 — extract query with conversation context + run search
-            query = WebSearch.extract_query(user_input, recent_memory=memory[-6:])
-            if _is_news:
-                data = {"query": query, "results": searcher.news(query, max_results=5), "full_text": {}}
-            else:
-                data = searcher.search_and_read(query, max_results=4, fetch_top=1)
-
-            _web_context = searcher.format_for_context(query, data)
-            n_results = len(data.get("results", []))
-            if n_results > 0:
-                print(f"   [found {n_results} results — synthesizing]")
-            else:
-                print(f"   [no results — falling back to training knowledge]")
-
-            if LOGGER_AVAILABLE:
-                logger.log_capability_used(
-                    "web_search", action="search", outcome="success",
-                    details={"query": query, "results": n_results}
-                )
-
-        # ── Vision ──
-        # Acknowledge immediately, capture + analyze, then synthesize.
+        # ── web_search context — populated after stream if [USE:web_search] detected ──
+        _web_context    = ""
         _vision_context = ""
-        if intent["intent"] == "vision" and VISION_AVAILABLE:
-            u = user_input.lower()
-            if any(x in u for x in ["image", "photo", "file", "this image", "this photo"]):
-                _speak("Which image should I look at?", emotion="neutral")
-                image_path = input("Image path: ").strip()
-                _speak("Got it, analyzing now.", emotion="neutral")
-                _vision_context = vision.look_at_image(image_path, user_input)
-            elif any(x in u for x in ["deep", "detail", "explain", "what's in", "code"]):
-                _speak("Let me take a closer look.", emotion="neutral")
-                _vision_context = vision.look_at_screen_deep(user_input)
-            else:
-                _speak("Let me take a look.", emotion="neutral")
-                _vision_context = vision.look_at_screen(user_input)
-            if LOGGER_AVAILABLE:
-                logger.log_capability_used("vision", action="analyze", outcome="success")
 
         # ── Approve / Deny self-generated capability ──
         if smm:
@@ -1209,7 +1096,7 @@ def main(text_mode: bool = False):
 
         show_thinking()
 
-        ai_response = stream_response_and_speak(
+        ai_response, _route = stream_response_and_speak(
             system_prompt, memory,
             emotion=current_emotion,
             text_mode=text_mode,
@@ -1218,6 +1105,119 @@ def main(text_mode: bool = False):
 
         if not ai_response:
             continue
+
+        # ── POST-STREAM CAPABILITY DISPATCH ──
+        # qwen14b signalled what she needs via [USE:xxx] in her response.
+        # Handle it now that she's finished talking.
+        if _route:
+            print(f"   [routing: {_route}]")
+
+            # ── Image generation (async — runs in background) ──
+            if _route == "image_generation" and COMFYUI_AVAILABLE:
+                u = user_input.lower()
+                def _gen_image():
+                    if any(x in u for x in ["realistic", "make it real", "real photo"]):
+                        _speak("Which image should I make realistic?", emotion="neutral")
+                        image_path = input("Image path: ").strip()
+                        result = comfyui.make_realistic(image_path)
+                    elif any(x in u for x in ["screen", "on my screen"]):
+                        result = comfyui.generate_from_screen(user_input)
+                    elif any(x in u for x in ["this image", "this photo", "reference"]):
+                        _speak("Which image should I use as reference?", emotion="neutral")
+                        image_path = input("Image path: ").strip()
+                        result = comfyui.generate_from_image(image_path, user_input)
+                    else:
+                        result = comfyui.generate(user_input)
+                    if result["success"]:
+                        print(f"\n✅ Image ready: {result['image_path']}")
+                        if LOGGER_AVAILABLE:
+                            logger.log_image_generation(
+                                prompt=result.get("prompt_used", ""),
+                                output_path=result.get("image_path"),
+                                model="ponyDiffusionV6XL", outcome="success"
+                            )
+                    else:
+                        print(f"\n⚠️  Image generation failed: {result.get('message')}")
+                        if LOGGER_AVAILABLE:
+                            logger.log_capability_used("comfyui", action="generate",
+                                                        outcome="failed", error=result.get("message"))
+                threading.Thread(target=_gen_image, daemon=True).start()
+
+            # ── Web search (sync — she needs the data to answer well) ──
+            elif _route == "web_search" and SEARCH_AVAILABLE:
+                print("   [searching...]")
+                _is_news = any(kw in user_input.lower() for kw in ["news", "latest", "current"])
+                query = WebSearch.extract_query(user_input, recent_memory=memory[-6:])
+                if _is_news:
+                    data = {"query": query, "results": searcher.news(query, max_results=5), "full_text": {}}
+                else:
+                    data = searcher.search_and_read(query, max_results=4, fetch_top=1)
+                _web_context = searcher.format_for_context(query, data)
+                n_results = len(data.get("results", []))
+                print(f"   [found {n_results} results — synthesizing]")
+                if LOGGER_AVAILABLE:
+                    logger.log_capability_used("web_search", action="search", outcome="success",
+                                                details={"query": query, "results": n_results})
+                # Inject results and re-call so she can actually answer with the data
+                _search_system = _web_context + "\n\n" + system_prompt
+                memory.append({"role": "AI", "content": ai_response})
+                memory.append({"role": "user", "content": f"[Search results retrieved. Summarize the answer for: {user_input}]"})
+                ai_response, _ = stream_response_and_speak(
+                    _search_system, memory,
+                    emotion=current_emotion, text_mode=text_mode, model=selected_model
+                )
+                memory.pop()  # Remove the injected search trigger
+
+            # ── Vision (sync — needs screenshot before responding) ──
+            elif _route == "vision" and VISION_AVAILABLE:
+                u = user_input.lower()
+                if any(x in u for x in ["image", "photo", "file", "this image"]):
+                    _speak("Which image should I look at?", emotion="neutral")
+                    image_path = input("Image path: ").strip()
+                    _vision_context = vision.look_at_image(image_path, user_input)
+                elif any(x in u for x in ["deep", "detail", "explain"]):
+                    _vision_context = vision.look_at_screen_deep(user_input)
+                else:
+                    _vision_context = vision.look_at_screen(user_input)
+                if LOGGER_AVAILABLE:
+                    logger.log_capability_used("vision", action="analyze", outcome="success")
+                _vision_system = _vision_context + "\n\n" + system_prompt
+                memory.append({"role": "AI", "content": ai_response})
+                memory.append({"role": "user", "content": f"[Screen/image analyzed. Now describe what you see in response to: {user_input}]"})
+                ai_response, _ = stream_response_and_speak(
+                    _vision_system, memory,
+                    emotion=current_emotion, text_mode=text_mode, model=selected_model
+                )
+                memory.pop()
+
+            # ── Email (sync) ──
+            elif _route.startswith("email") and email:
+                action = _route.split(":")[-1] if ":" in _route else "notify"
+                if action == "check":
+                    messages_inbox = hayeong_email.check_inbox(unread_only=True)
+                    if messages_inbox:
+                        for m in messages_inbox[:3]:
+                            print(f"  From: {m['from']} | {m['subject']}")
+                            print(f"  {m['body'][:150]}\n")
+                    if LOGGER_AVAILABLE:
+                        logger.log_capability_used("email", action="check_inbox", outcome="success")
+                elif action == "send":
+                    task_sum = tasks.summary() if tasks else None
+                    hayeong_email.send_daily_summary(task_summary=task_sum, process_status=procs.status())
+                    if LOGGER_AVAILABLE:
+                        logger.log_capability_used("email", action="send_summary", outcome="success")
+
+            # ── Task (sync) ──
+            elif _route.startswith("task") and tasks:
+                action = _route.split(":")[-1] if ":" in _route else "show"
+                if action == "add":
+                    raw = re.sub(r'(?i)(add a task|add task|remember to|i need to)[:\s]*', '', user_input).strip() or user_input
+                    kwargs = parse_task_from_text(raw, origin="james")
+                    tasks.add_task(**kwargs)
+                else:
+                    print(f"\n{tasks.format_list()}")
+                if LOGGER_AVAILABLE:
+                    logger.log_capability_used("task", action=action, outcome="success")
 
         if LOGGER_AVAILABLE:
             logger.log_conversation(

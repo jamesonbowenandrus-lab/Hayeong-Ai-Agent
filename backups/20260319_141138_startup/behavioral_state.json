@@ -9,7 +9,7 @@
       "secondary_emotions": [],
       "active_thoughts": [],
       "something_unresolved": null,
-      "last_updated": "2026-03-17T16:10:03.050882"
+      "last_updated": "2026-03-18T21:10:07.588802"
     },
     "emotion_vocabulary": {
       "description": "The emotional states Hayeong can hold internally. Not a simple mood bar — combinations are common.",
@@ -56,7 +56,7 @@
   "filter_layer": {
     "description": "Given her interior state, who she's with, what the situation is, and what's being discussed — how much surfaces and in what form?",
     "active_context": {
-      "who": "stranger",
+      "who": "james_close_friends",
       "situation": "casual",
       "topic_weight": "light",
       "social_role": "companion",

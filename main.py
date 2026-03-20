@@ -546,23 +546,53 @@ def stream_response_and_speak(system_prompt: str, memory: list, emotion: str = "
 
         token = chunk.get("message", {}).get("content", "")
         if not token:
+            if chunk.get("done", False) and not _route_resolved:
+                # Stream ended before we resolved — flush whatever we buffered
+                _route_resolved = True
+                _buf = "".join(_route_buffer)
+                _tag_match = re.match(r'^\[USE:([a-z_:]+)\]\s*\n?', _buf.strip())
+                if _tag_match:
+                    _detected_route = _tag_match.group(1)
+                    _buf = _buf[_tag_match.end():].lstrip("\n")
+                if _buf.strip():
+                    full_response.append(_buf)
+                    token_buffer.append(_buf)
             continue
 
-        # ── Route detection: buffer first line, check for [USE:xxx] tag ──
+        # ── Route detection: peek at the very first line only ──
+        # Buffer tokens until we see a newline or hit _ROUTE_WINDOW chars.
+        # Once resolved, fall through to normal processing immediately.
         if not _route_resolved:
             _route_buffer.append(token)
             _buf = "".join(_route_buffer)
             if "\n" in _buf or len(_buf) >= _ROUTE_WINDOW:
+                # We have enough to decide
                 _route_resolved = True
                 _tag_match = re.match(r'^\[USE:([a-z_:]+)\]\s*\n?', _buf.strip())
                 if _tag_match:
                     _detected_route = _tag_match.group(1)
                     _buf = _buf[_tag_match.end():].lstrip("\n")
-                # Feed remaining buffer into normal processing as one chunk
-                if _buf.strip():
-                    full_response.append(_buf)
-                    token_buffer.append(_buf)
-            continue  # Don't process until route is resolved
+                # Flush the buffer into normal processing right now
+                token = _buf  # treat buffered content as the current token
+                if not token.strip():
+                    if chunk.get("done", False):
+                        break
+                    continue
+            else:
+                # Haven't seen enough yet — keep buffering, don't print anything
+                if chunk.get("done", False):
+                    # Stream ended — flush whatever we have
+                    _route_resolved = True
+                    _buf = "".join(_route_buffer)
+                    _tag_match = re.match(r'^\[USE:([a-z_:]+)\]\s*\n?', _buf.strip())
+                    if _tag_match:
+                        _detected_route = _tag_match.group(1)
+                        _buf = _buf[_tag_match.end():].lstrip("\n")
+                    if _buf.strip():
+                        full_response.append(_buf)
+                        token_buffer.append(_buf)
+                    break
+                continue
 
         full_response.append(token)
         token_buffer.append(token)
