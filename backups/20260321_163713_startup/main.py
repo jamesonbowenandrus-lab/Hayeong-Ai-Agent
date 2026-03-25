@@ -396,14 +396,7 @@ def _strip_markdown(text: str) -> str:
     return text.strip()
 
 
-def stream_response_and_speak(system_prompt: str, memory: list, emotion: str = "neutral", text_mode: bool = False, model: str = None) -> tuple:
-    """
-    Streams the LLM response, speaks it via TTS, and returns (response_text, use_tag).
-
-    use_tag is extracted from the first line if it matches [USE:xxx].
-    That line is stripped from the spoken/printed output so James never hears it.
-    If no tag is present, use_tag is None and everything behaves as before.
-    """
+def stream_response_and_speak(system_prompt: str, memory: list, emotion: str = "neutral", text_mode: bool = False, model: str = None) -> str:
     messages = [{"role": "system", "content": system_prompt}]
     for entry in memory[-10:]:
         role = "user" if entry["role"] == "user" else "assistant"
@@ -413,13 +406,6 @@ def stream_response_and_speak(system_prompt: str, memory: list, emotion: str = "
     full_response  = []
     token_buffer   = []
     tts_done       = threading.Event()
-
-    # ── USE tag detection state ──
-    # Buffer tokens until we've seen the first newline, then decide
-    # whether the first line is a [USE:xxx] capability tag or normal text.
-    _use_tag            = None
-    _first_line_done    = False
-    _first_line_buf     = []
 
     def _is_sentence_end(text: str) -> bool:
         """
@@ -545,31 +531,6 @@ def stream_response_and_speak(system_prompt: str, memory: list, emotion: str = "
         if not token:
             continue
 
-        # ── First-line USE tag interception ──
-        # Buffer tokens until we see the first newline. If the first line
-        # is a [USE:xxx] tag, capture it and don't speak or print it.
-        # Once the first line is resolved, resume normal token flow.
-        if not _first_line_done:
-            _first_line_buf.append(token)
-            joined = "".join(_first_line_buf)
-            if "\n" in joined:
-                _first_line_done = True
-                first_line, remainder = joined.split("\n", 1)
-                first_line = first_line.strip()
-                if first_line.startswith("[USE:") and first_line.endswith("]"):
-                    _use_tag = first_line[5:-1]   # e.g. "web_search", "email:check"
-                    print(f"   [USE tag detected: {_use_tag}]")
-                    # Don't add the tag line to the response — only the remainder
-                    if remainder:
-                        full_response.append(remainder)
-                        token_buffer.append(remainder)
-                else:
-                    # Not a tag — flush everything buffered into normal flow
-                    full_response.extend(_first_line_buf)
-                    token_buffer.extend(_first_line_buf)
-                _first_line_buf = []
-            continue   # keep buffering until first line is resolved
-
         full_response.append(token)
         token_buffer.append(token)
 
@@ -603,13 +564,7 @@ def stream_response_and_speak(system_prompt: str, memory: list, emotion: str = "
 
     sentence_queue.put(None)
     tts_done.wait(timeout=120)
-
-    # If the first-line buffer was never flushed (very short response with no newline),
-    # treat it as normal text — no tag present.
-    if not _first_line_done and _first_line_buf:
-        full_response.extend(_first_line_buf)
-
-    return _strip_markdown("".join(full_response).strip()), _use_tag
+    return _strip_markdown("".join(full_response).strip())
 
 # ─────────────────────────────────────────────
 # MOOD / BEHAVIORAL STATE
@@ -1398,157 +1353,15 @@ def main(text_mode: bool = False):
 
         show_thinking()
 
-        ai_response, use_tag = stream_response_and_speak(
+        ai_response = stream_response_and_speak(
             system_prompt, memory,
             emotion=current_emotion,
             text_mode=text_mode,
             model=selected_model,
         )
 
-        if not ai_response and not use_tag:
+        if not ai_response:
             continue
-
-        # ── USE tag dispatch ──
-        # If the LLM signalled a capability via [USE:xxx], execute it now.
-        # Results are injected into context so she can synthesize naturally
-        # on the next turn (or immediately for fast operations like tasks/email).
-        if use_tag:
-            tag = use_tag.lower()
-
-            # Web search — run search, inject results, let her respond next turn
-            if tag == "web_search" and SEARCH_AVAILABLE:
-                _is_news = any(kw in user_input.lower() for kw in ["news", "latest", "current"])
-                query    = WebSearch.extract_query(user_input, recent_memory=memory[-6:])
-                print(f"   [web_search via USE tag: {query}]")
-                if _is_news:
-                    data = {"query": query, "results": searcher.news(query, max_results=5), "full_text": {}}
-                else:
-                    data = searcher.search_and_read(query, max_results=4, fetch_top=1)
-                n = len(data.get("results", []))
-                print(f"   [found {n} results]")
-                _web_context = searcher.format_for_context(query, data) if n > 0 else ""
-                if _web_context:
-                    # Inject results and ask her to synthesize
-                    memory.append({"role": "user",  "content": user_input})
-                    memory.append({"role": "AI",    "content": ai_response})
-                    system_prompt_with_results = _web_context + "\n\n" + system_prompt
-                    ai_response, _ = stream_response_and_speak(
-                        system_prompt_with_results, memory,
-                        emotion=current_emotion, text_mode=text_mode, model=selected_model,
-                    )
-
-            # Vision — look at screen or image
-            elif tag == "vision" and VISION_AVAILABLE:
-                u = user_input.lower()
-                if any(x in u for x in ["image", "photo", "file"]):
-                    _speak("Which image should I look at?", emotion="neutral")
-                    image_path = input("Image path: ").strip()
-                    _vision_context = vision.look_at_image(image_path, user_input)
-                elif any(x in u for x in ["deep", "detail", "explain", "what's in", "code"]):
-                    _vision_context = vision.look_at_screen_deep(user_input)
-                else:
-                    _vision_context = vision.look_at_screen(user_input)
-                if _vision_context:
-                    memory.append({"role": "user", "content": user_input})
-                    memory.append({"role": "AI",   "content": ai_response})
-                    system_prompt_with_vision = _vision_context + "\n\n" + system_prompt
-                    ai_response, _ = stream_response_and_speak(
-                        system_prompt_with_vision, memory,
-                        emotion=current_emotion, text_mode=text_mode, model=selected_model,
-                    )
-
-            # Image generation
-            elif tag == "image_generation" and COMFYUI_AVAILABLE:
-                u = user_input.lower()
-                if any(x in u for x in ["realistic", "make it real", "real photo"]):
-                    _speak("Which image should I make realistic?", emotion="neutral")
-                    image_path = input("Image path: ").strip()
-                    result = comfyui.make_realistic(image_path)
-                elif any(x in u for x in ["screen", "on my screen"]):
-                    result = comfyui.generate_from_screen(user_input)
-                elif any(x in u for x in ["this image", "this photo", "reference"]):
-                    _speak("Which image should I use as a reference?", emotion="neutral")
-                    image_path = input("Image path: ").strip()
-                    result = comfyui.generate_from_image(image_path, user_input)
-                else:
-                    result = comfyui.generate(user_input)
-                if not result.get("success"):
-                    ai_response = result.get("message", "Something went wrong with image generation.")
-
-            # Email actions — email:check, email:send, email:summary
-            elif tag.startswith("email:") and email:
-                email_action = tag.split(":", 1)[1]
-                if email_action in ("check", "check_inbox"):
-                    if email_monitor:
-                        unsurfaced = email_monitor.get_unsurfaced_important()
-                        recent     = email_monitor.get_recent(5)
-                        if unsurfaced:
-                            resp = f"{len(unsurfaced)} important email(s) you haven't seen."
-                        elif recent:
-                            resp = f"Nothing urgent. Last was from {recent[0].get('from','').split('<')[0].strip()}."
-                        else:
-                            resp = "Inbox looks quiet."
-                    else:
-                        msgs = hayeong_email.check_inbox(unread_only=True)
-                        resp = f"{len(msgs)} new message{'s' if len(msgs)!=1 else ''}." if msgs else "Nothing new."
-                    print(f"\nHayeong: {resp}")
-                    _speak(resp, emotion="neutral")
-                    ai_response = resp
-
-                elif email_action in ("send", "notify"):
-                    msg_text = re.sub(
-                        r'(?i)(email me|send me a message|notify me|ping me)[:\s]*', '', user_input
-                    ).strip() or "Hello from Hayeong!"
-                    ok   = hayeong_email.notify(msg_text)
-                    resp = "Done, sent." if ok else "Couldn't send — check email config."
-                    print(f"\nHayeong: {resp}")
-                    _speak(resp, emotion="neutral")
-                    ai_response = resp
-
-                elif email_action == "summary":
-                    task_sum  = tasks.summary() if tasks else None
-                    proc_stat = procs.status()
-                    ok   = hayeong_email.send_daily_summary(task_summary=task_sum, process_status=proc_stat)
-                    resp = "Sent you a summary." if ok else "Couldn't send — check email config."
-                    print(f"\nHayeong: {resp}")
-                    _speak(resp, emotion="neutral")
-                    ai_response = resp
-
-            # Task actions — task:show, task:add, task:completed
-            elif tag.startswith("task:") and tasks:
-                task_action = tag.split(":", 1)[1]
-                if task_action == "show":
-                    resp = tasks.format_list()
-                    print(f"\nHayeong:\n{resp}")
-                    _speak("Here's what's on my list.", emotion="neutral")
-                    ai_response = resp
-                elif task_action == "add":
-                    raw    = re.sub(r'(?i)(add a task|add task|remember to|i need to|put on the list)[:\s]*', '', user_input).strip() or user_input
-                    kwargs = parse_task_from_text(raw, origin="james") if TASKS_AVAILABLE else {"title": raw}
-                    new_task = tasks.add_task(**kwargs)
-                    resp     = f"Added: {new_task['title']}"
-                    print(f"\nHayeong: {resp}")
-                    _speak(resp, emotion="neutral")
-                    ai_response = resp
-                elif task_action == "completed":
-                    resp = tasks.format_list(state="completed")
-                    print(f"\nHayeong:\n{resp}")
-                    _speak("Here's what I've finished.", emotion="neutral")
-                    ai_response = resp
-
-            # Capability start/stop via USE tag (fallback for ambiguous commands)
-            elif tag.startswith("capability:"):
-                parts = tag.split(":")
-                if len(parts) == 3:
-                    _, cap_action, cap_target = parts
-                    response_text = CAPABILITY_RESPONSES.get((cap_action, cap_target), f"{cap_action}ing {cap_target}.")
-                    if cap_action == "start":
-                        result = procs.start(cap_target)
-                        if procs.is_running(cap_target):
-                            procs.monitor_and_restart(cap_target)
-                    else:
-                        result = procs.stop(cap_target)
-                    print(f"   [{result}]")
 
         if LOGGER_AVAILABLE:
             logger.log_conversation(

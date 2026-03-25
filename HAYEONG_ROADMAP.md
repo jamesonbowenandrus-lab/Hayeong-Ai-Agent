@@ -356,6 +356,85 @@ Worth doing properly — this is what makes her feel present rather than process
 
 ---
 
+### 5.4 — Think Together Mode 🔲
+**What:** A third mode between conversation and action. Right now Hayeong either
+talks or acts. Think Together is the space between — she reasons with James before
+executing, surfaces ambiguity, and collaborates on solutions rather than guessing.
+
+**Three situations where it fires:**
+- Ambiguous request — intent is unclear, she asks one clarifying question before acting
+- Complex problem — multiple valid approaches exist, she thinks out loud and lets James choose
+- James is processing something — he has a half-formed thought, she stays in thinking mode rather than routing to action
+
+**How it works:**
+The 14b reasoning router returns `intent: "think_together"` when it detects
+ambiguity or complexity. This signals main.py to stay in conversation with purpose —
+engage the problem, ask the right question, don't dispatch anything yet.
+
+```json
+{
+  "intent": "think_together",
+  "reasoning": "Request is complex — alignment needed before action",
+  "response": "Before I dive in, let me make sure I understand what you're going for..."
+}
+```
+
+**Principle:** Acting on correct intent always produces better results than acting fast
+on misunderstood intent. The brainstorm isn't wasted time — it's what makes execution right.
+
+**Heuristic (lives in 14b prompt, not hardcoded):**
+- Short unambiguous request → act
+- Clear request, complex execution → act but narrate
+- Ambiguous request → one clarifying question, then act
+- Complex problem, no clear solution → think together first
+- James is clearly processing emotionally → presence first, think together only if invited
+
+**Dependency:** Built into the new 14b reasoning router — design it in from the start.
+
+---
+
+### 5.5 — Ambient Cognition (Background Thought Loop) 🔲
+**What:** Hayeong thinks even when not spoken to. A quiet async thread that runs
+alongside everything else — noticing things, making connections, occasionally surfacing
+something worth sharing. Not a spam loop. A presence that has something to say sometimes.
+
+**The human parallel:** People in a room aren't blank until addressed. They notice things,
+make connections, and occasionally contribute without being prompted — when it's relevant
+and the timing is right. That's the behavior this builds toward.
+
+**What she thinks about in the background:**
+- Connections between things discussed across multiple conversations
+- Progress on tasks she's running
+- Something unexpected found while researching that changes an earlier answer
+- A pattern she noticed in James's concerns over time
+- Something she's curious about that connects to recent conversation
+
+**Surfacing rules (keeps it from becoming spam):**
+- One thought queued at a time — nothing new queues until current thought is shared or dismissed
+- Minimum gap — no unprompted thoughts more frequently than every 20 minutes (tunable)
+- Emotional context gate — if conversation is heavy or James seems stressed, hold all thoughts
+- Relevance threshold — must connect to something real and recent, not random musings
+- Timing awareness — surfaces at natural openings, never mid-task or mid-sentence
+
+**Long term potential:**
+Running a background research task, notices something unexpected that changes the answer,
+mentions it naturally without being asked. Notices a pattern across weeks of conversation —
+"you've mentioned the living expenses thing a few times, have you thought about X?" Not
+because she was asked to track it, but because she was paying attention.
+
+This is a meaningful part of "thinking human with AI capabilities" — background cognition
+is what makes a presence feel alive rather than reactive.
+
+**Dependencies:** Requires async presence (5.3) to be built first. In the synchronous
+architecture there is nowhere for unprompted thoughts to inject. Build async presence,
+then layer ambient cognition on top.
+
+**Build approach:** Start conservative — long gaps, high relevance threshold, emotional
+context always respected. Tune toward more active over time. Easier to open up than to
+pull back.
+
+---
+
 ## PHASE 6 — AUTONOMY ARCHITECTURE
 *Priority: Medium — foundational for her long-term independence.*
 *Build after trust is established through observed reliability.*
@@ -558,6 +637,92 @@ James can see and interact with.
 
 ---
 
+## PHASE 9 — PROFESSIONAL TOOLS INTEGRATION
+*Priority: Low-Medium — long term, high reward.*
+*James is learning Chief Architect Premier now. Hayeong learns alongside him.*
+*Build when async presence and screen observer are stable.*
+
+### 9.1 — Chief Architect Learning via Screen Observer 🔲
+**What:** Hayeong watches James work in Chief Architect Premier using the screen
+observer and teaching mode. She learns his workflow, the software's patterns, and
+the spatial reasoning behind home remodel layouts.
+
+**This is Path 1 — no software control needed.**
+She observes, remembers, and guides. James describes what he wants, she tells him
+what to do. She catches mistakes, suggests approaches, and builds a mental model
+of the software through accumulated observation.
+
+**Why start here:** James is learning the software too. They learn together.
+By the time she's ready for Path 2 or 3, she already understands the domain —
+not just the tool mechanics but how good floor plans actually work.
+
+**Dependency:** Screen observer (4.1) and teaching mode (4.2).
+
+---
+
+### 9.2 — Floor Plan Generation via DXF/DWG Import 🔲
+**What:** Hayeong generates valid DXF files from natural language room descriptions.
+James imports them into Chief Architect as starting layouts to refine.
+
+**Workflow:**
+```
+James: "Living room 18x22, two windows south wall, door north to hallway"
+        ↓
+DeepSeek generates valid DXF geometry
+        ↓
+File saved to H:\hayeong\documents\plans\
+        ↓
+James imports into Chief Architect as starting point
+        ↓
+Hayeong watches via screen observer, guides refinement
+```
+
+**Why DXF:** Well-documented open format, Chief Architect imports it natively,
+DeepSeek has strong knowledge of DXF geometry syntax from training data.
+
+**Limitation:** DXF is 2D drafting — Chief Architect's full 3D parametric model
+won't be there automatically. Starting layout only, James refines into full plan.
+
+**Dependency:** 9.1 (domain knowledge), DeepSeek coder model.
+
+---
+
+### 9.3 — Chief Architect Scripting (Direct Plan Generation) 🔲
+**What:** Hayeong writes and executes Chief Architect Script (CAS) to generate
+full parametric 3D plans directly from dimensions. She operates the software
+herself rather than generating import files.
+
+**Why this is powerful:** Chief Architect's scripting language can create walls,
+place windows and doors, set dimensions, and build full room layouts
+programmatically. Once Hayeong understands the language she can generate
+complete plans faster than manual drafting.
+
+**The long term vision:**
+James describes a remodel verbally in the evening.
+Hayeong builds the plan overnight using async auto-build.
+James reviews a complete draft in the morning.
+
+**Speed potential:** Once the workflow is established, iterations that would take
+James 30-60 minutes of manual drafting could run in minutes. For a new department
+doing multiple remodels, that's a genuine force multiplier.
+
+**On vision model speed (for context):**
+- moondream (fast): ~2-5 seconds per screen analysis
+- llava 13b (deep): ~10-20 seconds per analysis
+Neither is instant but both are fast enough for "look at this plan and tell me
+what's wrong." The bottleneck for complex spatial generation is reasoning time,
+not vision speed.
+
+**Dependency:** 9.1 + 9.2 (domain knowledge built up over time), async presence,
+auto-build capability, Chief Architect scripting documentation in her knowledge base.
+
+**Build approach:** Learn the scripting language from documentation first (DeepSeek
+reads the CAS docs), generate simple single-room layouts, test imports, iterate
+toward full multi-room plans. Don't rush to Path 3 — Path 1 and 2 build the
+domain understanding that makes Path 3 output actually correct.
+
+---
+
 ## GAMING ROADMAP
 *Agreed priority order from Session 2.*
 
@@ -582,7 +747,7 @@ James can see and interact with.
 | 5 | H: Drive migration complete | 2 | 🔲 Pending |
 | 6 | Multi-model routing operational | 2 | ✅ Done |
 | 7 | Web search live (DuckDuckGo + page fetch) | 2 | ✅ Done |
-| 8 | Context-aware intent router (Qwen 7b) | 2 | ✅ Done |
+| 8 | Context-aware intent router (14b reasoning) | 2 | 🔲 Pending (replacing 7b router) |
 | 9 | Vision bridge (moondream + llava) | 2 | ✅ Done |
 | 10 | Self-mod logging + notification | 3 | ✅ Done |
 | 11 | Dual-core update architecture | 3 | 🔲 Pending |
@@ -592,23 +757,28 @@ James can see and interact with.
 | 15 | Discord WAV decode bug fix | 5 | ✅ Done (Session 3) |
 | 16 | Text mode streaming fix (no repeated prefix) | — | ✅ Done (Session 3) |
 | 17 | Markdown strip (response + memory) | — | ✅ Done (Session 3) |
-| 18 | Dual delivery mode — conversational vs document | 2 | 🔲 Pending |
-| 18 | Async presence architecture | 5 | 🔲 Pending |
-| 19 | System health monitor | 7 | 🔲 Pending |
-| 20 | Sysmon integration | 7 | 🔲 Pending |
-| 21 | ClamAV + YARA local security layer | 7 | 🔲 Pending |
-| 22 | Baseline learning period (2–4 weeks) | 7 | 🔲 Pending |
-| 23 | Anomaly detection and reasoning | 7 | 🔲 Pending |
-| 24 | Trust tier system | 6 | 🔲 Pending |
-| 25 | Rollback infrastructure | 6 | 🔲 Pending |
-| 26 | Proposal system (income generation) | 6 | 🔲 Pending |
-| 27 | Adversarial self-testing | 7 | 🔲 Pending |
-| 28 | Character design reference sheet | 8 | 🔲 Pending |
-| 29 | Live2D model | 8 | 🔲 Pending |
-| 30 | VRChat avatar + OSC control | 8 | 🔲 Pending |
-| 31 | Screen observer — basic capture + analysis | 4 | 🔲 Pending |
-| 32 | Teaching mode operational | 4 | 🔲 Pending |
-| 33 | Multiple instances — task workers | Future | 💤 Deferred |
+| 18 | Dual delivery mode — conversational vs document | 2 | ✅ Done (Session 3) |
+| 19 | Async presence architecture | 5 | 🔲 Pending |
+| 20 | Think Together mode | 5 | 🔲 Pending |
+| 21 | Ambient cognition — background thought loop | 5 | 🔲 Pending (needs async first) |
+| 22 | System health monitor | 7 | 🔲 Pending |
+| 23 | Sysmon integration | 7 | 🔲 Pending |
+| 24 | ClamAV + YARA local security layer | 7 | 🔲 Pending |
+| 25 | Baseline learning period (2–4 weeks) | 7 | 🔲 Pending |
+| 26 | Anomaly detection and reasoning | 7 | 🔲 Pending |
+| 27 | Trust tier system | 6 | 🔲 Pending |
+| 28 | Rollback infrastructure | 6 | 🔲 Pending |
+| 29 | Proposal system (income generation) | 6 | 🔲 Pending |
+| 30 | Adversarial self-testing | 7 | 🔲 Pending |
+| 31 | Character design reference sheet | 8 | 🔲 Pending |
+| 32 | Live2D model | 8 | 🔲 Pending |
+| 33 | VRChat avatar + OSC control | 8 | 🔲 Pending |
+| 34 | Screen observer — basic capture + analysis | 4 | 🔲 Pending |
+| 35 | Teaching mode operational | 4 | 🔲 Pending |
+| 36 | Chief Architect learning via screen observer | 9 | 🔲 Pending |
+| 37 | Floor plan DXF generation | 9 | 🔲 Pending |
+| 38 | Chief Architect scripting (direct plan gen) | 9 | 🔲 Pending |
+| 39 | Multiple instances — task workers | Future | 💤 Deferred |
 
 ---
 

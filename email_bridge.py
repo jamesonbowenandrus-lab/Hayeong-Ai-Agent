@@ -90,8 +90,37 @@ class EmailBridge:
                 "   Generate an App Password at:\n"
                 "   Google Account → Security → 2-Step Verification → App Passwords"
             )
+            return
         if not JAMES_EMAIL:
             print("⚠️  [EmailBridge] JAMES_EMAIL not set in .env — sending disabled")
+
+        # ── Verify App Password still works on startup ──
+        # If 2FA was disabled on the Google account, the App Password becomes
+        # invalid and email silently breaks. Catch this immediately at startup
+        # rather than discovering it when a send fails.
+        try:
+            mail = imaplib.IMAP4_SSL(GMAIL_IMAP_HOST, GMAIL_IMAP_PORT)
+            mail.login(HAYEONG_EMAIL, EMAIL_PASSWORD)
+            mail.logout()
+            print("✅ [EmailBridge] Auth verified — App Password working")
+        except imaplib.IMAP4.error as e:
+            err = str(e).lower()
+            if "application-specific password required" in err or "invalid credentials" in err:
+                print(
+                    "\n🔴 [EmailBridge] AUTHENTICATION FAILED — App Password invalid.\n"
+                    "   This usually means 2-Step Verification was disabled on the Google account.\n"
+                    "   To fix:\n"
+                    "   1. Go to myaccount.google.com for hayeong.agent@gmail.com\n"
+                    "   2. Security → enable 2-Step Verification\n"
+                    "   3. Security → App Passwords → create new password named 'Hayeong'\n"
+                    "   4. Update HAYEONG_EMAIL_PASSWORD in .env with the new password\n"
+                    "   Email will not work until this is resolved.\n"
+                )
+            else:
+                print(f"⚠️  [EmailBridge] Auth check failed: {e}")
+        except Exception as e:
+            # Network issue etc — don't block startup, just warn
+            print(f"⚠️  [EmailBridge] Could not verify auth at startup: {e}")
 
     # ─────────────────────────────────────────
     # SEND — plain text

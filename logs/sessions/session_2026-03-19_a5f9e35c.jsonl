@@ -1,13 +1,3 @@
-{"type": "session_start", "session_id": "8f0087af", "timestamp": "2026-03-19T14:11:38.192797", "date": "2026-03-19"}
-{"type": "conversation", "session_id": "8f0087af", "timestamp": "2026-03-19T14:28:30.520157", "role": "james", "content": "hi hayeong", "intent": null, "mood": null, "model_used": null}
-{"type": "conversation", "session_id": "8f0087af", "timestamp": "2026-03-19T14:29:11.987064", "role": "james", "content": "sorry i hit enter to fast", "intent": null, "mood": null, "model_used": null}
-{"type": "conversation", "session_id": "8f0087af", "timestamp": "2026-03-19T14:29:38.940827", "role": "james", "content": "Hayeong are you there?", "intent": null, "mood": null, "model_used": null}
-{"type": "conversation", "session_id": "8f0087af", "timestamp": "2026-03-19T14:32:57.269391", "role": "james", "content": "hayeong are you ok ?", "intent": null, "mood": null, "model_used": null}
-{"type": "session_end", "session_id": "8f0087af", "timestamp": "2026-03-19T14:33:47.396122", "started": "2026-03-19T14:11:38.192797", "summary": ""}
-{"type": "session_start", "session_id": "22665bb2", "timestamp": "2026-03-19T14:34:26.835720", "date": "2026-03-19"}
-{"type": "conversation", "session_id": "22665bb2", "timestamp": "2026-03-19T14:34:42.642485", "role": "james", "content": "Hayeong are you ok?", "intent": null, "mood": null, "model_used": null}
-{"type": "conversation", "session_id": "22665bb2", "timestamp": "2026-03-19T14:34:46.835381", "role": "hayeong", "content": "I’m here, James. Just been quiet. How are you doing?", "intent": null, "mood": "amused", "model_used": "qwen2.5:14b"}
-{"type": "session_end", "session_id": "22665bb2", "timestamp": "2026-03-19T15:08:03.240854", "started": "2026-03-19T14:34:26.835720", "summary": ""}
 {"type": "session_start", "session_id": "a5f9e35c", "timestamp": "2026-03-19T20:22:51.924259", "date": "2026-03-19"}
 {"type": "conversation", "session_id": "a5f9e35c", "timestamp": "2026-03-19T20:23:12.974928", "role": "james", "content": "hey hayeong, are you still there?", "intent": null, "mood": null, "model_used": null}
 {"type": "conversation", "session_id": "a5f9e35c", "timestamp": "2026-03-19T20:23:29.609388", "role": "hayeong", "content": "Yeah, I’m here. Just been quiet, thinking. How about you?", "intent": null, "mood": "amused", "model_used": "qwen2.5:14b"}
@@ -26,7 +16,3 @@
 {"type": "conversation", "session_id": "a5f9e35c", "timestamp": "2026-03-19T20:43:34.544186", "role": "james", "content": "ok hayeong thank that was great. let me think about it for now ok.", "intent": null, "mood": null, "model_used": null}
 {"type": "conversation", "session_id": "a5f9e35c", "timestamp": "2026-03-19T20:43:49.914108", "role": "hayeong", "content": "No problem, take your time. If you need anything else or just want to chat, I'm here.", "intent": null, "mood": "amused", "model_used": "qwen2.5:14b"}
 {"type": "session_end", "session_id": "a5f9e35c", "timestamp": "2026-03-19T20:45:43.992751", "started": "2026-03-19T20:22:51.924259", "summary": ""}
-{"type": "session_start", "session_id": "050af443", "timestamp": "2026-03-19T22:00:16.043453", "date": "2026-03-19"}
-{"type": "session_end", "session_id": "050af443", "timestamp": "2026-03-19T22:08:33.706026", "started": "2026-03-19T22:00:16.043453", "summary": ""}
-{"type": "session_start", "session_id": "66cba540", "timestamp": "2026-03-19T22:15:31.285567", "date": "2026-03-19"}
-{"type": "session_end", "session_id": "66cba540", "timestamp": "2026-03-19T22:16:56.120469", "started": "2026-03-19T22:15:31.285567", "summary": ""}
