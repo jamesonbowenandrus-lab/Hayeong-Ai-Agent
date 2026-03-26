@@ -1,6 +1,6 @@
 {
-  "current": 4.9,
-  "last_updated": "2026-03-21T16:58:12.547860",
+  "current": 4.3000000000000025,
+  "last_updated": "2026-03-26T14:07:31.285018",
   "last_rest": "2026-03-21T16:47:07.268675",
   "session_started": "2026-03-09T20:33:47.066820",
   "log": [
@@ -651,6 +651,54 @@
       "reason": "turn_tick (casual/light)",
       "before": 5.0,
       "after": 4.9
+    },
+    {
+      "ts": "2026-03-25T22:42:17.003596",
+      "op": "cost",
+      "amount": 0.1,
+      "reason": "turn_tick (casual/light)",
+      "before": 4.9,
+      "after": 4.8
+    },
+    {
+      "ts": "2026-03-25T23:06:53.530380",
+      "op": "cost",
+      "amount": 0.1,
+      "reason": "turn_tick (casual/light)",
+      "before": 4.8,
+      "after": 4.7
+    },
+    {
+      "ts": "2026-03-25T23:09:35.411967",
+      "op": "cost",
+      "amount": 0.1,
+      "reason": "turn_tick (casual/light)",
+      "before": 4.7,
+      "after": 4.6
+    },
+    {
+      "ts": "2026-03-25T23:16:44.396678",
+      "op": "cost",
+      "amount": 0.1,
+      "reason": "turn_tick (casual/light)",
+      "before": 4.6,
+      "after": 4.5
+    },
+    {
+      "ts": "2026-03-26T14:05:15.965383",
+      "op": "cost",
+      "amount": 0.1,
+      "reason": "turn_tick (casual/light)",
+      "before": 4.5,
+      "after": 4.4
+    },
+    {
+      "ts": "2026-03-26T14:06:11.196659",
+      "op": "cost",
+      "amount": 0.1,
+      "reason": "turn_tick (casual/light)",
+      "before": 4.4,
+      "after": 4.3
     }
   ]
 }

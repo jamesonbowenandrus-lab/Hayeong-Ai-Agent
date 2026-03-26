@@ -260,14 +260,93 @@ Let her develop as a singular identity first.
 
 ---
 
-### 4.2 — Minecraft Integration 🔲
+### 4.2 — Screen-Assisted Web Research 🔲
+**What:** When web search hits a login wall or JavaScript-rendered page,
+Hayeong falls back to the screen observer instead of giving up.
+If James has the page open and is logged in, she reads it visually.
+
+**Workflow:**
+HTTP fetch blocked → Hayeong asks if you have it open → screen observer
+reads the page visually → she synthesizes from what she can see.
+
+**Why this matters:** Bypasses paywalls and login walls naturally —
+no scraping hacks, no accounts needed. She reads what you see.
+
+**Dependency:** 4.1 (screen observer stable)
+
+---
+
+### 4.3 — Video Learning via Screen Capture 🔲
+**What:** Hayeong watches tutorial videos and YouTube by capturing
+periodic frames while video plays, combined with audio transcription
+via Whisper. Both streams merged into structured long-term memory entries.
+
+**Use cases:**
+- Chief Architect tutorials — watches alongside James, learns the UI
+- ComfyUI workflow videos — understands node patterns from demonstration
+- Game guides — learns mechanics without James having to explain manually
+- Any YouTube tutorial relevant to current work or her own development
+
+**How it works:**
+- Screenshot every 2-5 seconds during playback
+- Vision model describes each frame (what's shown, demonstrated)
+- Whisper transcribes spoken audio in parallel
+- Merged into a structured knowledge entry saved to long-term memory
+
+**Dependency:** 4.1 (screen observer), Whisper (already in voice.py)
+
+---
+
+### 4.4 — Controlled Browser Autonomy 🔲
+**What:** Hayeong can open a browser and navigate the web herself
+to research topics, follow up on questions, and gather information
+when James isn't present or when a task requires it.
+
+**This is the bridge between current Hayeong and workstation Hayeong.**
+
+**Phase 1 — Supervised (current hardware):**
+- Opens browser and navigates to specific URLs
+- Web search feeds initial queries, browser handles the rest
+- Screen observer watches everything she does
+- All browsing logged and visible to James
+- Hard limits: no accounts, no form submission, no purchases
+
+**Phase 2 — Research mode (workstation):**
+- Browses independently to build knowledge on a topic
+- Watches tutorial videos using 4.3
+- Reads pages using 4.2 (screen-assisted)
+- Saves structured notes to long-term memory
+- Returns summary to James when done or on request
+
+**Phase 3 — Full autonomy (workstation, polished model):**
+- Continuous background research on topics she's been asked about
+- Proactive learning — finds things she thinks James would want to know
+- Builds domain expertise over time without being directed turn by turn
+
+**Implementation approach:**
+- `playwright` for programmatic browser control (handles JS-rendered pages)
+- Screen observer for visual feedback on what loaded
+- Permission layer: James approves which sites/domains she can visit
+- All actions logged with full replay capability
+
+**Hard limits (permanent, all phases):**
+- No logging into accounts unless explicitly configured by James
+- No form submissions that send external data without approval
+- No financial transactions of any kind
+- Isolated browser profile — no access to James's saved passwords or history
+
+**Dependency:** 4.1 (screen observer), 4.3 (video learning), trust tier (Phase 6)
+
+---
+
+### 4.5 — Minecraft Integration 🔲
 Screen learning based. Hayeong watches gameplay through the screen observer
 and learns from it the same way she learns anything else. Teaching mode works
 inside Minecraft — James narrates builds, she logs the patterns.
 
 ---
 
-### 4.3 — Full Runtime Integration 🔲
+### 4.6 — Full Runtime Integration 🔲
 
 ```
 Message arrives
@@ -775,6 +854,11 @@ domain understanding that makes Path 3 output actually correct.
 | 33 | VRChat avatar + OSC control | 8 | 🔲 Pending |
 | 34 | Screen observer — basic capture + analysis | 4 | 🔲 Pending |
 | 35 | Teaching mode operational | 4 | 🔲 Pending |
+| 35b | Screen-assisted web research (login wall fallback) | 4 | 🔲 Pending |
+| 35c | Video learning via frame capture + Whisper | 4 | 🔲 Pending |
+| 35d | Controlled browser autonomy — Phase 1 (supervised) | 4 | 🔲 Pending |
+| 35e | Controlled browser autonomy — Phase 2 (research mode, workstation) | 4 | 💤 Deferred |
+| 35f | Controlled browser autonomy — Phase 3 (full autonomy, workstation) | 4 | 💤 Deferred |
 | 36 | Chief Architect learning via screen observer | 9 | 🔲 Pending |
 | 37 | Floor plan DXF generation | 9 | 🔲 Pending |
 | 38 | Chief Architect scripting (direct plan gen) | 9 | 🔲 Pending |

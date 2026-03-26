@@ -107,3 +107,14 @@
 [2026-03-21 16:51:25] LLM extracted query [qwen2.5:7b]: 'latest news once huamn' (from: 'hey hayeong, how are you doing? I was wondering if you could')
 [2026-03-21 16:51:25] News search: 'latest news once huamn'
 [2026-03-21 16:51:25] Found 5 news results for 'latest news once huamn'
+[2026-03-25 22:27:21] WebSearch ready.
+[2026-03-25 22:58:13] WebSearch ready.
+[2026-03-25 23:16:05] LLM extracted query [qwen2.5:7b]: 'whale pup zapmander Once Human comparison' (from: 'I was wondering if you could help me with a task. Im trying ')
+[2026-03-25 23:16:05] Searching: 'whale pup zapmander Once Human comparison'
+[2026-03-25 23:16:06] Found 6 results for 'whale pup zapmander Once Human comparison'
+[2026-03-25 23:16:06] Fetching: https://www.youtube.com/watch?v=SJiT5Z6wjUs
+[2026-03-25 23:16:07] Fetched 251 chars from https://www.youtube.com/watch?v=SJiT5Z6wjUs
+[2026-03-25 23:16:07] Fetching: https://game8.co/games/Once-Human/archives/Deviants
+[2026-03-25 23:16:08] Fetched 4000 chars from https://game8.co/games/Once-Human/archives/Deviants
+[2026-03-25 23:16:08] Document saved: H:\hayeong\documents\whale_pup_zapmander_Once_Human_comparison_20260325_2316.md
+[2026-03-26 14:02:02] WebSearch ready.

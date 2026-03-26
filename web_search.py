@@ -396,51 +396,241 @@ class WebSearch:
 
         return "\n".join(lines)
 
-    def format_as_document(self, query: str, data: dict, topic: str = "") -> str:
+    def assess_content_quality(self, query: str, data: dict) -> dict:
         """
-        Format search results as a clean markdown document for saving or emailing.
-        This is for document delivery mode — structured, scannable, complete.
-        Unlike format_for_context(), this is the actual output James will read,
-        not a prompt injection for Hayeong to synthesize.
+        Assess whether the fetched search data is actually useful for the query.
+
+        Returns:
+        {
+            "has_useful_data": bool,
+            "confidence": "high" | "medium" | "low" | "none",
+            "usable_sources": int,   # sources with real content
+            "total_content_chars": int,
+            "issues": [str],         # list of problems found
+            "recommendation": str    # what to do next
+        }
+        """
+        results   = data.get("results",   [])
+        pages     = data.get("full_text", {})
+        issues    = []
+
+        # Count sources that have real content
+        usable = 0
+        total_chars = 0
+
+        # Login wall / paywall patterns that indicate blocked content
+        block_phrases = [
+            "create your free account", "sign in to continue", "subscribe to read",
+            "create an account", "log in to access", "members only",
+            "create your account today", "free member", "premium article",
+            "please enable javascript", "javascript is required",
+        ]
+
+        for r in results:
+            url     = r.get("url", "")
+            snippet = r.get("snippet", "").strip()
+
+            if url in pages:
+                page_text = pages[url].lower()
+                total_chars += len(pages[url])
+
+                # Check if it's a login wall
+                block_count = sum(1 for p in block_phrases if p in page_text)
+                if block_count >= 2:
+                    issues.append(f"Login wall detected: {url[:60]}")
+                elif len(pages[url]) < 200:
+                    issues.append(f"Nearly empty page: {url[:60]}")
+                else:
+                    usable += 1
+            elif snippet and len(snippet) > 80:
+                # Snippet only — counts as partial
+                usable += 0.5
+                total_chars += len(snippet)
+
+        # Also check if query terms appear in the content
+        query_words = [w.lower() for w in query.split() if len(w) > 3]
+        content_blob = " ".join(
+            pages.get(r["url"], r.get("snippet", "")).lower()
+            for r in results
+        )
+        matched_terms = sum(1 for w in query_words if w in content_blob)
+        term_coverage = matched_terms / max(len(query_words), 1)
+
+        if term_coverage < 0.3:
+            issues.append(f"Low topic relevance — only {matched_terms}/{len(query_words)} query terms found in content")
+
+        # Determine overall confidence
+        if usable >= 2 and term_coverage >= 0.5 and total_chars >= 1000:
+            confidence = "high"
+            has_useful = True
+            recommendation = "proceed"
+        elif usable >= 1 and term_coverage >= 0.3 and total_chars >= 400:
+            confidence = "medium"
+            has_useful = True
+            recommendation = "proceed_with_caveats"
+        elif total_chars >= 200:
+            confidence = "low"
+            has_useful = False
+            recommendation = "try_alternate_queries"
+        else:
+            confidence = "none"
+            has_useful = False
+            recommendation = "no_data"
+
+        return {
+            "has_useful_data":      has_useful,
+            "confidence":           confidence,
+            "usable_sources":       int(usable),
+            "total_content_chars":  total_chars,
+            "issues":               issues,
+            "recommendation":       recommendation,
+        }
+
+    def format_as_document(self, query: str, data: dict, topic: str = "",
+                           model: str = "qwen2.5:14b") -> str:
+        """
+        Generate a proper synthesized research document using the LLM.
+
+        Unlike the old version which just dumped raw source text, this:
+        1. Assesses whether the fetched data is actually useful
+        2. If yes — asks the LLM to write a real report FROM the sources
+        3. If no  — honestly states what was found and what's missing,
+                    includes the sources for James to check manually
+
+        The result is a document James can actually read and use —
+        not a source dump.
         """
         from datetime import datetime
-        results  = data.get("results",   [])
-        pages    = data.get("full_text", {})
-        date_str = datetime.now().strftime("%Y-%m-%d")
+        date_str = datetime.now().strftime("%Y-%m-%d %H:%M")
         title    = topic or query
 
-        lines = [
+        # ── Step 1: Quality check ──
+        quality = self.assess_content_quality(query, data)
+        results = data.get("results", [])
+        pages   = data.get("full_text", {})
+
+        header = [
             f"# {title}",
             f"*Research compiled by Hayeong — {date_str}*",
+            f"*Data confidence: {quality['confidence'].upper()} "
+            f"({quality['usable_sources']} usable source(s) found)*",
             "",
             "---",
             "",
         ]
 
+        # ── Step 2: If data is too thin — honest report ──
+        if not quality["has_useful_data"]:
+            lines = header + [
+                "## Research Status: Insufficient Data",
+                "",
+                "I searched for this topic but didn't find enough usable content "
+                "to write a proper comparison. Here's what I ran into:",
+                "",
+            ]
+            for issue in quality["issues"]:
+                lines.append(f"- {issue}")
+            lines += [
+                "",
+                "### What I did find (raw sources for your review):",
+                "",
+            ]
+            for r in results:
+                lines.append(f"- [{r.get('title','(no title)')}]({r.get('url','')})")
+                snip = r.get("snippet", "").strip()
+                if snip:
+                    lines.append(f"  > {snip[:200]}")
+            lines += [
+                "",
+                "---",
+                "",
+                "### Suggested next steps:",
+                "",
+                "- Try searching Reddit (reddit.com) for community comparisons",
+                f"- Search: `{query} reddit`",
+                f"- Search: `{query} wiki`",
+                "- The official game wiki or fandom site may have better data",
+            ]
+            return "\n".join(lines)
+
+        # ── Step 3: Good data — ask LLM to write the real report ──
+        # Build a raw data block for the LLM to work from
+        raw_data_lines = []
         for i, r in enumerate(results, 1):
-            t_title   = r.get("title",   "").strip()
-            url       = r.get("url",     "").strip()
-            snippet   = r.get("snippet", "").strip()
-            source    = r.get("source",  "")
-            date      = r.get("date",    "")
-
-            lines.append(f"## {i}. {t_title}")
-            if source or date:
-                meta = " | ".join(x for x in [source, date] if x)
-                lines.append(f"*{meta}*")
-            lines.append(f"**Source:** {url}")
-            lines.append("")
-
+            url     = r.get("url",     "")
+            title_r = r.get("title",   "")
+            snippet = r.get("snippet", "")
+            raw_data_lines.append(f"\n[Source {i}] {title_r}\nURL: {url}")
             if url in pages:
-                lines.append(pages[url][:2000])
+                raw_data_lines.append(f"Content:\n{pages[url][:2500]}")
             elif snippet:
-                lines.append(snippet)
+                raw_data_lines.append(f"Snippet: {snippet[:400]}")
 
-            lines.append("")
-            lines.append("---")
-            lines.append("")
+        raw_data = "\n".join(raw_data_lines)
 
-        return "\n".join(lines)
+        synthesis_prompt = f"""You are Hayeong, writing a research document for James.
+
+Topic: {title}
+Original request: {query}
+
+Here is the raw source data you gathered from the web:
+
+{raw_data}
+
+---
+
+Write a proper research report that James can actually use. The report should:
+1. Summarize what each subject is (e.g. if comparing two game items, explain what each one is)
+2. Compare them directly — similarities, differences, strengths, weaknesses
+3. Give a clear recommendation based on the data (which is better, for what purpose, and why)
+4. Be honest about what the sources did and did not cover
+5. If the data is incomplete on any point, say so clearly rather than guessing
+
+Format as clean markdown with proper headers.
+Do NOT list sources one by one. Synthesize the information.
+Write as yourself — direct, clear, Hayeong's voice.
+If you genuinely cannot make a recommendation from this data, say so and explain what information would be needed."""
+
+        try:
+            resp = requests.post(
+                OLLAMA_URL,
+                json={
+                    "model":   model,
+                    "messages": [{"role": "user", "content": synthesis_prompt}],
+                    "stream":  False,
+                    "options": {"temperature": 0.3},
+                },
+                timeout=120,
+            )
+            synthesized = resp.json()["message"]["content"].strip()
+            _log(f"Document synthesized by {model} — {len(synthesized)} chars")
+        except Exception as e:
+            _log(f"LLM synthesis failed: {e} — falling back to raw format")
+            # Fallback: at least give usable snippets
+            synthesized = "LLM synthesis failed. Raw source data below.\n\n"
+            for r in results:
+                synthesized += f"### {r.get('title','')}\n{r.get('snippet','')}\n\n"
+
+        # ── Step 4: Assemble final document ──
+        source_refs = "\n".join(
+            f"- [{r.get('title','(no title)')}]({r.get('url','')})"
+            for r in results
+        )
+
+        footer = [
+            "",
+            "---",
+            "",
+            "## Sources",
+            "",
+            source_refs,
+            "",
+            f"*Generated by Hayeong — {date_str}*",
+            f"*Confidence: {quality['confidence'].upper()} | "
+            f"Usable sources: {quality['usable_sources']}*",
+        ]
+
+        return "\n".join(header) + synthesized + "\n".join(footer)
 
     def save_document(self, content: str, topic: str, save_dir: str = None) -> str:
         """
@@ -657,4 +847,4 @@ if __name__ == "__main__":
     ]
     for t in test_inputs:
         cleaned = WebSearch.clean_query(t)
-        print(f"  '{t}'\n    → '{cleaned}'")
+        print(f"  '{t}'\n    → '{cleaned}'") 

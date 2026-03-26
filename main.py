@@ -546,29 +546,46 @@ def stream_response_and_speak(system_prompt: str, memory: list, emotion: str = "
             continue
 
         # ── First-line USE tag interception ──
-        # Buffer tokens until we see the first newline. If the first line
-        # is a [USE:xxx] tag, capture it and don't speak or print it.
-        # Once the first line is resolved, resume normal token flow.
+        # [USE:xxx] tags are short (~15-40 chars) and always on the first line.
+        # Buffer only long enough to confirm — never hold the whole response.
+        #
+        # Release conditions:
+        #   1. Newline seen → check if first line is a tag, flush accordingly
+        #   2. Buffer > 60 chars → clearly not a tag, release immediately
+        #   3. Doesn't start with "[" after 5 chars → not a tag, release now
         if not _first_line_done:
             _first_line_buf.append(token)
             joined = "".join(_first_line_buf)
-            if "\n" in joined:
+
+            has_newline     = "\n" in joined
+            clearly_not_tag = (
+                len(joined) > 60 or
+                (len(joined) > 5 and not joined.lstrip().startswith("["))
+            )
+
+            if has_newline or clearly_not_tag:
                 _first_line_done = True
-                first_line, remainder = joined.split("\n", 1)
-                first_line = first_line.strip()
-                if first_line.startswith("[USE:") and first_line.endswith("]"):
-                    _use_tag = first_line[5:-1]   # e.g. "web_search", "email:check"
-                    print(f"   [USE tag detected: {_use_tag}]")
-                    # Don't add the tag line to the response — only the remainder
-                    if remainder:
-                        full_response.append(remainder)
-                        token_buffer.append(remainder)
+
+                if has_newline:
+                    first_line, remainder = joined.split("\n", 1)
+                    first_line = first_line.strip()
+                    if first_line.startswith("[USE:") and first_line.endswith("]"):
+                        _use_tag = first_line[5:-1]
+                        print(f"   [USE tag detected: {_use_tag}]")
+                        if remainder.strip():
+                            full_response.append(remainder)
+                            token_buffer.append(remainder)
+                    else:
+                        full_response.extend(_first_line_buf)
+                        token_buffer.extend(_first_line_buf)
                 else:
-                    # Not a tag — flush everything buffered into normal flow
+                    # No newline but clearly not a tag — release immediately
                     full_response.extend(_first_line_buf)
                     token_buffer.extend(_first_line_buf)
+
                 _first_line_buf = []
-            continue   # keep buffering until first line is resolved
+            else:
+                continue  # still within tag-check window, keep buffering
 
         full_response.append(token)
         token_buffer.append(token)

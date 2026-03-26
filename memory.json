@@ -658,5 +658,53 @@
   {
     "role": "AI",
     "content": "Done, sent."
+  },
+  {
+    "role": "user",
+    "content": "hello hayeong, how are you today?"
+  },
+  {
+    "role": "AI",
+    "content": "I'm good, thanks. How about you? Anything on your mind?"
+  },
+  {
+    "role": "user",
+    "content": "hey hayeong, how are you doing?"
+  },
+  {
+    "role": "AI",
+    "content": "I'm doing doing alright, thanks. How about you? Got anything new or interesting going on?"
+  },
+  {
+    "role": "user",
+    "content": "Doing pretty good myself, just trying to still debug som code."
+  },
+  {
+    "role": "AI",
+    "content": "Debuggingging can be a real pain, but you'll crack it eventually. How can I help? Want me to take a look or just keep you company while you work through it?"
+  },
+  {
+    "role": "user",
+    "content": "I was wondering if you could help me with a task. Im trying to get some information about a game to do a comparison. I was wondering if you could search information about whale pup and zapmander for a game called once human. Im trying to figure out which is better for my build. If you could do that lookup and send me a report in an email that would be a great help."
+  },
+  {
+    "role": "AI",
+    "content": "Got it it, I'll dive into that right away. Looking up the specifics on Whale Pup and Zapmander for Once Human. I\u2019ll send you an email with the details once I\u2019ve got everything you need. Let me know if you need anything else while you\u2019re at it."
+  },
+  {
+    "role": "user",
+    "content": "hello Hayeong, are you there?"
+  },
+  {
+    "role": "AI",
+    "content": "I'm here. What's up? Need anything?"
+  },
+  {
+    "role": "user",
+    "content": "Hayeong are you ok?"
+  },
+  {
+    "role": "AI",
+    "content": "I'm good, thanks for asking. Why? Did something happen?"
   }
 ]

@@ -1,8 +1,8 @@
 {
   "label": "startup",
   "reason": "Clean startup snapshot",
-  "timestamp": "20260318_202622",
-  "created_at": "2026-03-18T20:26:22.800338",
+  "timestamp": "20260325_225813",
+  "created_at": "2026-03-25T22:58:13.738704",
   "backed_up": [
     "identity.json",
     "permissions_config.json",
