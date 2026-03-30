@@ -118,3 +118,140 @@
 [2026-03-25 23:16:08] Fetched 4000 chars from https://game8.co/games/Once-Human/archives/Deviants
 [2026-03-25 23:16:08] Document saved: H:\hayeong\documents\whale_pup_zapmander_Once_Human_comparison_20260325_2316.md
 [2026-03-26 14:02:02] WebSearch ready.
+[2026-03-26 14:14:04] WebSearch ready.
+[2026-03-28 02:33:40] WebSearch ready.
+[2026-03-28 03:06:35] WebSearch ready.
+[2026-03-28 17:55:33] WebSearch ready.
+[2026-03-28 23:21:37] WebSearch ready.
+[2026-03-28 23:27:00] Searching: 'whale pup vs zapmander deviant Once Human pros and cons'
+[2026-03-28 23:27:04] Found 6 results for 'whale pup vs zapmander deviant Once Human pros and cons'
+[2026-03-28 23:27:04] Fetching: https://www.youtube.com/watch?v=rmxrrv9fP2Y
+[2026-03-28 23:27:05] Fetched 254 chars from https://www.youtube.com/watch?v=rmxrrv9fP2Y
+[2026-03-28 23:27:05] Fetching: https://game8.co/games/Once-Human/archives/561716
+[2026-03-28 23:27:05] Fetch error (https://game8.co/games/Once-Human/archives/561716): HTTPSConnectionPool(host='game8.co', port=443): Max retries exceeded with url: /games/Once-Human/archives/561716 (Caused by NameResolutionError("HTTPSConnection(host='game8.co', port=443): Failed to resolve 'game8.co' ([Errno 11002] getaddrinfo failed)"))
+[2026-03-28 23:27:05] Skipping https://game8.co/games/Once-Human/archives/561716 (empty or blocked), trying next result
+[2026-03-28 23:27:05] Fetching: https://www.lucidpuzzle.com/once-human-deviant-tier-list/
+[2026-03-28 23:27:06] Fetched 4000 chars from https://www.lucidpuzzle.com/once-human-deviant-tier-list/
+[2026-03-28 23:27:39] Document synthesized by qwen2.5:14b — 3994 chars
+[2026-03-28 23:27:39] Document saved: H:\hayeong\documents\whale_pup_vs_zapmander_deviant_Once_Human_pros_and_20260328_2327.md
+[2026-03-28 23:30:10] Searching: 'Whale Pup vs Zapmander deviant Once Human pros and cons'
+[2026-03-28 23:30:11] Found 6 results for 'Whale Pup vs Zapmander deviant Once Human pros and cons'
+[2026-03-28 23:30:11] Fetching: https://game8.co/games/Once-Human/archives/566263
+[2026-03-28 23:30:11] Fetch error (https://game8.co/games/Once-Human/archives/566263): HTTPSConnectionPool(host='game8.co', port=443): Max retries exceeded with url: /games/Once-Human/archives/566263 (Caused by NameResolutionError("HTTPSConnection(host='game8.co', port=443): Failed to resolve 'game8.co' ([Errno 11002] getaddrinfo failed)"))
+[2026-03-28 23:30:11] Skipping https://game8.co/games/Once-Human/archives/566263 (empty or blocked), trying next result
+[2026-03-28 23:30:11] Fetching: https://www.youtube.com/watch?v=_NdgVEAptYU
+[2026-03-28 23:30:12] Fetched 257 chars from https://www.youtube.com/watch?v=_NdgVEAptYU
+[2026-03-28 23:30:12] Fetching: https://www.gamewitted.com/gaming/all-deviants-in-once-human-locations-abilities-more
+[2026-03-28 23:30:13] Fetched 10 chars from https://www.gamewitted.com/gaming/all-deviants-in-once-human-locations-abilities-more
+[2026-03-28 23:30:43] Document synthesized by qwen2.5:14b — 3331 chars
+[2026-03-28 23:30:43] Document saved: H:\hayeong\documents\Whale_Pup_vs_Zapmander_deviant_Once_Human_pros_and_20260328_2330.md
+[2026-03-28 23:54:50] Searching: 'shadow hippowdon and shadow swampert pvp master league raids worth powering up'
+[2026-03-28 23:54:52] Found 6 results for 'shadow hippowdon and shadow swampert pvp master league raids worth powering up'
+[2026-03-28 23:54:52] Fetching: https://pokemongohub.net/post/pvp/nifty-or-thrifty-master-league-premier-pvp-analysis/
+[2026-03-28 23:54:52] Fetch error (https://pokemongohub.net/post/pvp/nifty-or-thrifty-master-league-premier-pvp-analysis/): 403 Client Error: Forbidden for url: https://pokemongohub.net/post/pvp/nifty-or-thrifty-master-league-premier-pvp-analysis/
+[2026-03-28 23:54:52] Skipping https://pokemongohub.net/post/pvp/nifty-or-thrifty-master-league-premier-pvp-analysis/ (empty or blocked), trying next result
+[2026-03-28 23:54:52] Fetching: https://pokemongohub.net/post/event/pokemon-global-gofest-2023-a-comprehensive-pvp-preparation-guide/
+[2026-03-28 23:54:52] Fetch error (https://pokemongohub.net/post/event/pokemon-global-gofest-2023-a-comprehensive-pvp-preparation-guide/): 403 Client Error: Forbidden for url: https://pokemongohub.net/post/event/pokemon-global-gofest-2023-a-comprehensive-pvp-preparation-guide/
+[2026-03-28 23:54:52] Skipping https://pokemongohub.net/post/event/pokemon-global-gofest-2023-a-comprehensive-pvp-preparation-guide/ (empty or blocked), trying next result
+[2026-03-28 23:54:52] Fetching: https://pokemongohub.net/post/meta/season-of-adventure-abound-scorching-sands-excadrill-magical-leaf-users-and-shadow-zapdos-as-raid-attackers/
+[2026-03-28 23:54:52] Fetch error (https://pokemongohub.net/post/meta/season-of-adventure-abound-scorching-sands-excadrill-magical-leaf-users-and-shadow-zapdos-as-raid-attackers/): 403 Client Error: Forbidden for url: https://pokemongohub.net/post/meta/season-of-adventure-abound-scorching-sands-excadrill-magical-leaf-users-and-shadow-zapdos-as-raid-attackers/
+[2026-03-28 23:54:52] Skipping https://pokemongohub.net/post/meta/season-of-adventure-abound-scorching-sands-excadrill-magical-leaf-users-and-shadow-zapdos-as-raid-attackers/ (empty or blocked), trying next result
+[2026-03-28 23:54:52] Fetching: https://www.stadiumgaming.gg/post/adventures-abound-pvp-update-analysis
+[2026-03-28 23:54:53] Fetched 4000 chars from https://www.stadiumgaming.gg/post/adventures-abound-pvp-update-analysis
+[2026-03-28 23:54:53] Fetching: https://gemaga.com/pokemon-go-battle-league-tier-list/
+[2026-03-28 23:54:54] Fetched 4000 chars from https://gemaga.com/pokemon-go-battle-league-tier-list/
+[2026-03-28 23:55:28] Document synthesized by qwen2.5:14b — 3680 chars
+[2026-03-28 23:55:28] Document saved: H:\hayeong\documents\shadow_hippowdon_and_shadow_swampert_pvp_master_le_20260328_2355.md
+[2026-03-28 23:58:30] Searching: 'Shadow Hippowdon and Shadow Swampert worth powering up in Pokemon GO'
+[2026-03-28 23:58:31] Found 6 results for 'Shadow Hippowdon and Shadow Swampert worth powering up in Pokemon GO'
+[2026-03-28 23:58:31] Fetching: https://pokemongo.fandom.com/wiki/Hippowdon
+[2026-03-28 23:58:31] Fetch error (https://pokemongo.fandom.com/wiki/Hippowdon): 403 Client Error: Forbidden for url: https://pokemongo.fandom.com/wiki/Hippowdon
+[2026-03-28 23:58:31] Skipping https://pokemongo.fandom.com/wiki/Hippowdon (empty or blocked), trying next result
+[2026-03-28 23:58:31] Fetching: https://pokemon.gameinfo.io/en/pokemon/450-hippowdon
+[2026-03-28 23:58:32] Fetched 4000 chars from https://pokemon.gameinfo.io/en/pokemon/450-hippowdon
+[2026-03-28 23:58:32] Fetching: https://www.pokebattler.com/raids/defenders/HIPPOWDON_SHADOW_FORM/levels/RAID_LEVEL_3_SHADOW/attackers/levels/40/strategies/CINEMATIC_ATTACK_WHEN_POSSIBLE/DEFENSE_RANDOM_MC?sort=ESTIMATOR&weatherCondition=NO_WEATHER&dodgeStrategy=DODGE_REACTION_TIME&aggregation=AVERAGE&includeLegendary=true&includeShadow=true&includeMegas=true&attackerTypes=POKEMON_TYPE_ALL&primalAssistants=&numParty=1
+[2026-03-28 23:58:32] Fetched 2676 chars from https://www.pokebattler.com/raids/defenders/HIPPOWDON_SHADOW_FORM/levels/RAID_LEVEL_3_SHADOW/attackers/levels/40/strategies/CINEMATIC_ATTACK_WHEN_POSSIBLE/DEFENSE_RANDOM_MC?sort=ESTIMATOR&weatherCondition=NO_WEATHER&dodgeStrategy=DODGE_REACTION_TIME&aggregation=AVERAGE&includeLegendary=true&includeShadow=true&includeMegas=true&attackerTypes=POKEMON_TYPE_ALL&primalAssistants=&numParty=1
+[2026-03-28 23:59:06] Document synthesized by qwen2.5:14b — 3256 chars
+[2026-03-28 23:59:06] Document saved: H:\hayeong\documents\Shadow_Hippowdon_and_Shadow_Swampert_worth_powerin_20260328_2359.md
+[2026-03-29 00:02:51] WebSearch ready.
+[2026-03-29 00:11:05] News search: 'current Threadripper series pros and cons previous series'
+[2026-03-29 00:11:05] Found 1 news results for 'current Threadripper series pros and cons previous series'
+[2026-03-29 00:11:05] Document saved: H:\hayeong\documents\current_Threadripper_series_pros_and_cons_previous_20260329_0011.md
+[2026-03-29 00:15:36] Searching: 'current Ryzen Threadripper 9000 series specifications'
+[2026-03-29 00:15:37] Found 6 results for 'current Ryzen Threadripper 9000 series specifications'
+[2026-03-29 00:15:37] Fetching: https://en.wikipedia.org/wiki/Template:AMD_Ryzen_Threadripper_9000_series
+[2026-03-29 00:15:38] Fetched 2362 chars from https://en.wikipedia.org/wiki/Template:AMD_Ryzen_Threadripper_9000_series
+[2026-03-29 00:15:38] Fetching: https://boxx.com/blog/hardware/amd-ryzen-threadripper-9000-series
+[2026-03-29 00:15:39] Fetched 4000 chars from https://boxx.com/blog/hardware/amd-ryzen-threadripper-9000-series
+[2026-03-29 00:16:24] Document synthesized by qwen2.5:14b — 4811 chars
+[2026-03-29 00:16:24] Document saved: H:\hayeong\documents\current_Ryzen_Threadripper_9000_series_specificati_20260329_0016.md
+[2026-03-29 00:30:46] WebSearch ready.
+[2026-03-29 00:37:48] Searching: 'top non-legendary shadow Pokémon for PvP and raids in Pokémon GO'
+[2026-03-29 00:37:49] Found 6 results for 'top non-legendary shadow Pokémon for PvP and raids in Pokémon GO'
+[2026-03-29 00:37:49] Fetching: https://pvpoke.com/rankings/all/1500/overall/
+[2026-03-29 00:37:50] Fetched 4000 chars from https://pvpoke.com/rankings/all/1500/overall/
+[2026-03-29 00:37:50] Fetching: https://db.pokemongohub.net/best/raid-attackers
+[2026-03-29 00:37:50] Fetch error (https://db.pokemongohub.net/best/raid-attackers): 403 Client Error: Forbidden for url: https://db.pokemongohub.net/best/raid-attackers
+[2026-03-29 00:37:50] Skipping https://db.pokemongohub.net/best/raid-attackers (empty or blocked), trying next result
+[2026-03-29 00:37:50] Fetching: https://pokemongo.gishan.net/friends/raids/
+[2026-03-29 00:37:50] Fetch error (https://pokemongo.gishan.net/friends/raids/): 403 Client Error: Forbidden for url: https://pokemongo.gishan.net/friends/raids/
+[2026-03-29 00:37:50] Skipping https://pokemongo.gishan.net/friends/raids/ (empty or blocked), trying next result
+[2026-03-29 00:37:50] Fetching: https://www.tiktok.com/discover/best-non-legendary-pokemon
+[2026-03-29 00:37:51] Fetched 22 chars from https://www.tiktok.com/discover/best-non-legendary-pokemon
+[2026-03-29 00:38:23] Document synthesized by qwen2.5:14b — 3382 chars
+[2026-03-29 00:38:23] Document saved: H:\hayeong\documents\top_non-legendary_shadow_Pokémon_for_PvP_and_raids_20260329_0038.md
+[2026-03-29 17:38:08] WebSearch ready.
+[2026-03-29 17:57:02] Searching: 'shadow swampert and shadow hippowdon rankings for raids and PvP leagues in Pokémon GO'
+[2026-03-29 17:57:03] Found 6 results for 'shadow swampert and shadow hippowdon rankings for raids and PvP leagues in Pokémon GO'
+[2026-03-29 17:57:03] Fetching: https://db.pokemongohub.net/pokemon/260-Shadow/pvp
+[2026-03-29 17:57:04] Fetch error (https://db.pokemongohub.net/pokemon/260-Shadow/pvp): 403 Client Error: Forbidden for url: https://db.pokemongohub.net/pokemon/260-Shadow/pvp
+[2026-03-29 17:57:04] Skipping https://db.pokemongohub.net/pokemon/260-Shadow/pvp (empty or blocked), trying next result
+[2026-03-29 17:57:04] Fetching: https://www.youtube.com/watch?v=wfOsKxy2YpM
+[2026-03-29 17:57:05] Fetched 275 chars from https://www.youtube.com/watch?v=wfOsKxy2YpM
+[2026-03-29 17:57:05] Fetching: https://www.pokebattler.com/raids/defenders/HIPPOWDON_SHADOW_FORM/levels/RAID_LEVEL_3_SHADOW/attackers/levels/40/strategies/CINEMATIC_ATTACK_WHEN_POSSIBLE/DEFENSE_RANDOM_MC?sort=ESTIMATOR&weatherCondition=NO_WEATHER&dodgeStrategy=DODGE_REACTION_TIME&aggregation=AVERAGE&includeLegendary=true&includeShadow=true&includeMegas=true&attackerTypes=POKEMON_TYPE_ALL&primalAssistants=&numParty=1
+[2026-03-29 17:57:06] Fetched 2676 chars from https://www.pokebattler.com/raids/defenders/HIPPOWDON_SHADOW_FORM/levels/RAID_LEVEL_3_SHADOW/attackers/levels/40/strategies/CINEMATIC_ATTACK_WHEN_POSSIBLE/DEFENSE_RANDOM_MC?sort=ESTIMATOR&weatherCondition=NO_WEATHER&dodgeStrategy=DODGE_REACTION_TIME&aggregation=AVERAGE&includeLegendary=true&includeShadow=true&includeMegas=true&attackerTypes=POKEMON_TYPE_ALL&primalAssistants=&numParty=1
+[2026-03-29 17:57:22] Document synthesized by qwen2.5:14b — 4065 chars
+[2026-03-29 17:57:22] Document saved: H:\hayeong\documents\shadow_swampert_and_shadow_hippowdon_rankings_for__20260329_1757.md
+[2026-03-29 18:05:51] Searching: 'price differences and differences between top Threadripper series CPUs'
+[2026-03-29 18:05:53] Found 6 results for 'price differences and differences between top Threadripper series CPUs'
+[2026-03-29 18:05:53] Fetching: https://www.propelrc.com/best-threadripper-cpu/
+[2026-03-29 18:05:53] Fetched 4000 chars from https://www.propelrc.com/best-threadripper-cpu/
+[2026-03-29 18:05:53] Fetching: https://www.cpu-monkey.com/en/cpu_family-amd_ryzen_threadripper
+[2026-03-29 18:05:54] Fetch error (https://www.cpu-monkey.com/en/cpu_family-amd_ryzen_threadripper): 403 Client Error: Forbidden for url: https://www.cpu-monkey.com/en/cpu_family-amd_ryzen_threadripper
+[2026-03-29 18:05:54] Skipping https://www.cpu-monkey.com/en/cpu_family-amd_ryzen_threadripper (empty or blocked), trying next result
+[2026-03-29 18:05:54] Fetching: https://www.pugetsystems.com/labs/articles/amd-threadripper-9000-vs-threadripper-pro-9000wx/
+[2026-03-29 18:05:54] Fetched 4000 chars from https://www.pugetsystems.com/labs/articles/amd-threadripper-9000-vs-threadripper-pro-9000wx/
+[2026-03-29 18:06:17] Document synthesized by qwen2.5:14b — 4546 chars
+[2026-03-29 18:06:17] Document saved: H:\hayeong\documents\price_differences_and_differences_between_top_Thre_20260329_1806.md
+[2026-03-29 18:09:54] Searching: 'top Threadripper series CPUs price differences and specs'
+[2026-03-29 18:09:56] Found 6 results for 'top Threadripper series CPUs price differences and specs'
+[2026-03-29 18:09:56] Fetching: https://wiproo.com/top-of-the-line-amd-threadripper-cpus-specs-comparison-performance-overview/
+[2026-03-29 18:09:56] Fetched 4000 chars from https://wiproo.com/top-of-the-line-amd-threadripper-cpus-specs-comparison-performance-overview/
+[2026-03-29 18:09:56] Fetching: https://arstechnica.com/gadgets/2020/02/amd-threadripper-3990x-is-here-64-cores-128-threads-3990/
+[2026-03-29 18:09:57] Fetched 4000 chars from https://arstechnica.com/gadgets/2020/02/amd-threadripper-3990x-is-here-64-cores-128-threads-3990/
+[2026-03-29 18:10:18] Document synthesized by qwen2.5:14b — 3702 chars
+[2026-03-29 18:10:18] Document saved: H:\hayeong\documents\top_Threadripper_series_CPUs_price_differences_and_20260329_1810.md
+[2026-03-29 18:42:20] WebSearch ready.
+[2026-03-29 18:51:21] Searching: 'Black Kyurem vs White Kyurem in Pokémon GO raids and PvP'
+[2026-03-29 18:51:22] Found 6 results for 'Black Kyurem vs White Kyurem in Pokémon GO raids and PvP'
+[2026-03-29 18:51:22] Fetching: https://pokemongohub.net/post/meta/how-good-are-black-and-white-kyurem-in-pokemon-go/
+[2026-03-29 18:51:22] Fetch error (https://pokemongohub.net/post/meta/how-good-are-black-and-white-kyurem-in-pokemon-go/): 403 Client Error: Forbidden for url: https://pokemongohub.net/post/meta/how-good-are-black-and-white-kyurem-in-pokemon-go/
+[2026-03-29 18:51:22] Skipping https://pokemongohub.net/post/meta/how-good-are-black-and-white-kyurem-in-pokemon-go/ (empty or blocked), trying next result
+[2026-03-29 18:51:22] Fetching: https://www.sportskeeda.com/pokemon/black-kyurem-vs-white-kyurem-pokemon-go-which-form-better
+[2026-03-29 18:51:23] Fetched 4000 chars from https://www.sportskeeda.com/pokemon/black-kyurem-vs-white-kyurem-pokemon-go-which-form-better
+[2026-03-29 18:51:23] Fetching: https://www.pokemon.com/us/strategy/black-kyurem-and-white-kyurem-pokemon-go-raid-battle-tips
+[2026-03-29 18:51:24] Fetched 4000 chars from https://www.pokemon.com/us/strategy/black-kyurem-and-white-kyurem-pokemon-go-raid-battle-tips
+[2026-03-29 18:51:39] Document synthesized by qwen2.5:14b — 3527 chars
+[2026-03-29 18:51:39] Document saved: H:\hayeong\documents\Black_Kyurem_vs_White_Kyurem_in_Pokémon_GO_raids_a_20260329_1851.md
+[2026-03-29 18:54:25] Searching: 'top NVIDIA GPUs for Threadripper CPU system with multiple GPUs'
+[2026-03-29 18:54:26] Found 6 results for 'top NVIDIA GPUs for Threadripper CPU system with multiple GPUs'
+[2026-03-29 18:54:26] Fetching: https://topflightpc.com/recommended-hardware-for-4-gpu-rendering-threadripper-7000/
+[2026-03-29 18:54:26] Fetch error (https://topflightpc.com/recommended-hardware-for-4-gpu-rendering-threadripper-7000/): 403 Client Error: Forbidden for url: https://topflightpc.com/recommended-hardware-for-4-gpu-rendering-threadripper-7000/
+[2026-03-29 18:54:26] Skipping https://topflightpc.com/recommended-hardware-for-4-gpu-rendering-threadripper-7000/ (empty or blocked), trying next result
+[2026-03-29 18:54:26] Fetching: https://bizon-tech.com/bizon-x5000.html
+[2026-03-29 18:54:27] Fetched 455 chars from https://bizon-tech.com/bizon-x5000.html
+[2026-03-29 18:54:27] Fetching: https://forums.chaos.com/forum/chaos-common/chaos-common-hardware/1220366-threadripper-or-mainstream-cpu-with-multiple-gpu’s
+[2026-03-29 18:54:28] Fetched 4000 chars from https://forums.chaos.com/forum/chaos-common/chaos-common-hardware/1220366-threadripper-or-mainstream-cpu-with-multiple-gpu’s
+[2026-03-29 18:54:45] Document synthesized by qwen2.5:14b — 3832 chars
+[2026-03-29 18:54:45] Document saved: H:\hayeong\documents\top_NVIDIA_GPUs_for_Threadripper_CPU_system_with_m_20260329_1854.md
+[2026-03-29 20:16:45] WebSearch ready.

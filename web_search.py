@@ -487,7 +487,8 @@ class WebSearch:
         }
 
     def format_as_document(self, query: str, data: dict, topic: str = "",
-                           model: str = "qwen2.5:14b") -> str:
+                           model: str = "qwen2.5:14b",
+                           constraints: list = None) -> str:
         """
         Generate a proper synthesized research document using the LLM.
 
@@ -572,24 +573,41 @@ class WebSearch:
 
 Topic: {title}
 Original request: {query}
+{f'''
+EXPLICIT CONSTRAINTS — James stated these requirements. You MUST follow them exactly.
+Before finalizing your report, re-read this list and remove anything that violates these constraints:
+{chr(10).join(f"  - {c}" for c in constraints)}
 
+If you cannot find content that fits within these constraints, say so clearly rather than including
+content that violates them.
+''' if constraints else ''}
 Here is the raw source data you gathered from the web:
 
 {raw_data}
 
 ---
 
-Write a proper research report that James can actually use. The report should:
-1. Summarize what each subject is (e.g. if comparing two game items, explain what each one is)
-2. Compare them directly — similarities, differences, strengths, weaknesses
-3. Give a clear recommendation based on the data (which is better, for what purpose, and why)
-4. Be honest about what the sources did and did not cover
-5. If the data is incomplete on any point, say so clearly rather than guessing
+Write a proper research report James can actually use. Follow these rules carefully:
 
-Format as clean markdown with proper headers.
-Do NOT list sources one by one. Synthesize the information.
-Write as yourself — direct, clear, Hayeong's voice.
-If you genuinely cannot make a recommendation from this data, say so and explain what information would be needed."""
+CONTENT:
+1. Summarize what each subject is — what it does, where it fits, why it matters
+2. Compare them directly: similarities, differences, strengths, weaknesses
+3. Give a clear recommendation — which is better, for what purpose, and why
+4. If the data is genuinely missing something important, say so ONCE in a brief note at the end — not repeatedly throughout the report
+
+WRITING STYLE — this is critical:
+- Write like a knowledgeable person talking to a friend, not like a formal report generator
+- Be direct and confident. If you found something useful, state it clearly.
+- Do NOT use phrases like "it is implied", "it can be assumed", "based on limited information"
+- Do NOT repeat the same caveat or gap more than once — mention it once and move on
+- Do NOT pad with filler sentences like "further research would be needed" or "players should explore"
+- If you can make a recommendation, make it. Don't hedge every sentence.
+- Keep it tight — say what needs to be said, nothing more
+
+FORMAT:
+- Clean markdown with headers
+- Do NOT list sources one by one — synthesize the information
+- Do NOT include a Sources section — that will be appended separately"""
 
         try:
             resp = requests.post(
@@ -603,6 +621,10 @@ If you genuinely cannot make a recommendation from this data, say so and explain
                 timeout=120,
             )
             synthesized = resp.json()["message"]["content"].strip()
+            # Strip any Sources section the LLM may have added — we append our own below.
+            # This fixes the duplicate sources bug where sources appeared twice in documents.
+            synthesized = re.sub(r'\n##\s*Sources.*$', '', synthesized,
+                                 flags=re.DOTALL | re.IGNORECASE).strip()
             _log(f"Document synthesized by {model} — {len(synthesized)} chars")
         except Exception as e:
             _log(f"LLM synthesis failed: {e} — falling back to raw format")
@@ -847,4 +869,4 @@ if __name__ == "__main__":
     ]
     for t in test_inputs:
         cleaned = WebSearch.clean_query(t)
-        print(f"  '{t}'\n    → '{cleaned}'") 
+        print(f"  '{t}'\n    → '{cleaned}'")

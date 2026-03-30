@@ -1,161 +1,9 @@
 {
-  "current": 4.3000000000000025,
-  "last_updated": "2026-03-26T14:07:31.285018",
-  "last_rest": "2026-03-21T16:47:07.268675",
+  "current": 4.800000000000001,
+  "last_updated": "2026-03-29T21:33:13.526377",
+  "last_rest": "2026-03-29T20:16:50.145065",
   "session_started": "2026-03-09T20:33:47.066820",
   "log": [
-    {
-      "ts": "2026-03-09T20:34:04.460121",
-      "op": "cost",
-      "amount": 0.1,
-      "reason": "turn_tick (casual/light)",
-      "before": 4.0,
-      "after": 3.9
-    },
-    {
-      "ts": "2026-03-09T20:35:12.760018",
-      "op": "cost",
-      "amount": 0.1,
-      "reason": "turn_tick (casual/light)",
-      "before": 3.9,
-      "after": 3.8
-    },
-    {
-      "ts": "2026-03-09T20:36:05.858955",
-      "op": "cost",
-      "amount": 0.1,
-      "reason": "turn_tick (casual/light)",
-      "before": 3.8,
-      "after": 3.7
-    },
-    {
-      "ts": "2026-03-09T20:40:10.585095",
-      "op": "cost",
-      "amount": 0.1,
-      "reason": "turn_tick (casual/light)",
-      "before": 3.7,
-      "after": 3.6
-    },
-    {
-      "ts": "2026-03-11T09:41:23.839626",
-      "op": "cost",
-      "amount": 0.1,
-      "reason": "turn_tick (casual/light)",
-      "before": 3.6,
-      "after": 3.5
-    },
-    {
-      "ts": "2026-03-11T09:55:43.398708",
-      "op": "cost",
-      "amount": 0.1,
-      "reason": "turn_tick (casual/light)",
-      "before": 3.5,
-      "after": 3.4
-    },
-    {
-      "ts": "2026-03-11T09:57:10.046255",
-      "op": "cost",
-      "amount": 0.1,
-      "reason": "turn_tick (casual/light)",
-      "before": 3.4,
-      "after": 3.3
-    },
-    {
-      "ts": "2026-03-11T10:10:23.206002",
-      "op": "cost",
-      "amount": 0.1,
-      "reason": "turn_tick (casual/light)",
-      "before": 3.3,
-      "after": 3.2
-    },
-    {
-      "ts": "2026-03-11T10:14:36.830016",
-      "op": "cost",
-      "amount": 0.1,
-      "reason": "turn_tick (casual/light)",
-      "before": 3.2,
-      "after": 3.1
-    },
-    {
-      "ts": "2026-03-11T10:24:46.191289",
-      "op": "cost",
-      "amount": 0.1,
-      "reason": "turn_tick (casual/light)",
-      "before": 3.1,
-      "after": 3.0
-    },
-    {
-      "ts": "2026-03-11T12:24:10.971342",
-      "op": "cost",
-      "amount": 0.1,
-      "reason": "turn_tick (casual/light)",
-      "before": 3.0,
-      "after": 2.9
-    },
-    {
-      "ts": "2026-03-11T12:31:43.143719",
-      "op": "cost",
-      "amount": 0.1,
-      "reason": "turn_tick (casual/light)",
-      "before": 2.9,
-      "after": 2.8
-    },
-    {
-      "ts": "2026-03-11T12:35:37.485149",
-      "op": "cost",
-      "amount": 0.1,
-      "reason": "turn_tick (casual/light)",
-      "before": 2.8,
-      "after": 2.7
-    },
-    {
-      "ts": "2026-03-11T12:46:45.299209",
-      "op": "cost",
-      "amount": 0.1,
-      "reason": "turn_tick (casual/light)",
-      "before": 2.7,
-      "after": 2.6
-    },
-    {
-      "ts": "2026-03-16T13:54:02.304966",
-      "op": "cost",
-      "amount": 0.1,
-      "reason": "turn_tick (casual/light)",
-      "before": 2.6,
-      "after": 2.5
-    },
-    {
-      "ts": "2026-03-16T14:06:46.012722",
-      "op": "cost",
-      "amount": 0.1,
-      "reason": "turn_tick (casual/light)",
-      "before": 2.5,
-      "after": 2.4
-    },
-    {
-      "ts": "2026-03-16T14:56:53.271443",
-      "op": "cost",
-      "amount": 0.1,
-      "reason": "turn_tick (casual/light)",
-      "before": 2.4,
-      "after": 2.3
-    },
-    {
-      "ts": "2026-03-16T14:58:07.190939",
-      "op": "cost",
-      "amount": 0.1,
-      "reason": "turn_tick (casual/light)",
-      "before": 2.3,
-      "after": 2.2
-    },
-    {
-      "ts": "2026-03-16T15:00:08.880950",
-      "op": "cost",
-      "amount": 0.1,
-      "reason": "turn_tick (casual/light)",
-      "before": 2.2,
-      "after": 2.1
-    },
     {
       "ts": "2026-03-16T15:05:24.601169",
       "op": "cost",
@@ -699,6 +547,262 @@
       "reason": "turn_tick (casual/light)",
       "before": 4.4,
       "after": 4.3
+    },
+    {
+      "ts": "2026-03-26T14:14:09.058763",
+      "op": "offline_recovery",
+      "amount": 0.5,
+      "reason": "offline 7 min",
+      "before": 4.3,
+      "after": 4.8
+    },
+    {
+      "ts": "2026-03-26T14:14:51.490718",
+      "op": "cost",
+      "amount": 0.1,
+      "reason": "turn_tick (casual/light)",
+      "before": 4.8,
+      "after": 4.7
+    },
+    {
+      "ts": "2026-03-26T14:15:44.307432",
+      "op": "cost",
+      "amount": 0.1,
+      "reason": "turn_tick (casual/light)",
+      "before": 4.7,
+      "after": 4.6
+    },
+    {
+      "ts": "2026-03-26T14:17:13.904441",
+      "op": "cost",
+      "amount": 0.1,
+      "reason": "turn_tick (casual/light)",
+      "before": 4.6,
+      "after": 4.5
+    },
+    {
+      "ts": "2026-03-26T14:24:01.715369",
+      "op": "cost",
+      "amount": 0.1,
+      "reason": "turn_tick (casual/light)",
+      "before": 4.5,
+      "after": 4.4
+    },
+    {
+      "ts": "2026-03-28T03:06:48.510644",
+      "op": "offline_recovery",
+      "amount": 0.5,
+      "reason": "offline 10 min",
+      "before": 4.4,
+      "after": 4.9
+    },
+    {
+      "ts": "2026-03-28T17:57:01.840467",
+      "op": "cost",
+      "amount": 0.1,
+      "reason": "turn_tick (casual/light)",
+      "before": 4.9,
+      "after": 4.8
+    },
+    {
+      "ts": "2026-03-28T23:21:41.538622",
+      "op": "offline_recovery",
+      "amount": 1.5,
+      "reason": "offline 324 min",
+      "before": 4.8,
+      "after": 5.0
+    },
+    {
+      "ts": "2026-03-28T23:23:15.107379",
+      "op": "cost",
+      "amount": 0.1,
+      "reason": "turn_tick (casual/light)",
+      "before": 5.0,
+      "after": 4.9
+    },
+    {
+      "ts": "2026-03-28T23:27:49.672941",
+      "op": "cost",
+      "amount": 0.1,
+      "reason": "turn_tick (casual/light)",
+      "before": 4.9,
+      "after": 4.8
+    },
+    {
+      "ts": "2026-03-28T23:30:53.114521",
+      "op": "cost",
+      "amount": 0.1,
+      "reason": "turn_tick (casual/light)",
+      "before": 4.8,
+      "after": 4.7
+    },
+    {
+      "ts": "2026-03-28T23:45:53.499206",
+      "op": "cost",
+      "amount": 0.1,
+      "reason": "turn_tick (casual/light)",
+      "before": 4.7,
+      "after": 4.6
+    },
+    {
+      "ts": "2026-03-28T23:55:39.014818",
+      "op": "cost",
+      "amount": 0.1,
+      "reason": "turn_tick (casual/light)",
+      "before": 4.6,
+      "after": 4.5
+    },
+    {
+      "ts": "2026-03-28T23:59:17.544125",
+      "op": "cost",
+      "amount": 0.1,
+      "reason": "turn_tick (casual/light)",
+      "before": 4.5,
+      "after": 4.4
+    },
+    {
+      "ts": "2026-03-29T00:04:09.526963",
+      "op": "cost",
+      "amount": 0.1,
+      "reason": "turn_tick (casual/light)",
+      "before": 4.4,
+      "after": 4.3
+    },
+    {
+      "ts": "2026-03-29T00:11:39.873624",
+      "op": "cost",
+      "amount": 0.1,
+      "reason": "turn_tick (casual/light)",
+      "before": 4.3,
+      "after": 4.2
+    },
+    {
+      "ts": "2026-03-29T00:16:36.185463",
+      "op": "cost",
+      "amount": 0.1,
+      "reason": "turn_tick (casual/light)",
+      "before": 4.2,
+      "after": 4.1
+    },
+    {
+      "ts": "2026-03-29T00:30:50.641649",
+      "op": "offline_recovery",
+      "amount": 0.5,
+      "reason": "offline 12 min",
+      "before": 4.1,
+      "after": 4.6
+    },
+    {
+      "ts": "2026-03-29T00:38:38.671587",
+      "op": "cost",
+      "amount": 0.1,
+      "reason": "turn_tick (casual/light)",
+      "before": 4.6,
+      "after": 4.5
+    },
+    {
+      "ts": "2026-03-29T00:44:00.593007",
+      "op": "cost",
+      "amount": 0.1,
+      "reason": "turn_tick (casual/light)",
+      "before": 4.5,
+      "after": 4.4
+    },
+    {
+      "ts": "2026-03-29T00:46:41.332714",
+      "op": "cost",
+      "amount": 0.1,
+      "reason": "turn_tick (casual/light)",
+      "before": 4.4,
+      "after": 4.3
+    },
+    {
+      "ts": "2026-03-29T17:50:08.588307",
+      "op": "cost",
+      "amount": 0.1,
+      "reason": "turn_tick (casual/light)",
+      "before": 4.3,
+      "after": 4.2
+    },
+    {
+      "ts": "2026-03-29T17:52:24.434892",
+      "op": "cost",
+      "amount": 0.1,
+      "reason": "turn_tick (casual/light)",
+      "before": 4.2,
+      "after": 4.1
+    },
+    {
+      "ts": "2026-03-29T17:57:34.306743",
+      "op": "cost",
+      "amount": 0.1,
+      "reason": "turn_tick (casual/light)",
+      "before": 4.1,
+      "after": 4.0
+    },
+    {
+      "ts": "2026-03-29T18:06:30.700306",
+      "op": "cost",
+      "amount": 0.1,
+      "reason": "turn_tick (casual/light)",
+      "before": 4.0,
+      "after": 3.9
+    },
+    {
+      "ts": "2026-03-29T18:10:29.404003",
+      "op": "cost",
+      "amount": 0.1,
+      "reason": "turn_tick (casual/light)",
+      "before": 3.9,
+      "after": 3.8
+    },
+    {
+      "ts": "2026-03-29T18:42:24.914667",
+      "op": "offline_recovery",
+      "amount": 0.5,
+      "reason": "offline 29 min",
+      "before": 3.8,
+      "after": 4.3
+    },
+    {
+      "ts": "2026-03-29T18:51:53.675899",
+      "op": "cost",
+      "amount": 0.1,
+      "reason": "turn_tick (casual/light)",
+      "before": 4.3,
+      "after": 4.2
+    },
+    {
+      "ts": "2026-03-29T18:55:00.283219",
+      "op": "cost",
+      "amount": 0.1,
+      "reason": "turn_tick (casual/light)",
+      "before": 4.2,
+      "after": 4.1
+    },
+    {
+      "ts": "2026-03-29T20:16:50.145065",
+      "op": "offline_recovery",
+      "amount": 1.0,
+      "reason": "offline 78 min",
+      "before": 4.1,
+      "after": 5.0
+    },
+    {
+      "ts": "2026-03-29T20:26:11.801786",
+      "op": "cost",
+      "amount": 0.1,
+      "reason": "turn_tick (casual/light)",
+      "before": 5.0,
+      "after": 4.9
+    },
+    {
+      "ts": "2026-03-29T20:38:21.311607",
+      "op": "cost",
+      "amount": 0.1,
+      "reason": "turn_tick (casual/light)",
+      "before": 4.9,
+      "after": 4.8
     }
   ]
 }

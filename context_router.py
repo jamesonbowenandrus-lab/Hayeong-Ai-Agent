@@ -64,19 +64,29 @@ ROUTER_TIMEOUT   = 20             # Seconds — 7b needs time to load alongside 
 
 INTENT_DEFINITIONS = {
     "web_search": {
-        "description": "James wants Hayeong to look something up online — specs, news, prices, facts, current events.",
+        "description": (
+            "James wants Hayeong to look something up online — specs, news, prices, facts, "
+            "current events, game info, comparisons, or research. "
+            "IMPORTANT: If James asks for research, a comparison, or a report on something "
+            "AND mentions sending it via email, classify as web_search NOT email. "
+            "Email is just the delivery method — the primary task is research."
+        ),
         "examples": [
             "search for AMD RX 9070 XT specs",
             "what's the latest news on ComfyUI",
             "look up the price of the RTX 5090",
             "find out about Live2D software",
-            "google that for me",
+            "research whale pup and zapmander in Once Human and send me a report",
+            "can you do some research on X and write me a comparison report",
+            "look into both options and email me a breakdown",
         ],
         "keywords": [
             "search for", "look up", "lookup", "look it up", "google", "find out",
             "latest news", "news about", "what's the latest", "current price",
             "how much does", "check online", "check the web",
             "can you lookup", "can you look up", "can you find",
+            "do some research", "research on", "comparison report",
+            "write me a report", "write up a comparison", "look into",
         ],
     },
     "vision": {
@@ -124,16 +134,24 @@ INTENT_DEFINITIONS = {
         ],
     },
     "email": {
-        "description": "Anything about email — checking inbox, sending, notifying.",
+        "description": (
+            "Checking inbox, sending a notification, or getting an email summary. "
+            "Only use this when the PRIMARY task IS the email action itself. "
+            "Do NOT use this if James is asking for research/comparison and mentions "
+            "email only as a delivery method — that is web_search."
+        ),
         "examples": [
             "check your email",
             "did I get any emails",
             "send me a message",
             "notify me when done",
+            "send me a daily summary",
         ],
         "keywords": [
-            "email", "inbox", "notify", "ping me",
-            "anything come in", "did i get", "send me a summary",
+            "check your email", "check my email", "check the inbox",
+            "did i get any emails", "any new emails", "inbox",
+            "notify me", "ping me", "send me a daily summary",
+            "anything come in", "did i get any messages",
         ],
     },
     "capability": {
@@ -284,6 +302,12 @@ CRITICAL RULES:
 - If James is replying to something Hayeong said (a question, a suspicion check, a result),
   that reply is almost always "conversation" — not a tool request.
 - Only classify as web_search/vision/image_generation if James is CLEARLY requesting that tool.
+- RESEARCH + EMAIL: If James asks for research, a comparison, or a report on a topic AND
+  mentions email as the delivery method, classify as web_search (NOT email).
+  Email is just how she delivers it — the task is research. Example: "look up X and email
+  me the report" = web_search, not email.
+- EMAIL ONLY: Only classify as email if the primary task IS the email action itself
+  (check inbox, send a notification, get a summary of emails).
 - When in doubt, use "conversation".
 
 Respond with ONLY this JSON — no explanation, no markdown:

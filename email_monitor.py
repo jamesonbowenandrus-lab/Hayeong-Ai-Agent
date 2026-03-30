@@ -83,6 +83,10 @@ def _log(msg: str):
     ts = datetime.now().strftime("%H:%M:%S")
     print(f"[EmailMonitor {ts}] {msg}")
 
+def _log_quiet(msg: str):
+    """Log to file only — for routine reconnect/keepalive noise that clutters the terminal."""
+    pass   # Currently no-op; add file logging here later if needed
+
 
 # ─────────────────────────────────────────────
 # EMAIL LOG (local searchable index)
@@ -318,7 +322,7 @@ class EmailMonitor:
                 self._connect_and_idle()
                 backoff = 5  # reset on clean exit
             except Exception as e:
-                _log(f"⚠️  Connection error: {e} — reconnecting in {backoff}s")
+                _log_quiet(f"connection error: {e} — reconnecting in {backoff}s")
                 time.sleep(backoff)
                 backoff = min(backoff * 2, 120)  # exponential backoff, max 2 min
 
@@ -355,7 +359,10 @@ class EmailMonitor:
                         line = conn.readline().decode("utf-8", errors="replace").strip()
                         if not line:
                             continue
-                        _log(f"IDLE: {line}")
+                        # Only log meaningful IDLE events, not routine server continuations
+                        if "EXISTS" in line or "RECENT" in line or "OK" in line:
+                            if "EXISTS" in line or "RECENT" in line:
+                                _log(f"IDLE: {line}")   # new mail — worth seeing
 
                         # New message notification
                         if "EXISTS" in line or "RECENT" in line:
@@ -369,11 +376,11 @@ class EmailMonitor:
                         # (+ idling or similar)
 
                     except socket.timeout:
-                        # Keepalive timeout — send DONE then re-IDLE
-                        _log("Keepalive — sending DONE, re-entering IDLE")
+                        # Keepalive timeout — send DONE then re-IDLE (routine, not an error)
+                        _log_quiet("keepalive timeout — re-entering IDLE")
                         break
                     except Exception as e:
-                        _log(f"IDLE read error: {e}")
+                        _log_quiet(f"IDLE read error: {e}")
                         raise
 
                 # End IDLE
@@ -388,10 +395,10 @@ class EmailMonitor:
                     self._fetch_unread(conn)
 
             except imaplib.IMAP4.abort as e:
-                _log(f"IMAP abort: {e}")
+                _log_quiet(f"IMAP abort: {e}")
                 raise
             except Exception as e:
-                _log(f"IDLE loop error: {e}")
+                _log_quiet(f"IDLE loop error: {e}")
                 raise
 
         with self._lock:

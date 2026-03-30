@@ -45,6 +45,13 @@ from identity_verification import (
 )
 
 try:
+    from situation_tracker import SituationTracker
+    SITUATION_TRACKER_AVAILABLE = True
+except ImportError:
+    SITUATION_TRACKER_AVAILABLE = False
+    print("⚠️  situation_tracker.py not found — shared situational awareness inactive")
+
+try:
     from energy_manager import EnergyManager
     ENERGY_AVAILABLE = True
 except ImportError:
@@ -296,6 +303,59 @@ def detect_capability_command(text: str) -> tuple[str, str] | tuple[None, None]:
 
 
 # ─────────────────────────────────────────────
+# WRAP-UP FAST PATH
+# Detects thank-you / acknowledgment / close-out messages before
+# any LLM call runs. These signals are unambiguous — running them
+# through snapshot + decide_action + verifier wastes GPU cycles and
+# introduces failure risk (as seen: all three layers misfired on
+# "Thank you very much!").
+#
+# Same design principle as detect_capability_command():
+# when the signal is clear enough, don't ask an LLM.
+# ─────────────────────────────────────────────
+
+_WRAPUP_EXACT = {
+    "thanks", "thank you", "ty", "thx", "cheers",
+    "perfect", "great", "awesome", "nice", "cool",
+    "sounds good", "looks good", "that's good", "that works",
+    "got it", "understood", "noted",
+}
+
+_WRAPUP_CONTAINS = [
+    "thank you", "thank you very much", "thanks a lot", "thanks so much",
+    "great job", "good job", "nice work", "well done", "good work",
+    "that's all i needed", "that's all for now", "that's perfect",
+    "this is great", "this is perfect", "this is helpful", "this helps",
+    "gives me great info", "gives me what i need",
+    "i'll check it out", "i'll look it over", "i'll review it",
+    "no that's all", "nothing else", "that'll do",
+    "you're welcome", "appreciate it", "appreciate that",
+]
+
+def is_wrap_up(text: str) -> bool:
+    """
+    Returns True if the message is clearly a wrap-up / acknowledgment
+    and no tool should fire regardless of conversation context.
+
+    Intentionally conservative — only matches clear positive closings.
+    Does NOT catch things like "thanks but can you also search X"
+    because those have additional content after the thank-you.
+    """
+    t = text.lower().strip().rstrip("!.,")
+    # Exact short matches
+    if t in _WRAPUP_EXACT:
+        return True
+    # Contains check — but only if the message is short enough
+    # that there's no real request hiding in it
+    # (under ~120 chars = likely just an acknowledgment)
+    if len(text) < 120:
+        for phrase in _WRAPUP_CONTAINS:
+            if phrase in t:
+                return True
+    return False
+
+
+# ─────────────────────────────────────────────
 # GPU CHECK
 # ─────────────────────────────────────────────
 
@@ -396,13 +456,264 @@ def _strip_markdown(text: str) -> str:
     return text.strip()
 
 
-def stream_response_and_speak(system_prompt: str, memory: list, emotion: str = "neutral", text_mode: bool = False, model: str = None) -> tuple:
-    """
-    Streams the LLM response, speaks it via TTS, and returns (response_text, use_tag).
 
-    use_tag is extracted from the first line if it matches [USE:xxx].
-    That line is stripped from the spoken/printed output so James never hears it.
-    If no tag is present, use_tag is None and everything behaves as before.
+# ─────────────────────────────────────────────
+# JSON DECISION ENGINE
+# A fast non-streaming call that asks Hayeong what she needs to do
+# before she responds. Returns a structured action dict.
+# This replaces the fragile [USE:xxx] first-line tag system.
+#
+# Design: one small focused call → clean parseable JSON → then stream
+# the full natural response with zero parsing complexity.
+# ─────────────────────────────────────────────
+
+DECISION_PROMPT = """You are Hayeong's decision engine.
+
+Based on the conversation and the latest message from James, decide what action (if any) is needed before you respond.
+
+Available actions:
+  web_search    — James wants something looked up online
+                  Include: query (what to search), delivery ("conversational" or "document")
+                  Use "document" when James asks for a report, comparison, or wants it emailed/saved
+  vision        — James wants you to look at his screen or an image
+                  Include: mode ("screen", "deep", or "image")
+  image_gen     — James wants you to generate or draw an image
+  email_check   — James wants to check his inbox
+  email_send    — James wants to send a notification or summary email
+  task_show     — James wants to see the task list
+  task_add      — James wants to add a task
+                  Include: task_text (what to add)
+  none          — Normal conversation, no capability needed
+
+Return ONLY valid JSON. No explanation, no markdown, no extra text.
+
+Examples:
+  {"action": "none"}
+  {"action": "web_search", "query": "zapmander vs whale pup Once Human", "delivery": "document"}
+  {"action": "web_search", "query": "RTX 5090 price", "delivery": "conversational"}
+  {"action": "email_check"}
+  {"action": "task_add", "task_text": "fix the voice bot"}
+  {"action": "vision", "mode": "screen"}
+
+CRITICAL RULES — read carefully:
+  - If James just completed a task and is wrapping up ("thanks", "that's good", "sounds good",
+    "I'll check it out", "no that's all") → ALWAYS return none. Do not repeat the task.
+  - If James is talking ABOUT a capability (mentioning search, email, tasks in conversation)
+    but not actually requesting it → return none. Example: "I want to test your search function"
+    is NOT a search request — it is a conversational statement.
+  - If a task was just performed in the last 1-2 turns and James hasn't asked for it again
+    → do not repeat it. Check conversation history before deciding.
+  - If James mentions emailing a report AS PART OF a research request → web_search with delivery=document
+  - If the message is purely conversational, a thank you, or a reaction → none
+  - Only pick an action if you are CERTAIN it is being freshly requested right now
+  - When in doubt → none. It is always better to respond conversationally than to fire a tool incorrectly.
+
+SEQUENCING RULES — for compound requests containing multiple actions:
+  - When James asks to SEARCH something AND ALSO do a secondary action (add to task list,
+    email results, save, etc.) → ALWAYS return web_search first. The secondary action
+    follows in the next step after results exist.
+  - Example: "search X and add it to my task list" → web_search (task_add comes after in loop)
+  - Example: "look up X and email me a report" → web_search with delivery=document (email is automatic)
+  - The rule: research always leads. Secondary actions follow results, not precede them.
+
+REPEAT GUARD — prevent duplicate actions:
+  - Check the last 2-3 turns. If the exact same action was already performed on the same
+    topic → return none. Do not repeat work that was just done.
+  - Example: if a task was just added for "Ground type Pokémon research" → do not add it again
+    just because James is still talking about the same topic.
+"""
+
+def decide_action(user_input: str, memory: list, model: str = None,
+                  snapshot: dict = None) -> dict:
+    """
+    Fast JSON decision call — determines what capability (if any) Hayeong
+    needs to invoke before responding. Non-streaming, focused, fast.
+
+    Returns a dict like:
+      {"action": "none"}
+      {"action": "web_search", "query": "...", "delivery": "conversational"}
+      {"action": "email_check"}
+    """
+    _model = model or PRIMARY_MODEL
+
+    # ── Inject relevant long-term memory into decision context ──
+    # This lets Hayeong know James's patterns and preferences when deciding
+    # what to do — not just recent turns, but things she actually remembers.
+    long_term_context = ""
+    try:
+        long_term_context = recall_for_prompt(user_input, n_results=3)
+    except Exception:
+        pass
+
+    # Build system content — long-term memory prepended to decision prompt
+    system_content = DECISION_PROMPT
+    if long_term_context:
+        system_content = (
+            f"[RELEVANT MEMORY — things Hayeong remembers about James that may inform this decision]\n"
+            f"{long_term_context}\n\n"
+            f"---\n\n"
+            + system_content
+        )
+    # Inject situation snapshot — shared awareness of what phase/topic we're in
+    if snapshot:
+        from situation_tracker import SituationTracker
+        # Build compact decision-friendly string from snapshot
+        s = snapshot
+        parts = [f"[SITUATION: phase={s.get('phase','?')}",
+                 f"topic={s.get('current_topic','?')!r}"]
+        if s.get("task_switching"):
+            parts.append("SWITCHING=true")
+        if s.get("just_completed"):
+            parts.append(f"just_completed={s['just_completed']!r}")
+        constraints = s.get("active_constraints", [])
+        if constraints:
+            parts.append(f"constraints={constraints}")
+        parts.append("]")
+        snap_line = " ".join(parts)
+        system_content = snap_line + "\n\n" + system_content
+
+    messages = [{"role": "system", "content": system_content}]
+    for entry in memory[-8:]:   # 8 turns gives enough context to detect wrap-ups and repeated tasks
+        role = "user" if entry["role"] == "user" else "assistant"
+        messages.append({"role": role, "content": entry["content"][:300]})
+    messages.append({"role": "user", "content": user_input})
+
+    try:
+        resp = requests.post(
+            OLLAMA_URL,
+            json={
+                "model":   _model,
+                "messages": messages,
+                "stream":  False,
+                "options": {"temperature": 0.0, "num_ctx": 4096},
+                "format":  "json",
+            },
+            timeout=15,
+        )
+        raw = resp.json()["message"]["content"].strip()
+        # Strip markdown fences if model adds them
+        raw = re.sub(r"^```[a-z]*\n?", "", raw)
+        raw = re.sub(r"\n?```$",       "", raw)
+        result = json.loads(raw.strip())
+        action = result.get("action", "none")
+        print(f"   [Decision] {action}" + (
+            f" — {result.get('query','')}" if action == "web_search" else ""
+        ))
+        return result
+    except Exception as e:
+        print(f"   [Decision] failed ({e}) — defaulting to none")
+        return {"action": "none"}
+
+
+# ─────────────────────────────────────────────
+# CONTEXT VERIFIER
+# A meta-cognitive self-check that runs after decide_action()
+# returns a non-none action, before anything executes.
+#
+# Purpose: extract explicit constraints from the request AND verify
+# the action is genuinely needed — not just triggered by keywords.
+#
+# This is the generalized awareness layer. Every capability passes
+# through here, so constraint sensitivity is never per-feature —
+# it lives in the architecture itself.
+# ─────────────────────────────────────────────
+
+VERIFIER_PROMPT = """You are Hayeong's self-check layer — a brief moment of reflection before acting.
+
+A decision was made to use a tool. Before executing, verify two things:
+
+1. IS THIS ACTION GENUINELY NEEDED?
+   - Is James actually requesting this right now, or just mentioning it in conversation?
+   - Does the planned action match what he's asking for?
+
+2. WHAT CONSTRAINTS DID JAMES STATE?
+   - Extract any explicit requirements, restrictions, or filters he mentioned
+   - Examples: "non-legendary only", "under $100", "for Windows", "no spoilers", "keep it short"
+   - Only extract what he explicitly said — do not invent constraints
+
+Return ONLY valid JSON. No explanation, no markdown, no extra text.
+
+Format when action is correct:
+{"verified": true, "constraints": ["non-legendary only", "obtainable in base game"], "reasoning": "James clearly asked for X"}
+
+Format when action is wrong:
+{"verified": false, "constraints": [], "reasoning": "James was describing X, not requesting it"}
+
+If no constraints were stated: return an empty list — do not guess.
+"""
+
+def context_verifier(user_input: str, action: str, decision: dict,
+                     recent_memory: list, model: str = None,
+                     snapshot: dict = None) -> dict:
+    """
+    Lightweight self-check before executing a tool.
+
+    Runs only when decide_action() returns a non-none action.
+    Extracts explicit constraints from the request and verifies the
+    action is genuinely what James is asking for right now.
+
+    Returns:
+      { "verified": bool, "constraints": list[str], "reasoning": str }
+
+    On failure: defaults to verified=True, empty constraints (fail open —
+    better to act than to silently block everything if verifier errors).
+    """
+    _model = model or PRIMARY_MODEL
+
+    # Build compact history block for context
+    history_lines = []
+    for m in recent_memory[-8:]:
+        role = "James" if m["role"] == "user" else "Hayeong"
+        history_lines.append(f"{role}: {m.get('content', '')[:250]}")
+    history_block = "\n".join(history_lines)
+
+    check_input = (
+        f"{('Situation: ' + json.dumps({k: snapshot[k] for k in ['phase','current_topic','active_constraints','task_switching'] if k in snapshot}) + chr(10)) if snapshot else ''}"
+        f"Recent conversation:\n{history_block}\n\n"
+        f"Latest message from James: {user_input}\n\n"
+        f"Planned action: {action}\n"
+        f"Action details: {json.dumps(decision)}\n\n"
+        f"Verify this action and extract any constraints James stated."
+    )
+
+    try:
+        resp = requests.post(
+            OLLAMA_URL,
+            json={
+                "model":   _model,
+                "messages": [
+                    {"role": "system", "content": VERIFIER_PROMPT},
+                    {"role": "user",   "content": check_input},
+                ],
+                "stream":  False,
+                "format":  "json",
+                "options": {"temperature": 0.0},
+            },
+            timeout=20,
+        )
+        raw = resp.json()["message"]["content"].strip()
+        raw = re.sub(r"^```[a-z]*\n?", "", raw)
+        raw = re.sub(r"\n?```$",       "", raw)
+        result      = json.loads(raw.strip())
+        verified    = result.get("verified", True)
+        constraints = result.get("constraints", [])
+        reasoning   = result.get("reasoning", "")
+        print(f"   [Verifier] {'✅' if verified else '❌ blocked —'} {reasoning[:100]}")
+        if constraints:
+            print(f"   [Constraints] {constraints}")
+        return {"verified": verified, "constraints": constraints, "reasoning": reasoning}
+    except Exception as e:
+        print(f"   [Verifier] error ({e}) — defaulting to proceed")
+        return {"verified": True, "constraints": [], "reasoning": "verifier error — defaulting open"}
+
+
+def stream_response_and_speak(system_prompt: str, memory: list, emotion: str = "neutral", text_mode: bool = False, model: str = None) -> str:
+    """
+    Streams the LLM response and speaks it via TTS.
+    Returns the full response text.
+
+    Capability routing is handled BEFORE this call via decide_action().
+    This function is now purely response streaming — no tag parsing needed.
     """
     messages = [{"role": "system", "content": system_prompt}]
     for entry in memory[-10:]:
@@ -413,13 +724,6 @@ def stream_response_and_speak(system_prompt: str, memory: list, emotion: str = "
     full_response  = []
     token_buffer   = []
     tts_done       = threading.Event()
-
-    # ── USE tag detection state ──
-    # Buffer tokens until we've seen the first newline, then decide
-    # whether the first line is a [USE:xxx] capability tag or normal text.
-    _use_tag            = None
-    _first_line_done    = False
-    _first_line_buf     = []
 
     def _is_sentence_end(text: str) -> bool:
         """
@@ -545,47 +849,6 @@ def stream_response_and_speak(system_prompt: str, memory: list, emotion: str = "
         if not token:
             continue
 
-        # ── First-line USE tag interception ──
-        # [USE:xxx] tags are short (~15-40 chars) and always on the first line.
-        # Buffer only long enough to confirm — never hold the whole response.
-        #
-        # Release conditions:
-        #   1. Newline seen → check if first line is a tag, flush accordingly
-        #   2. Buffer > 60 chars → clearly not a tag, release immediately
-        #   3. Doesn't start with "[" after 5 chars → not a tag, release now
-        if not _first_line_done:
-            _first_line_buf.append(token)
-            joined = "".join(_first_line_buf)
-
-            has_newline     = "\n" in joined
-            clearly_not_tag = (
-                len(joined) > 60 or
-                (len(joined) > 5 and not joined.lstrip().startswith("["))
-            )
-
-            if has_newline or clearly_not_tag:
-                _first_line_done = True
-
-                if has_newline:
-                    first_line, remainder = joined.split("\n", 1)
-                    first_line = first_line.strip()
-                    if first_line.startswith("[USE:") and first_line.endswith("]"):
-                        _use_tag = first_line[5:-1]
-                        print(f"   [USE tag detected: {_use_tag}]")
-                        if remainder.strip():
-                            full_response.append(remainder)
-                            token_buffer.append(remainder)
-                    else:
-                        full_response.extend(_first_line_buf)
-                        token_buffer.extend(_first_line_buf)
-                else:
-                    # No newline but clearly not a tag — release immediately
-                    full_response.extend(_first_line_buf)
-                    token_buffer.extend(_first_line_buf)
-
-                _first_line_buf = []
-            else:
-                continue  # still within tag-check window, keep buffering
 
         full_response.append(token)
         token_buffer.append(token)
@@ -620,13 +883,7 @@ def stream_response_and_speak(system_prompt: str, memory: list, emotion: str = "
 
     sentence_queue.put(None)
     tts_done.wait(timeout=120)
-
-    # If the first-line buffer was never flushed (very short response with no newline),
-    # treat it as normal text — no tag present.
-    if not _first_line_done and _first_line_buf:
-        full_response.extend(_first_line_buf)
-
-    return _strip_markdown("".join(full_response).strip()), _use_tag
+    return _strip_markdown("".join(full_response).strip())
 
 # ─────────────────────────────────────────────
 # MOOD / BEHAVIORAL STATE
@@ -794,6 +1051,7 @@ def main(text_mode: bool = False):
     arch       = HayeongArchitecture()
     session    = SessionTrust(environment="home")
     procs      = ProcessManager()
+    tracker    = SituationTracker() if SITUATION_TRACKER_AVAILABLE else None
 
     # Strip suspicion/verification messages from previous sessions.
     # These carry over into context and make Hayeong behave like she's
@@ -878,6 +1136,24 @@ def main(text_mode: bool = False):
     else:
         print("   ⚠️  discord_hayeong.js not found — Discord voice inactive")
 
+
+    # ── Preload primary model — eliminates cold-start latency ──
+    try:
+        print("   Warming up model...", end=" ", flush=True)
+        requests.post(
+            OLLAMA_URL,
+            json={
+                "model":   PRIMARY_MODEL,
+                "messages": [{"role": "user", "content": "hi"}],
+                "stream":  False,
+                "options": {"num_predict": 1, "num_ctx": 512},
+            },
+            timeout=30,
+        )
+        print("ready.")
+    except Exception:
+        print("(warmup failed — first response may be slow)")
+
     print("\n✅ Hayeong is ready.")
     if text_mode:
         print("   Mode: TEXT CHAT — type your message and press Enter. Type 'exit' to quit.")
@@ -958,18 +1234,11 @@ def main(text_mode: bool = False):
                 logger.end_session()
             break
 
-        
-        # ── UNIFIED INTENT ROUTING ──
-        # Context-aware — passes recent memory so the router understands
-        # what's actually happening in the conversation, not just keywords.
-        intent = detector.route(user_input, memory[-4:])
-
         # ── Log user input ──
         if LOGGER_AVAILABLE:
             logger.log_conversation(
                 role="james",
                 content=user_input,
-                intent=intent.get("intent") if intent else None
             )
  
         # ── Rest command — "take a rest", "go rest", "recharge" ──
@@ -993,351 +1262,6 @@ def main(text_mode: bool = False):
             resp = random.choice(_rest_responses)
             print(f"\nHayeong: {resp}")
             _speak(resp, emotion="warm")
-            memory.append({"role": "user", "content": user_input})
-            memory.append({"role": "AI",   "content": resp})
-            save_memory(memory)
-            print()
-            continue
-
-        # ── Capability: start/stop a subprocess ──
-        if intent["intent"] == "capability" and intent["action"] and intent["target"]:
-            cap    = intent["target"]
-            action = intent["action"]
-            response_text = CAPABILITY_RESPONSES.get((action, cap), f"{action}ing {cap}.")
-            print(f"\nHayeong: {response_text}")
-            _speak(response_text, emotion="neutral")
- 
-            if action == "start":
-                result = procs.start(cap)
-                if procs.is_running(cap):
-                    procs.monitor_and_restart(cap)
-                print(f"   [{result}]")
-            else:
-                result = procs.stop(cap)
-                print(f"   [{result}]")
- 
-            memory.append({"role": "user", "content": user_input})
-            memory.append({"role": "AI",   "content": response_text})
-            save_memory(memory)
-            print()
-            continue
- 
-        # ── Task commands ──
-        if intent["intent"] == "task" and tasks:
-            task_action = intent["action"]
- 
-            if task_action == "show":
-                resp = tasks.format_list()
-                print(f"\nHayeong:\n{resp}")
-                _speak("Here's what's on my list.", emotion="neutral")
- 
-            elif task_action == "show_completed":
-                resp = tasks.format_list(state="completed")
-                print(f"\nHayeong:\n{resp}")
-                _speak("Here's what I've finished.", emotion="neutral")
- 
-            elif task_action == "show_blocked":
-                resp = tasks.format_list(state="blocked")
-                print(f"\nHayeong:\n{resp}")
-                _speak("Here's what's blocked.", emotion="neutral")
- 
-            elif task_action == "add":
-                # Strip the command portion so only the task description remains
-                raw = re.sub(
-                    r'(?i)(add a task|add task|remember to|i need to|put on the list)[:\s]*',
-                    '', user_input
-                ).strip() or user_input
-                kwargs   = parse_task_from_text(raw, origin="james")
-                new_task = tasks.add_task(**kwargs)
-                resp     = f"Added to backlog: {new_task['title']}"
-                print(f"\nHayeong: {resp}")
-                _speak(resp, emotion="neutral")
- 
-            else:
-                # Unrecognised task sub-action — let LLM handle it naturally
-                resp = None
- 
-            if resp is not None:
-                memory.append({"role": "user", "content": user_input})
-                memory.append({"role": "AI",   "content": resp})
-                save_memory(memory)
-                print()
-                continue
- 
-        # ── Email commands ──
-        if intent["intent"] == "email" and email:
-            email_action = intent["action"]
-
-            if email_action == "send_summary":
-                task_sum  = tasks.summary() if tasks else None
-                proc_stat = procs.status()
-                ok   = hayeong_email.send_daily_summary(
-                    task_summary=task_sum, process_status=proc_stat
-                )
-                resp = "Sent you a summary." if ok else "Couldn't send — check email config."
-
-            elif email_action == "check_inbox":
-                # Use monitor log if available — faster, no IMAP call needed
-                if email_monitor:
-                    recent = email_monitor.get_recent(5)
-                    unsurfaced = email_monitor.get_unsurfaced_important()
-                    if unsurfaced:
-                        resp = f"{len(unsurfaced)} important email(s) you haven't seen yet."
-                        for m in unsurfaced[:3]:
-                            print(f"  [{m['importance'].upper()}] From: {m['from']}")
-                            print(f"  Subject: {m['subject']}")
-                            print(f"  {m['body'][:150]}\n")
-                    elif recent:
-                        resp = f"Nothing urgent. Last email was from {recent[0].get('from','').split('<')[0].strip()} — {recent[0].get('subject','(no subject)')}."
-                    else:
-                        resp = "Inbox looks quiet."
-                else:
-                    # Fallback to live IMAP check
-                    messages_inbox = hayeong_email.check_inbox(unread_only=True)
-                    if messages_inbox:
-                        resp = f"{len(messages_inbox)} new message{'s' if len(messages_inbox) != 1 else ''}."
-                        for m in messages_inbox[:3]:
-                            print(f"  From: {m['from']}")
-                            print(f"  Subject: {m['subject']}")
-                            print(f"  {m['body'][:150]}\n")
-                    else:
-                        resp = "Nothing new."
-
-            elif email_action == "search" or any(
-                p in user_input.lower() for p in [
-                    "find email", "search email", "search my email",
-                    "find that email", "look for email", "email about",
-                    "email from", "did i get an email",
-                ]
-            ):
-                # Email search via monitor log
-                if email_monitor:
-                    query   = WebSearch.extract_query(user_input, recent_memory=memory[-4:]) if SEARCH_AVAILABLE else user_input
-                    results = email_monitor.search(query, max_results=5)
-                    _web_context = format_email_results(results, query)
-                    resp = None  # let LLM synthesize with context
-                else:
-                    resp = "Email search isn't available right now."
-
-            else:  # notify — default email action
-                msg_text = re.sub(
-                    r'(?i)(email me|send me a message|notify me|send me a note|ping me)[:\s]*',
-                    '', user_input
-                ).strip() or "Hello from Hayeong!"
-                ok   = hayeong_email.notify(msg_text)
-                resp = "Done, sent." if ok else "Couldn't send — check email config."
-
-            if resp is not None:
-                print(f"\nHayeong: {resp}")
-                _speak(resp, emotion="neutral")
-                memory.append({"role": "user", "content": user_input})
-                memory.append({"role": "AI",   "content": resp})
-                save_memory(memory)
-                print()
-                continue
-            # If resp is None (search case), fall through to LLM with _web_context injected
-
-        # ── Image generation ──
-        if intent["intent"] == "image_generation" and COMFYUI_AVAILABLE:
-            u = user_input.lower()
-            if any(x in u for x in ["realistic", "make it real", "real photo", "turn this into"]):
-                _speak("Which image should I make realistic?", emotion="neutral")
-                image_path = input("Image path: ").strip()
-                result = comfyui.make_realistic(image_path)
-            elif any(x in u for x in ["screen", "on my screen"]):
-                _speak("Let me look at your screen.", emotion="neutral")
-                result = comfyui.generate_from_screen(user_input)
-            elif any(x in u for x in ["this image", "this photo", "reference"]):
-                _speak("Which image should I use as a reference?", emotion="neutral")
-                image_path = input("Image path: ").strip()
-                result = comfyui.generate_from_image(image_path, user_input)
-            else:
-                _speak("On it, let me generate that.", emotion="neutral")
-                result = comfyui.generate(user_input)
-
-            if result["success"]:
-                resp = f"Done! Saved to {result['image_path']}"
-                if LOGGER_AVAILABLE:
-                    logger.log_image_generation(
-                        prompt=result.get("prompt_used", ""),
-                        output_path=result.get("image_path"),
-                        model="ponyDiffusionV6XL",
-                        outcome="success"
-                    )
-                    logger.log_capability_used("comfyui", action="generate", outcome="success")
-            else:
-                resp = result.get("message", "Something went wrong with image generation.")
-                if LOGGER_AVAILABLE:
-                    logger.log_capability_used("comfyui", action="generate", outcome="failed",
-                                               error=result.get("message"))
-
-            print(f"\nHayeong: {resp}")
-            _speak(resp, emotion="neutral")
-            memory.append({"role": "user", "content": user_input})
-            memory.append({"role": "AI",   "content": resp})
-            save_memory(memory)
-            print()
-            continue
-
-        # ── Goal / progress report trigger ──
-        if LOGGER_AVAILABLE and any(p in user_input.lower() for p in [
-            "goal", "progress report", "workstation", "how much have we saved",
-            "how are we doing", "weekly report"
-        ]):
-            goal = logger.goal_status()
-            resp = (
-                f"We've saved ${goal['earned']:.2f} of ${goal['target']:.2f} — "
-                f"{goal['percent']:.1f}% of the workstation goal. "
-                f"${goal['remaining']:.2f} to go."
-            )
-            # Feed data to memory so Hayeong can respond naturally and add her own thoughts
-            memory.append({"role": "user", "content": user_input})
-            memory.append({"role": "AI",   "content": resp})
-            save_memory(memory)
-            # Don't continue — fall through to LLM so she can elaborate naturally
-
-        # ── Web search ──
-        # Acknowledge immediately, run search in parallel, synthesize when done.
-        _web_context = ""
-        if intent["intent"] == "web_search" and SEARCH_AVAILABLE:
-            _is_news        = any(kw in user_input.lower() for kw in ["news", "latest", "current"])
-            _delivery_mode  = intent.get("delivery_mode", "conversational")
-
-            # Step 1 — acknowledge instantly
-            if _delivery_mode == "document":
-                _speak("Sure, let me pull that together for you. I'll send you the full breakdown when I'm done.", emotion="neutral")
-            else:
-                _speak("Let me look that up.", emotion="neutral")
-            print(f"   [searching... delivery={_delivery_mode}]")
-
-            # Step 2 — extract query + run search
-            query = WebSearch.extract_query(user_input, recent_memory=memory[-6:])
-            if _is_news:
-                data = {"query": query, "results": searcher.news(query, max_results=5), "full_text": {}}
-            else:
-                # Document mode fetches more results for a richer breakdown
-                max_r  = 6 if _delivery_mode == "document" else 4
-                data   = searcher.search_and_read(query, max_results=max_r, fetch_top=2 if _delivery_mode == "document" else 1)
-
-            n_results = len(data.get("results", []))
-            if n_results > 0:
-                print(f"   [found {n_results} results]")
-            else:
-                print(f"   [no results — falling back to training knowledge]")
-
-            if _delivery_mode == "document" and n_results > 0:
-                # Document mode: generate doc, save it, email it, give Hayeong a brief
-                # context so she can give her personal take before mentioning the doc
-                doc_content = searcher.format_as_document(query, data, topic=query)
-                doc_path    = searcher.save_document(doc_content, topic=query)
-                print(f"   [document saved: {doc_path}]")
-
-                # Try to email the document if email is available
-                _doc_emailed = False
-                if EMAIL_AVAILABLE:
-                    try:
-                        with open(doc_path, "r", encoding="utf-8") as f:
-                            doc_text = f.read()
-                        email_result = hayeong_email.send(
-                            to=hayeong_email.james_email,
-                            subject=f"Research: {query}",
-                            body=doc_text,
-                        )
-                        _doc_emailed = email_result.get("success", False)
-                        if _doc_emailed:
-                            print(f"   [document emailed to James]")
-                    except Exception as e:
-                        print(f"   [email failed: {e}]")
-
-                # Give Hayeong context for her conversational take + doc mention
-                _doc_note = (
-                    f"You emailed James the full research document for '{query}'. "
-                    if _doc_emailed else
-                    f"You saved the full research document to: {doc_path}. "
-                )
-                _web_context = (
-                    searcher.format_for_context(query, data) +
-                    f"\n\n[DOCUMENT NOTE]: {_doc_note}"
-                    "Give James your brief personal take on the most interesting findings "
-                    "in 2-4 sentences, then mention you've sent/saved the full breakdown. "
-                    "Don't list everything — just your honest impression of what stands out."
-                )
-            else:
-                # Conversational mode: standard context injection, she synthesizes naturally
-                _web_context = searcher.format_for_context(query, data)
-
-            if LOGGER_AVAILABLE:
-                logger.log_capability_used(
-                    "web_search", action="search", outcome="success",
-                    details={"query": query, "results": n_results, "delivery": _delivery_mode}
-                )
-
-        # ── Vision ──
-        # Acknowledge immediately, capture + analyze, then synthesize.
-        _vision_context = ""
-        if intent["intent"] == "vision" and VISION_AVAILABLE:
-            u = user_input.lower()
-            if any(x in u for x in ["image", "photo", "file", "this image", "this photo"]):
-                _speak("Which image should I look at?", emotion="neutral")
-                image_path = input("Image path: ").strip()
-                _speak("Got it, analyzing now.", emotion="neutral")
-                _vision_context = vision.look_at_image(image_path, user_input)
-            elif any(x in u for x in ["deep", "detail", "explain", "what's in", "code"]):
-                _speak("Let me take a closer look.", emotion="neutral")
-                _vision_context = vision.look_at_screen_deep(user_input)
-            else:
-                _speak("Let me take a look.", emotion="neutral")
-                _vision_context = vision.look_at_screen(user_input)
-            if LOGGER_AVAILABLE:
-                logger.log_capability_used("vision", action="analyze", outcome="success")
-
-        # ── Approve / Deny self-generated capability ──
-        if smm:
-            approve_match = re.match(_APPROVE_PATTERN, user_input)
-            deny_match    = re.match(_DENY_PATTERN, user_input)
-            if approve_match or deny_match:
-                match    = approve_match or deny_match
-                approved = bool(approve_match)
-                filename = match.group(1)
-                ok       = smm.approve_capability(filename, approved=approved)
-                resp     = f"{'Activated' if approved else 'Disabled'}: {filename}." if ok else f"Couldn't find '{filename}' in pending capabilities."
-                print(f"\nHayeong: {resp}")
-                _speak(resp, emotion="neutral")
-                memory.append({"role": "user", "content": user_input})
-                memory.append({"role": "AI",   "content": resp})
-                save_memory(memory)
-                print()
-                continue
-
-        # ── Self-mod summary ──
-        if smm and any(p in user_input.lower() for p in _SELFMOD_PATTERNS):
-            summary = smm.weekly_summary()
-            pending = smm.pending_proposals()
-            if summary["has_anything"]:
-                lines = "\n".join(summary["summary_lines"])
-                resp = f"Here's what I changed this week:\n{lines}"
-            elif pending:
-                resp = f"I have {len(pending)} pending proposal(s) waiting for your review."
-            else:
-                resp = "Nothing to report — no changes this week."
-            print(f"\nHayeong: {resp}")
-            _speak(resp, emotion="neutral")
-            memory.append({"role": "user", "content": user_input})
-            memory.append({"role": "AI", "content": resp})
-            save_memory(memory)
-            print()
-            continue
-
-        # ── Status command ──
-        if any(p in user_input.lower() for p in ["what's running", "status", "what are you running"]):
-            status = procs.status()
-            if status:
-                lines = ", ".join(f"{k} ({v})" for k, v in status.items())
-                resp = f"Running: {lines}."
-            else:
-                resp = "Nothing extra running right now."
-            print(f"\nHayeong: {resp}")
-            _speak(resp, emotion="neutral")
             memory.append({"role": "user", "content": user_input})
             memory.append({"role": "AI",   "content": resp})
             save_memory(memory)
@@ -1397,175 +1321,384 @@ def main(text_mode: bool = False):
         if long_term_context:
             system_prompt = long_term_context + "\n\n" + system_prompt
 
-        # Prepend any web search or vision context for this turn
-        if _web_context:
-            system_prompt = _web_context + "\n\n" + system_prompt
-        if _vision_context:
-            system_prompt = _vision_context + "\n\n" + system_prompt
 
         current_emotion = arch.behavioral.state["interior_state"]["current"]["primary_emotion"]
 
-        # ── Model routing ──
-        # Decide which model handles this message before calling the LLM.
-        # Coding → DeepSeek 33b | Long/complex → Qwen 32b | Default → Qwen 14b
-        route         = router.route(user_input)
+        # ── Wrap-up fast path — skip entire decision pipeline ──
+        # "Thank you very much!" should never trigger a tool.
+        # Checking this before snapshot/decide_action/verifier saves
+        # 3 GPU calls and eliminates a whole class of false triggers.
+        if is_wrap_up(user_input):
+            print(f"   [WrapUp] detected — skipping decision pipeline")
+            adjust_mood_by_context(user_input, mood_state)
+            mood_to_behavioral_state(mood_state, arch)
+            if mixer:
+                blend = suggest_blend_for_context("casual", "home")
+                mixer.blend_states(blend)
+                mixer.step()
+            who           = session.get_privacy_context()
+            long_term_ctx = recall_for_prompt(user_input, n_results=4)
+            system_prompt = build_system_prompt(
+                who=who, situation="casual", environment="home",
+                state_of_mind=detect_state_of_mind("casual", "home", mood_state)
+            )
+            if long_term_ctx:
+                system_prompt = long_term_ctx + "\n\n" + system_prompt
+            memory.append({"role": "user", "content": user_input})
+            show_thinking()
+            ai_response = stream_response_and_speak(
+                system_prompt, memory,
+                emotion=arch.behavioral.state["interior_state"]["current"]["primary_emotion"],
+                text_mode=text_mode,
+                model=selected_model if 'selected_model' in dir() else PRIMARY_MODEL,
+            )
+            if ai_response:
+                memory.append({"role": "AI", "content": ai_response})
+                save_memory(memory)
+            print()
+            continue
+
+        # ── Model selection ──
+        # model_router.py still handles code/complex routing via keyword triggers.
+        # For most messages the primary model handles everything.
+        route          = router.route(user_input)
         selected_model = route["model_name"]
         if route["model"] != "main":
             print(f"   [routing to {route['model']} — {route['reasoning']}]")
 
+        # ── Situation snapshot — shared awareness for this entire turn ──
+        # Computed ONCE here. Passed to decide_action, context_verifier,
+        # and injected into system_prompt so all calls share the same picture.
+        _snapshot = None
+        if tracker:
+            _snapshot = tracker.build_snapshot(user_input, memory, model=selected_model)
+
+        # ── JSON DECISION — what does Hayeong need to do? ──
+        decision = decide_action(user_input, memory, model=selected_model, snapshot=_snapshot)
+        action   = decision.get("action", "none")
+
+        # ── Context verifier — self-check before any tool executes ──
+        # Only runs when an action was actually chosen (skip overhead on "none").
+        # Extracts constraints and confirms the action is genuinely requested.
+        _constraints = []
+
+        # Also respect the snapshot's phase — if we're wrapping up, block all tools
+        if tracker and _snapshot and _snapshot.get("phase") == "wrapping_up":
+            if action != "none":
+                print(f"   [Situation] phase=wrapping_up — blocking {action}, falling back to conversation")
+                action = "none"
+
+        if action != "none":
+            verification = context_verifier(
+                user_input, action, decision, memory,
+                model=selected_model, snapshot=_snapshot
+            )
+            if not verification["verified"]:
+                print(f"   [Verifier] action blocked — falling back to conversation")
+                action = "none"
+            else:
+                # Prefer verifier constraints; fall back to snapshot constraints
+                _constraints = verification.get("constraints", [])
+                if not _constraints and _snapshot:
+                    _constraints = _snapshot.get("active_constraints", [])
+
+        # ── Execute capability before streaming response ──
+        _web_context    = ""
+        _vision_context = ""
+
+        if action == "web_search" and SEARCH_AVAILABLE:
+            query         = decision.get("query") or WebSearch.extract_query(user_input, recent_memory=memory[-6:])
+            delivery      = decision.get("delivery", "conversational")
+            _is_news      = any(kw in user_input.lower() for kw in ["latest news", "news about", "what's in the news", "recent news", "breaking news"])
+
+            if delivery == "document":
+                _speak("Sure, let me pull that together. I'll have the full breakdown for you shortly.", emotion="neutral")
+            else:
+                _speak("Let me look that up.", emotion="neutral")
+            print(f"   [searching: {query!r} delivery={delivery}]")
+
+            if _is_news:
+                data = {"query": query, "results": searcher.news(query, max_results=5), "full_text": {}}
+            else:
+                max_r = 6 if delivery == "document" else 4
+                data  = searcher.search_and_read(query, max_results=max_r, fetch_top=2 if delivery == "document" else 1)
+
+            n_results = len(data.get("results", []))
+            print(f"   [found {n_results} results]")
+
+            if delivery == "document" and n_results > 0:
+                doc_content = searcher.format_as_document(query, data, topic=query, constraints=_constraints)
+                doc_path    = searcher.save_document(doc_content, topic=query)
+                print(f"   [document saved: {doc_path}]")
+                _doc_emailed = False
+                if EMAIL_AVAILABLE:
+                    try:
+                        with open(doc_path, "r", encoding="utf-8") as _f:
+                            doc_text = _f.read()
+                        _ok = hayeong_email.send(
+                            to=hayeong_email.to_address,
+                            subject=f"Research: {query}",
+                            body=doc_text,
+                        )
+                        _doc_emailed = isinstance(_ok, bool) and _ok or (isinstance(_ok, dict) and _ok.get("success"))
+                        if _doc_emailed:
+                            print(f"   [document emailed]")
+                    except Exception as _e:
+                        print(f"   [email failed: {_e}]")
+                _doc_note = (
+                    f"You emailed James the full research document for '{query}'. "
+                    if _doc_emailed else
+                    f"You saved the full research document to: {doc_path}. "
+                )
+                _web_context = (
+                    searcher.format_for_context(query, data) +
+                    f"\n\n[DOCUMENT NOTE]: {_doc_note}"
+                    "Give James your brief personal take on the most interesting findings "
+                    "in 2-4 sentences, then mention you've sent/saved the full breakdown."
+                )
+            else:
+                _web_context = searcher.format_for_context(query, data)
+            if LOGGER_AVAILABLE:
+                logger.log_capability_used("web_search", action="search", outcome="success",
+                    details={"query": query, "results": n_results, "delivery": delivery})
+
+        elif action == "vision" and VISION_AVAILABLE:
+            mode = decision.get("mode", "screen")
+            if mode == "image":
+                _speak("Which image should I look at?", emotion="neutral")
+                image_path = input("Image path: ").strip()
+                _speak("Got it, analyzing now.", emotion="neutral")
+                _vision_context = vision.look_at_image(image_path, user_input)
+            elif mode == "deep":
+                _speak("Let me take a closer look.", emotion="neutral")
+                _vision_context = vision.look_at_screen_deep(user_input)
+            else:
+                _speak("Let me take a look.", emotion="neutral")
+                _vision_context = vision.look_at_screen(user_input)
+            if LOGGER_AVAILABLE:
+                logger.log_capability_used("vision", action="analyze", outcome="success")
+
+        elif action == "image_gen" and COMFYUI_AVAILABLE:
+            u = user_input.lower()
+            _speak("On it, let me generate that.", emotion="neutral")
+            if any(x in u for x in ["realistic", "make it real", "real photo"]):
+                _speak("Which image should I make realistic?", emotion="neutral")
+                image_path = input("Image path: ").strip()
+                result = comfyui.make_realistic(image_path)
+            elif any(x in u for x in ["screen", "on my screen"]):
+                result = comfyui.generate_from_screen(user_input)
+            elif any(x in u for x in ["this image", "this photo", "reference"]):
+                _speak("Which image should I use as reference?", emotion="neutral")
+                image_path = input("Image path: ").strip()
+                result = comfyui.generate_from_image(image_path, user_input)
+            else:
+                result = comfyui.generate(user_input)
+            if result.get("success"):
+                if LOGGER_AVAILABLE:
+                    logger.log_capability_used("comfyui", action="generate", outcome="success")
+            else:
+                print(f"   [image gen failed: {result.get('message')}]")
+
+        elif action == "email_check" and email:
+            if email_monitor:
+                unsurfaced = email_monitor.get_unsurfaced_important()
+                recent     = email_monitor.get_recent(5)
+                if unsurfaced:
+                    _web_context = f"[EMAIL] {len(unsurfaced)} important email(s) James hasn't seen. Show him the details."
+                elif recent:
+                    _web_context = f"[EMAIL] Inbox quiet. Last email: from {recent[0].get('from','').split('<')[0].strip()} — {recent[0].get('subject','(no subject)')}."
+                else:
+                    _web_context = "[EMAIL] Inbox is empty / nothing new."
+            else:
+                msgs = hayeong_email.check_inbox(unread_only=True)
+                _web_context = f"[EMAIL] {len(msgs)} new message(s)." if msgs else "[EMAIL] Nothing new in inbox."
+
+        elif action == "email_send" and email:
+            msg_text = re.sub(r'(?i)(email me|notify me|ping me|send me)[:\s]*', '', user_input).strip() or "Hello from Hayeong!"
+            ok = hayeong_email.notify(msg_text)
+            _web_context = "[EMAIL SENT] Notification delivered." if ok else "[EMAIL] Send failed — check config."
+
+        elif action == "task_show" and tasks:
+            task_list    = tasks.format_list()
+            _web_context = f"[TASKS]\n{task_list}"
+
+        elif action == "task_add" and tasks:
+            task_text = decision.get("task_text") or re.sub(
+                r'(?i)(add a task|add task|remember to|i need to)[:\s]*', '', user_input
+            ).strip() or user_input
+            kwargs   = parse_task_from_text(task_text, origin="james") if TASKS_AVAILABLE else {"title": task_text}
+            new_task = tasks.add_task(**kwargs)
+            _web_context = f"[TASK ADDED] {new_task['title']}"
+
+        # ── Multi-step loop — chain follow-on actions if needed ──
+        # After the first action executes, ask once more: is there a logical
+        # next step? This handles compound tasks like "research X and email me
+        # a report" where search → email is a natural two-step sequence.
+        #
+        # Hard limits:
+        #   - Max 2 additional steps (3 total including first)
+        #   - Same action twice → stop (loop guard)
+        #   - Verifier does NOT re-run on loop steps — Hayeong decided these,
+        #     not the user. We trust her own follow-through.
+        #   - If either context slot is already populated from the first step,
+        #     carry it forward into accumulated context.
+        #
+        # The loop uses a separate conservative prompt focused on
+        # "what's next given what you just did" — not "what should you do."
+
+        _LOOP_PROMPT = """You are Hayeong deciding whether there is a logical NEXT STEP after completing an action.
+
+You just completed a task. Given the original request and what you just did, decide if there is one more clear action needed — or if you should stop and respond to James.
+
+IMPORTANT: Be very conservative. Only continue if:
+  1. The original request clearly implied a follow-on action (e.g. "research X and email it to me")
+  2. The next action is different from the one you just did
+  3. The next action directly serves the original request — not a tangent
+
+If in ANY doubt → return none. The conversation is better served by responding naturally.
+
+Return ONLY valid JSON. Same format as before:
+  {"action": "none"}
+  {"action": "email_send"}
+  {"action": "task_add", "task_text": "..."}
+
+Actions available: web_search, email_check, email_send, task_show, task_add, vision, image_gen, none
+"""
+
+        _LOOP_MAX_STEPS  = 2
+        _loop_step       = 0
+        _prev_action     = action
+        _all_web_ctx     = [_web_context]
+        _all_vision_ctx  = [_vision_context]
+
+        while _loop_step < _LOOP_MAX_STEPS and _prev_action != "none":
+            # Build accumulated results block for the loop decision
+            _accum = "\n\n".join(c for c in _all_web_ctx + _all_vision_ctx if c)
+            if not _accum:
+                break
+
+            try:
+                _loop_messages = [
+                    {"role": "system", "content": _LOOP_PROMPT},
+                ]
+                # Recent memory
+                for _m in memory[-6:]:
+                    _r = "user" if _m["role"] == "user" else "assistant"
+                    _loop_messages.append({"role": _r, "content": _m.get("content", "")[:250]})
+                _loop_messages.append({"role": "user", "content":
+                    f"Original request: {user_input}\n\n"
+                    f"Action just completed: {_prev_action}\n\n"
+                    f"Results so far:\n{_accum[:1200]}\n\n"
+                    f"Is there a clear next step, or should you stop and respond?"
+                })
+
+                _loop_resp = requests.post(
+                    OLLAMA_URL,
+                    json={
+                        "model":   selected_model,
+                        "messages": _loop_messages,
+                        "stream":  False,
+                        "format":  "json",
+                        "options": {"temperature": 0.0},
+                    },
+                    timeout=15,
+                )
+                _loop_raw  = _loop_resp.json()["message"]["content"].strip()
+                _loop_raw  = re.sub(r"^```[a-z]*\n?", "", _loop_raw)
+                _loop_raw  = re.sub(r"\n?```$",        "", _loop_raw)
+                _next      = json.loads(_loop_raw.strip())
+                _next_act  = _next.get("action", "none")
+
+                # Loop guards
+                if _next_act == "none" or _next_act == _prev_action:
+                    print(f"   [Loop step {_loop_step+1}] stopping — {_next_act}")
+                    break
+
+                print(f"   [Loop step {_loop_step+1}] {_next_act}")
+
+                # ── Dispatch the follow-on action ──
+                _step_web_ctx    = ""
+                _step_vision_ctx = ""
+
+                if _next_act == "web_search" and SEARCH_AVAILABLE:
+                    _q   = _next.get("query") or WebSearch.extract_query(user_input, recent_memory=memory[-4:])
+                    _del = _next.get("delivery", "conversational")
+                    print(f"   [searching: {_q!r} delivery={_del}]")
+                    _d   = searcher.search_and_read(_q, max_results=4, fetch_top=1)
+                    if _del == "document" and _d.get("results"):
+                        _dc  = searcher.format_as_document(_q, _d, topic=_q, constraints=_constraints)
+                        _dp  = searcher.save_document(_dc, topic=_q)
+                        _step_web_ctx = searcher.format_for_context(_q, _d) + f"\n\n[DOCUMENT SAVED: {_dp}]"
+                    else:
+                        _step_web_ctx = searcher.format_for_context(_q, _d)
+
+                elif _next_act == "email_send" and EMAIL_AVAILABLE:
+                    # Most common loop case: research done, now email the doc
+                    _prior_doc = next(
+                        (c for c in _all_web_ctx if "[DOCUMENT NOTE]" in c or "DOCUMENT SAVED" in c), ""
+                    )
+                    if _prior_doc:
+                        # The document was already emailed in the first step if delivery=document
+                        # If we're here it means it wasn't — send a summary
+                        _summary = _accum[:800]
+                        _ok = hayeong_email.notify(f"Research summary:\n\n{_summary}")
+                        _step_web_ctx = "[EMAIL SENT] Summary delivered." if _ok else "[EMAIL] Send failed."
+                    else:
+                        _ok = hayeong_email.notify(f"Regarding your request: {user_input[:200]}")
+                        _step_web_ctx = "[EMAIL SENT] Notification delivered." if _ok else "[EMAIL] Send failed."
+
+                elif _next_act == "task_add" and TASKS_AVAILABLE:
+                    _tt = _next.get("task_text") or user_input[:80]
+                    _nt = tasks.add_task(title=_tt, origin="hayeong")
+                    _step_web_ctx = f"[TASK ADDED] {_nt['title']}"
+
+                elif _next_act == "task_show" and TASKS_AVAILABLE:
+                    _step_web_ctx = f"[TASKS]\n{tasks.format_list()}"
+
+                elif _next_act == "email_check" and EMAIL_AVAILABLE:
+                    _msgs = hayeong_email.check_inbox(unread_only=True)
+                    _step_web_ctx = f"[EMAIL] {len(_msgs)} new message(s)." if _msgs else "[EMAIL] Nothing new."
+
+                elif _next_act == "vision" and VISION_AVAILABLE:
+                    _step_vision_ctx = vision.look_at_screen(user_input)
+
+                # Accumulate
+                if _step_web_ctx:
+                    _all_web_ctx.append(_step_web_ctx)
+                if _step_vision_ctx:
+                    _all_vision_ctx.append(_step_vision_ctx)
+
+                _prev_action = _next_act
+                _loop_step  += 1
+
+            except Exception as _le:
+                print(f"   [Loop step {_loop_step+1}] error ({_le}) — stopping loop")
+                break
+
+        # Merge all accumulated context from all steps
+        _web_context    = "\n\n".join(c for c in _all_web_ctx    if c)
+        _vision_context = "\n\n".join(c for c in _all_vision_ctx if c)
+
+        # ── Inject any context into system prompt ──
+        if _web_context:
+            system_prompt = _web_context + "\n\n" + system_prompt
+        if _vision_context:
+            system_prompt = _vision_context + "\n\n" + system_prompt
+        if tracker and _snapshot:
+            system_prompt = tracker.format_for_prompt(include_backlog=True) + "\n\n" + system_prompt
+
+        # ── Stream response ──
         show_thinking()
 
-        ai_response, use_tag = stream_response_and_speak(
+        ai_response = stream_response_and_speak(
             system_prompt, memory,
             emotion=current_emotion,
             text_mode=text_mode,
             model=selected_model,
         )
 
-        if not ai_response and not use_tag:
+        if not ai_response:
             continue
-
-        # ── USE tag dispatch ──
-        # If the LLM signalled a capability via [USE:xxx], execute it now.
-        # Results are injected into context so she can synthesize naturally
-        # on the next turn (or immediately for fast operations like tasks/email).
-        if use_tag:
-            tag = use_tag.lower()
-
-            # Web search — run search, inject results, let her respond next turn
-            if tag == "web_search" and SEARCH_AVAILABLE:
-                _is_news = any(kw in user_input.lower() for kw in ["news", "latest", "current"])
-                query    = WebSearch.extract_query(user_input, recent_memory=memory[-6:])
-                print(f"   [web_search via USE tag: {query}]")
-                if _is_news:
-                    data = {"query": query, "results": searcher.news(query, max_results=5), "full_text": {}}
-                else:
-                    data = searcher.search_and_read(query, max_results=4, fetch_top=1)
-                n = len(data.get("results", []))
-                print(f"   [found {n} results]")
-                _web_context = searcher.format_for_context(query, data) if n > 0 else ""
-                if _web_context:
-                    # Inject results and ask her to synthesize
-                    memory.append({"role": "user",  "content": user_input})
-                    memory.append({"role": "AI",    "content": ai_response})
-                    system_prompt_with_results = _web_context + "\n\n" + system_prompt
-                    ai_response, _ = stream_response_and_speak(
-                        system_prompt_with_results, memory,
-                        emotion=current_emotion, text_mode=text_mode, model=selected_model,
-                    )
-
-            # Vision — look at screen or image
-            elif tag == "vision" and VISION_AVAILABLE:
-                u = user_input.lower()
-                if any(x in u for x in ["image", "photo", "file"]):
-                    _speak("Which image should I look at?", emotion="neutral")
-                    image_path = input("Image path: ").strip()
-                    _vision_context = vision.look_at_image(image_path, user_input)
-                elif any(x in u for x in ["deep", "detail", "explain", "what's in", "code"]):
-                    _vision_context = vision.look_at_screen_deep(user_input)
-                else:
-                    _vision_context = vision.look_at_screen(user_input)
-                if _vision_context:
-                    memory.append({"role": "user", "content": user_input})
-                    memory.append({"role": "AI",   "content": ai_response})
-                    system_prompt_with_vision = _vision_context + "\n\n" + system_prompt
-                    ai_response, _ = stream_response_and_speak(
-                        system_prompt_with_vision, memory,
-                        emotion=current_emotion, text_mode=text_mode, model=selected_model,
-                    )
-
-            # Image generation
-            elif tag == "image_generation" and COMFYUI_AVAILABLE:
-                u = user_input.lower()
-                if any(x in u for x in ["realistic", "make it real", "real photo"]):
-                    _speak("Which image should I make realistic?", emotion="neutral")
-                    image_path = input("Image path: ").strip()
-                    result = comfyui.make_realistic(image_path)
-                elif any(x in u for x in ["screen", "on my screen"]):
-                    result = comfyui.generate_from_screen(user_input)
-                elif any(x in u for x in ["this image", "this photo", "reference"]):
-                    _speak("Which image should I use as a reference?", emotion="neutral")
-                    image_path = input("Image path: ").strip()
-                    result = comfyui.generate_from_image(image_path, user_input)
-                else:
-                    result = comfyui.generate(user_input)
-                if not result.get("success"):
-                    ai_response = result.get("message", "Something went wrong with image generation.")
-
-            # Email actions — email:check, email:send, email:summary
-            elif tag.startswith("email:") and email:
-                email_action = tag.split(":", 1)[1]
-                if email_action in ("check", "check_inbox"):
-                    if email_monitor:
-                        unsurfaced = email_monitor.get_unsurfaced_important()
-                        recent     = email_monitor.get_recent(5)
-                        if unsurfaced:
-                            resp = f"{len(unsurfaced)} important email(s) you haven't seen."
-                        elif recent:
-                            resp = f"Nothing urgent. Last was from {recent[0].get('from','').split('<')[0].strip()}."
-                        else:
-                            resp = "Inbox looks quiet."
-                    else:
-                        msgs = hayeong_email.check_inbox(unread_only=True)
-                        resp = f"{len(msgs)} new message{'s' if len(msgs)!=1 else ''}." if msgs else "Nothing new."
-                    print(f"\nHayeong: {resp}")
-                    _speak(resp, emotion="neutral")
-                    ai_response = resp
-
-                elif email_action in ("send", "notify"):
-                    msg_text = re.sub(
-                        r'(?i)(email me|send me a message|notify me|ping me)[:\s]*', '', user_input
-                    ).strip() or "Hello from Hayeong!"
-                    ok   = hayeong_email.notify(msg_text)
-                    resp = "Done, sent." if ok else "Couldn't send — check email config."
-                    print(f"\nHayeong: {resp}")
-                    _speak(resp, emotion="neutral")
-                    ai_response = resp
-
-                elif email_action == "summary":
-                    task_sum  = tasks.summary() if tasks else None
-                    proc_stat = procs.status()
-                    ok   = hayeong_email.send_daily_summary(task_summary=task_sum, process_status=proc_stat)
-                    resp = "Sent you a summary." if ok else "Couldn't send — check email config."
-                    print(f"\nHayeong: {resp}")
-                    _speak(resp, emotion="neutral")
-                    ai_response = resp
-
-            # Task actions — task:show, task:add, task:completed
-            elif tag.startswith("task:") and tasks:
-                task_action = tag.split(":", 1)[1]
-                if task_action == "show":
-                    resp = tasks.format_list()
-                    print(f"\nHayeong:\n{resp}")
-                    _speak("Here's what's on my list.", emotion="neutral")
-                    ai_response = resp
-                elif task_action == "add":
-                    raw    = re.sub(r'(?i)(add a task|add task|remember to|i need to|put on the list)[:\s]*', '', user_input).strip() or user_input
-                    kwargs = parse_task_from_text(raw, origin="james") if TASKS_AVAILABLE else {"title": raw}
-                    new_task = tasks.add_task(**kwargs)
-                    resp     = f"Added: {new_task['title']}"
-                    print(f"\nHayeong: {resp}")
-                    _speak(resp, emotion="neutral")
-                    ai_response = resp
-                elif task_action == "completed":
-                    resp = tasks.format_list(state="completed")
-                    print(f"\nHayeong:\n{resp}")
-                    _speak("Here's what I've finished.", emotion="neutral")
-                    ai_response = resp
-
-            # Capability start/stop via USE tag (fallback for ambiguous commands)
-            elif tag.startswith("capability:"):
-                parts = tag.split(":")
-                if len(parts) == 3:
-                    _, cap_action, cap_target = parts
-                    response_text = CAPABILITY_RESPONSES.get((cap_action, cap_target), f"{cap_action}ing {cap_target}.")
-                    if cap_action == "start":
-                        result = procs.start(cap_target)
-                        if procs.is_running(cap_target):
-                            procs.monitor_and_restart(cap_target)
-                    else:
-                        result = procs.stop(cap_target)
-                    print(f"   [{result}]")
 
         if LOGGER_AVAILABLE:
             logger.log_conversation(

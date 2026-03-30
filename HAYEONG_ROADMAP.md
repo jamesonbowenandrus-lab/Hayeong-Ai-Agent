@@ -128,17 +128,61 @@ See `move_to_h_drive.bat` — runs the migration automatically.
 A lightweight classifier runs before every request and selects the appropriate model.
 See `model_router.py`.
 
-**Model roles:**
+**Current model roles:**
 
 | Model | Role | Trigger |
 |-------|------|---------|
-| qwen2.5:14b | Conversation, reasoning, identity | Default |
+| qwen2.5:14b | Conversation, reasoning, identity, JSON decisions | Default |
 | qwen2.5:32b | Complex long-form reasoning | complexity signals + length |
-| qwen2.5:7b | Routing, query extraction | internal only |
+| qwen2.5:7b | Query extraction (web search) | internal only |
 | DeepSeek Coder 33b | Code generation, debugging | code / fix / write / implement |
 | moondream | Fast screen vision | look at screen |
 | llava:13b | Deep image analysis | detailed vision tasks |
 | llama3.2 | Lightweight fallback | when primary unavailable |
+
+---
+
+### 2.2b — Conditional Multi-Model Call Architecture 🔲
+**What:** Three-tier role-based model system. Models are assigned functional
+roles — not just sizes. The fast layer handles simple messages completely
+without ever touching the conversation layer.
+
+**Design principle:** Organize by speed and depth of thinking required,
+not by model size alone.
+
+| Layer | Role | Model | When Used |
+|-------|------|-------|-----------|
+| ⚡ Reflex | Classify + react to simple input | qwen2.5:7b | Greetings, ack, simple replies (~70% of messages) |
+| 🗣️ Conversation | Natural dialogue, JSON decisions, capability use | qwen2.5:14b | Any message needing personality or tool use |
+| 🧠 Deep thinking | Research, planning, complex reasoning | DeepSeek / qwen2.5:32b | Multi-step tasks, code, strategy |
+
+**Conditional logic (key design):**
+The 7b layer only escalates to 14b when complexity is detected.
+Simple messages complete at the reflex layer — 14b is never called.
+This is NOT two calls every time — it's one call for ~70% of messages.
+
+```
+user input
+    ↓
+7b classifier (fast, JSON output)
+    ↓
+{"complexity": "simple"} → 7b responds directly → DONE
+{"complexity": "complex"} → escalate to 14b → responds
+{"complexity": "task"} → escalate to 14b + task loop
+```
+
+**Why this matters for voice:**
+Real-time voice conversation requires sub-500ms first-token latency.
+A 14b model on a single GPU can't reliably hit that for simple inputs.
+7b on the same hardware responds in ~100-200ms — fast enough to feel alive.
+
+**Implementation order:**
+1. JSON structured output stable (current work) ✅ prerequisite
+2. Measure actual latency per message type (needs data first)
+3. Add 7b reflex layer conditionally
+4. Tune escalation threshold based on observed behavior
+
+**Dependency:** JSON refactor complete, latency measurement, voice pipeline
 
 ---
 
