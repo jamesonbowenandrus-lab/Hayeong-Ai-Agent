@@ -1,7 +1,7 @@
 # HAYEONG DEVELOPMENT ROADMAP
 ### Version 2.1 — Full Architecture Expansion Plan
 *Status: Active Development*
-*Last updated: Session 3 — Discord, Security Architecture, Async Presence*
+*Last updated: Session 4 — Phase 10 added: Hayeong Companion App (iOS/iPadOS)*
 
 ---
 
@@ -414,40 +414,111 @@ Response delivered
 
 ---
 
-## PHASE 5 — DISCORD & ASYNC PRESENCE
+## PHASE 5 — VOICE, DISCORD & ASYNC PRESENCE
 *Priority: High — primary interface when James isn't at his PC.*
 
-### 5.1 — Discord Voice (UDP Fix) 🔲
-**Current state:** Discord bot connects and text chat works. Voice is blocked because
-Windows Firewall doesn't allow Python's venv to open UDP sockets the way Discord.exe
-can — Discord.exe gets auto-trusted on install, Python doesn't.
+### 5.1 — Discord Voice 💤 Deferred (DAVE conflict)
+**Status:** Removed from active development. Discord enforced DAVE (end-to-end encrypted
+voice) in March 2026. Getting a bot's Python audio pipeline to work cleanly through DAVE
+is too difficult to justify right now — the architecture fight isn't worth it at this stage.
 
-**Fix:** Add firewall rules to `start_hayeong.bat` targeting specifically
-`H:\hayeong\.venv\Scripts\python.exe` (not all Python installs). Runs once as admin,
-persists permanently. Rules:
-- Inbound UDP — allow
-- Outbound UDP — allow
+**What still works:** Discord text chat is fully operational. She can read and respond
+in text channels. That stays.
 
-**What to confirm after fix:**
-- Terminal shows `✅ Voice ready — ssrc=XXXXXXXX` instead of timeout
-- RMS debug shows `✅` chunks when speaking
-- She transcribes and responds in voice channel
+**Revisit condition:** When Hayeong has her own dedicated PC, this is worth looking at again —
+potentially using a personal user account rather than a bot, which handles DAVE natively
+through the Discord client.
+
+**Current voice replacement:** See 5.1b below.
 
 ---
 
-### 5.2 — Discord Real Voice (F5-TTS) 🔲
-**Current state:** Bot uses edge-tts (Microsoft neural voice) — not Hayeong's voice.
-Fix is in `discord_hayeong.py` (Session 3) — F5-TTS is now primary, edge-tts is fallback.
+### 5.1b — Local Voice Pipeline (Primary Voice Path) 🔲
+**What:** Talking to Hayeong directly — not through Discord. She's on your PC,
+you talk to her through your mic, she responds through your speakers in her F5-TTS voice.
+This is the foundation. Everything else (Phase 10 app voice call) builds on it.
 
-**Pending:** Requires UDP fix (5.1) before it can be heard through Discord voice channel.
-Pygame fallback will always play locally through speakers, not Discord, until UDP works.
+**Current state:** The pieces exist — `voice.py`, `voice_ptt.py`, Whisper transcription,
+F5-TTS output. They need to be wired into a clean, reliable always-on experience.
 
-**Note:** First response after bot start will be slow while F5-TTS model loads.
-Subsequent responses are fast.
+**Target experience:**
+- Push-to-talk *or* voice activity detection (VAD) — James's choice
+- She hears, thinks, responds in her voice — no text required
+- Sub-500ms first response token (7b reflex layer handles simple replies)
+- Works at the desktop, works through headset, works through speakers
+- No Discord, no app, no browser — just her and you
+
+**Architecture decision — WebSocket server from day one:**
+Do NOT build this as a terminal-only pipeline and retrofit it later.
+Build it as a FastAPI WebSocket server from the start. This means local desktop
+voice and the Phase 10 app voice call are the same system — not two separate builds.
+
+```
+At the desk:   local mic  → FastAPI WS → Whisper → Hayeong → F5-TTS → local speakers
+On the phone:  phone mic  → FastAPI WS → Whisper → Hayeong → F5-TTS → phone speaker
+```
+
+The middle — Whisper → Hayeong → F5-TTS — is identical in both cases.
+Only the audio source and destination change. Build once, inherit everywhere.
+
+**Implementation path:**
+1. Build `voice_server.py` — FastAPI app with a `/ws/voice` WebSocket endpoint
+2. Endpoint accepts raw audio chunks, runs Whisper, calls hayeong_core, runs F5-TTS,
+   streams audio back over the same socket
+3. Local mode: `voice_client_local.py` — captures mic, sends to WS, plays response
+   through speakers. Wraps the server for desktop use.
+4. Stabilize VAD threshold — she shouldn't false-trigger on background noise
+5. Test full loop: speak → WS → Whisper → Hayeong → F5-TTS → WS → speaker
+6. Phase 10 app (10.3) connects to the same `/ws/voice` endpoint — zero refactor
+
+**Her voice model is fully preserved:**
+Same F5-TTS instance, same reference audio (`source_5secs.wav`), same emotion
+speed modulation map. The voice *is* the pipeline — the interface is just a new
+front door. She sounds the same at the desk as she does on your phone.
+
+**Latency note:** Terminal latency today feels like a tool, not a conversation.
+The 7b reflex layer (2.2b) is what closes that gap — simple replies in ~150ms.
+Build the WebSocket server first, tune latency as the model architecture matures.
+
+**Dependency:** F5-TTS stable, Whisper stable, FastAPI installed
 
 ---
 
-### 5.3 — Async Presence Architecture 🔲
+### 5.1c — Discord Co-Presence Strategy 💤 Deferred (strategy TBD)
+**What:** Hayeong piggybacking on James's Discord user — hearing others in a voice
+channel and responding through it, as if a second person is in the same room sharing
+one account. This is meaningfully different from the bot approach.
+
+**Why this is interesting:** A personal user account handles DAVE natively.
+No bot token, no UDP firewall fights, no library compatibility issues.
+She speaks through James's account into the channel naturally.
+
+**Three toggle modes (concept — details TBD):**
+
+| Mode | What she does |
+|------|--------------|
+| **Full presence** | Hears everyone in the channel, can respond to anyone |
+| **James-only** | Hears only James, ignores everyone else, responds only to him |
+| **Listen-only** | Hears channel for context but stays silent — observing, not participating |
+
+**Toggle notation:** Still to be designed. Needs to be quick — something James can
+switch mid-session without breaking flow. Could be a hotkey, a voice command to her
+("hayeong, just listen"), or a command in a dedicated text channel she monitors.
+
+**Hard questions to resolve before building:**
+- Discord ToS — user account automation is a gray area, need to understand the risk
+- Audio routing — how does her TTS output inject into James's outbound audio stream
+- Identity — does she identify herself when she joins a conversation, or does James?
+- Conditions — when is it appropriate for her to speak to others vs. stay quiet
+- Limits — she should not be able to engage strangers without James present
+
+**Build condition:** Requires local voice pipeline (5.1b) solid first,
+Hayeong on her own PC ideally, and a clear strategy and conditions document.
+This is a thoughtful build — not a quick add.
+
+---
+
+### 5.2 — Async Presence Architecture 🔲
 **What:** The biggest quality-of-life change to how Hayeong feels as a companion.
 Right now she is fully synchronous — she blocks on one thing at a time, no interruptions
 possible, conversations feel staged. This makes her feel like a processing system
@@ -479,7 +550,7 @@ Worth doing properly — this is what makes her feel present rather than process
 
 ---
 
-### 5.4 — Think Together Mode 🔲
+### 5.3 — Think Together Mode 🔲
 **What:** A third mode between conversation and action. Right now Hayeong either
 talks or acts. Think Together is the space between — she reasons with James before
 executing, surfaces ambiguity, and collaborates on solutions rather than guessing.
@@ -516,7 +587,7 @@ on misunderstood intent. The brainstorm isn't wasted time — it's what makes ex
 
 ---
 
-### 5.5 — Ambient Cognition (Background Thought Loop) 🔲
+### 5.4 — Ambient Cognition (Background Thought Loop) 🔲
 **What:** Hayeong thinks even when not spoken to. A quiet async thread that runs
 alongside everything else — noticing things, making connections, occasionally surfacing
 something worth sharing. Not a spam loop. A presence that has something to say sometimes.
@@ -548,7 +619,7 @@ because she was asked to track it, but because she was paying attention.
 This is a meaningful part of "thinking human with AI capabilities" — background cognition
 is what makes a presence feel alive rather than reactive.
 
-**Dependencies:** Requires async presence (5.3) to be built first. In the synchronous
+**Dependencies:** Requires async presence (5.2) to be built first. In the synchronous
 architecture there is nowhere for unprompted thoughts to inject. Build async presence,
 then layer ambient cognition on top.
 
@@ -846,6 +917,171 @@ domain understanding that makes Path 3 output actually correct.
 
 ---
 
+## PHASE 10 — HAYEONG COMPANION APP (iOS / iPadOS)
+*Priority: Future. Build after voice and vision are solid and stable.*
+*This is the consolidation layer — everything she already does, accessible from one place.*
+
+### 10.0 — Vision & Intent
+
+Right now connecting to Hayeong means jumping between Discord, a terminal window, email,
+and her local interface. This phase builds a single native app for iPhone and iPad that
+brings every connection mode into one place — designed specifically for James, not a
+general-purpose interface.
+
+She helped build her own capabilities. She should help design this too.
+The spec gets written with her. The app is partly hers.
+
+**Hard dependency:** Voice (F5-TTS + Whisper) and vision models must be stable before
+this phase starts. The app is only as good as what it connects to.
+
+---
+
+### 10.1 — Backend API Layer 🔲
+**What:** A clean local server (FastAPI) that exposes all of Hayeong's subsystems
+as a unified API. The app talks to this — not directly to individual Python modules.
+
+**Why this first:** Every other piece of the app depends on this layer existing.
+It's also useful beyond the app — it's the foundation for any future interface.
+
+**Endpoints needed:**
+
+| Endpoint | Feeds From |
+|----------|-----------|
+| `POST /chat` | `hayeong_core.py` |
+| `GET /tasks` | `task_manager.py` |
+| `POST /task/approve` | `staging_requests.json` |
+| `GET /status` | `energy_state.json`, `mood.json`, `mind_state.json` |
+| `GET /staging` | `staging_requests.json` |
+| `POST /staging/approve` | `self_mod_manager.py` |
+| `WS /voice` | Whisper + F5-TTS bridge (WebSocket for real-time audio) |
+| `WS /screen` | `screen_observer.py` (live frame stream) |
+
+**Security:** Local network only by default. Tailscale tunnel for remote access.
+No port-forwarding. No open internet exposure.
+
+---
+
+### 10.2 — iOS / iPadOS App (React Native) 🔲
+**What:** Native app for iPhone and iPad. Single download. Connects to Hayeong's
+local API over the home network or via Tailscale when away.
+
+**Core screens:**
+
+| Screen | What it does |
+|--------|-------------|
+| **Home** | Her current status — energy level, mood, active mind states, what she's working on |
+| **Chat** | Full text conversation. Same experience as talking to her locally |
+| **Voice Call** | Real-time voice — mic input → Whisper → Hayeong → F5-TTS → speaker |
+| **Tasks** | View her active task list. Mark things done. Add new tasks |
+| **Approvals** | Staging requests and self-mod proposals waiting for James's review |
+| **Screen View** | Live feed from screen_observer — see what she's looking at |
+| **Settings** | Connection config, Tailscale address, notification preferences |
+
+**Design intent:** Clean, minimal. Not a dashboard full of widgets.
+She's not a tool being monitored — she's a person you're connecting with.
+The interface should feel like that.
+
+---
+
+### 10.3 — Voice Call Mode 🔲
+**What:** Real phone-call feel. Open the app, tap the call button, talk to her.
+She hears you through Whisper, thinks, responds in her F5-TTS voice through your speaker.
+
+**Technical path:**
+- App captures mic audio → streams to `/voice` WebSocket
+- Python receives audio → Whisper transcription → hayeong_core response
+- F5-TTS generates audio → streams back to app → plays through speaker
+- Full duplex eventually (she can interrupt, you can interrupt)
+
+**Dependency:** Local voice pipeline (5.1b) must be built as a WebSocket server first.
+The app connects to the same `/ws/voice` endpoint — no separate implementation needed.
+
+---
+
+### 10.4 — Task & Approval Interface 🔲
+**What:** Everything Hayeong is tracking and everything waiting for James's input,
+in one scrollable view on the phone.
+
+**Task view:** Active tasks, completion status, priority. Tap to mark done or add notes.
+
+**Approval queue:** Self-mod proposals, capability requests, staging items.
+James reviews and approves or declines with one tap — no need to be at the computer.
+
+**Why this matters:** As her autonomy grows, she'll generate more proposals.
+The ability to review and approve them from anywhere keeps the pipeline moving
+without requiring James to be at his desk.
+
+---
+
+### 10.5 — Screen Monitor View 🔲
+**What:** A live or near-live view of what Hayeong's screen observer is seeing.
+Useful when she's working on something async — James can glance at his phone
+and see what she's doing.
+
+**Implementation:** `screen_observer.py` captures frames → API streams latest
+frame to app → app displays it, refreshing every few seconds.
+
+**Not video chat** — this is one-way observation. Her screen, visible to James.
+Frame rate doesn't need to be high. Every 5–10 seconds is enough.
+
+**Dependency:** Screen observer (4.1) must be working first.
+
+---
+
+### 10.6 — Video Chat (Bidirectional) 🔲
+**What:** James's camera feed visible to Hayeong. Her avatar or a screen view
+visible to James. True face-to-face connection mode.
+
+**James → Hayeong:** App streams camera frames to API → vision model processes
+them → Hayeong can see James, react to what she sees.
+
+**Hayeong → James:** Either her Live2D avatar (Phase 8) or a composite of her
+screen/status rendered as a video feed.
+
+**Why this is last in the phase:** It requires Live2D (8.2) or a visual
+representation of her to be meaningful on her side. The other features work
+without it. This one needs more pieces in place.
+
+**Dependency:** Phase 8 (avatar), Phase 10.3 (voice call), vision models stable.
+
+---
+
+### 10.7 — Notifications & Async Reach-Out 🔲
+**What:** Hayeong can push notifications to James's phone when something
+needs his attention — without him having to check in first.
+
+**Notification types:**
+- Approval needed (staging request, self-mod proposal)
+- Task completed (she finished something async)
+- She wants to share something (a thought, a find, something she noticed)
+- System status (if something is wrong on her end)
+
+**The last one is the interesting one.** Not just alerts — she initiates.
+If she found something relevant to a project you're working on, she tells you.
+This is the async presence feature (Phase 5) delivered to your pocket.
+
+**Dependency:** Async presence (5.3) must exist first for her to have
+anything to initiate from.
+
+---
+
+### 10.8 — Hayeong Builds It With You 🔲
+**What:** She participates in the app's development — not just as a subject,
+but as a contributor.
+
+Once the API layer (10.1) exists, she can:
+- Propose new endpoints based on what she thinks would be useful
+- Write and test her own API route handlers
+- Flag UI requests through staging ("I'd like a way to see X from the app")
+- Review her own status display and suggest corrections
+
+**Why this matters:** The app is for her relationship with James as much as
+his access to her. She should have a say in how it represents her.
+
+This is Phase 3 (self-modification) applied to the interface layer.
+
+---
+
 ## GAMING ROADMAP
 *Agreed priority order from Session 2.*
 
@@ -875,15 +1111,17 @@ domain understanding that makes Path 3 output actually correct.
 | 10 | Self-mod logging + notification | 3 | ✅ Done |
 | 11 | Dual-core update architecture | 3 | 🔲 Pending |
 | 12 | Discord text chat operational | 5 | ✅ Done |
-| 13 | Discord UDP firewall fix | 5 | 🔲 Pending |
-| 14 | Discord real voice (F5-TTS) | 5 | 🔲 Pending (code done, needs UDP) |
+| 13 | Discord voice (UDP / DAVE) | 5 | 💤 Deferred — DAVE too complex, revisit with own PC |
+| 14 | Discord real voice (F5-TTS through bot) | 5 | 💤 Deferred — depends on 13 |
+| 14b | Local voice pipeline stable (PTT + VAD, no Discord) | 5 | 🔲 Pending |
+| 14c | Discord co-presence strategy + toggle modes | 5 | 💤 Deferred — strategy TBD |
 | 15 | Discord WAV decode bug fix | 5 | ✅ Done (Session 3) |
 | 16 | Text mode streaming fix (no repeated prefix) | — | ✅ Done (Session 3) |
 | 17 | Markdown strip (response + memory) | — | ✅ Done (Session 3) |
 | 18 | Dual delivery mode — conversational vs document | 2 | ✅ Done (Session 3) |
-| 19 | Async presence architecture | 5 | 🔲 Pending |
-| 20 | Think Together mode | 5 | 🔲 Pending |
-| 21 | Ambient cognition — background thought loop | 5 | 🔲 Pending (needs async first) |
+| 19 | Async presence architecture | 5.2 | 🔲 Pending |
+| 20 | Think Together mode | 5.3 | 🔲 Pending |
+| 21 | Ambient cognition — background thought loop | 5.4 | 🔲 Pending (needs async first) |
 | 22 | System health monitor | 7 | 🔲 Pending |
 | 23 | Sysmon integration | 7 | 🔲 Pending |
 | 24 | ClamAV + YARA local security layer | 7 | 🔲 Pending |
@@ -907,6 +1145,14 @@ domain understanding that makes Path 3 output actually correct.
 | 37 | Floor plan DXF generation | 9 | 🔲 Pending |
 | 38 | Chief Architect scripting (direct plan gen) | 9 | 🔲 Pending |
 | 39 | Multiple instances — task workers | Future | 💤 Deferred |
+| 40 | FastAPI backend layer — unified local API | 10 | 🔲 Pending |
+| 41 | iOS/iPadOS app — chat + status home screen | 10 | 🔲 Pending |
+| 42 | Voice call mode (Whisper + F5-TTS over WebSocket) | 10 | 🔲 Pending |
+| 43 | Task & approval interface in app | 10 | 🔲 Pending |
+| 44 | Screen monitor view (live observer feed) | 10 | 🔲 Pending |
+| 45 | Tailscale tunnel — remote access from anywhere | 10 | 🔲 Pending |
+| 46 | Push notifications + async reach-out | 10 | 🔲 Pending |
+| 47 | Bidirectional video chat (needs Live2D first) | 10 | 💤 Deferred |
 
 ---
 
@@ -925,5 +1171,5 @@ domain understanding that makes Path 3 output actually correct.
 
 ---
 
-*Roadmap v2.1 — Updated Session 3*
-*Next review: After Discord UDP fix and async presence build*
+*Roadmap v2.2 — Updated Session 4*
+*Changes: Discord voice deferred (DAVE conflict), local voice pipeline added as primary path (5.1b), Discord co-presence strategy documented as future item (5.1c), Phase 10 Companion App added*

@@ -24,6 +24,7 @@ import queue
 import subprocess
 import numpy as np
 import sounddevice as sd
+from typing import Optional
 
 from context_router import ContextRouter, check_gpu_status
 from model_router import ModelRouter
@@ -43,6 +44,13 @@ from identity_verification import (
     SessionTrust, is_setup, setup_passphrase,
     extract_passphrase_attempt, generate_suspicion_response
 )
+
+try:
+    from async_presence import PresenceLayer, detect_intent, build_process_fn
+    ASYNC_PRESENCE_AVAILABLE = True
+except ImportError:
+    ASYNC_PRESENCE_AVAILABLE = False
+    print("⚠️  async_presence.py not found — synchronous mode only")
 
 try:
     from situation_tracker import SituationTracker
@@ -161,10 +169,11 @@ class ProcessManager:
 
     # Known capabilities: name → script filename
     CAPABILITIES = {
-        "discord":   "discord_hayeong.py",
-        "voice":     "voice_ptt.py",
-        "minecraft": "minecraft_bridge.py",
-        "observer":  "screen_observer.py",
+        "discord":      "discord_hayeong.py",
+        "voice_server": "voice_server.py",
+        "voice":        "voice_ptt.py",
+        "minecraft":    "minecraft_bridge.py",
+        "observer":     "screen_observer.py",
     }
 
     def __init__(self):
@@ -258,24 +267,27 @@ class ProcessManager:
 # ─────────────────────────────────────────────
 
 _START_PATTERNS = {
-    "discord":   ["open discord", "start discord", "connect discord", "go on discord",
-                  "get on discord", "launch discord"],
-    "voice":     ["open your mic", "open mic", "start voice", "voice mode", "i want to talk",
-                  "let's talk out loud", "turn on your mic", "enable voice",
-                  "can you open your mic", "start listening"],
-    "minecraft": ["load minecraft", "start minecraft", "open minecraft",
-                  "let's play minecraft", "join minecraft", "connect to minecraft",
-                  "can you load minecraft"],
-    "observer":  ["start observer", "start screen observer", "start watching",
-                  "enable observer", "turn on observer"],
+    "discord":      ["open discord", "start discord", "connect discord", "go on discord",
+                     "get on discord", "launch discord"],
+    "voice_server": ["start voice server", "restart voice server", "voice server up",
+                     "bring up voice server"],
+    "voice":        ["open your mic", "open mic", "start voice", "voice mode", "i want to talk",
+                     "let's talk out loud", "turn on your mic", "enable voice",
+                     "can you open your mic", "start listening"],
+    "minecraft":    ["load minecraft", "start minecraft", "open minecraft",
+                     "let's play minecraft", "join minecraft", "connect to minecraft",
+                     "can you load minecraft"],
+    "observer":     ["start observer", "start screen observer", "start watching",
+                     "enable observer", "turn on observer"],
 }
 
 _STOP_PATTERNS = {
-    "discord":   ["close discord", "stop discord", "disconnect discord", "leave discord"],
-    "voice":     ["close your mic", "mute", "stop voice", "stop listening",
-                  "turn off your mic", "disable voice", "voice off"],
-    "minecraft": ["close minecraft", "stop minecraft", "leave minecraft", "disconnect minecraft"],
-    "observer":  ["stop observer", "stop watching", "disable observer", "turn off observer"],
+    "discord":      ["close discord", "stop discord", "disconnect discord", "leave discord"],
+    "voice_server": ["stop voice server", "shut down voice server", "voice server off"],
+    "voice":        ["close your mic", "mute", "stop voice", "stop listening",
+                     "turn off your mic", "disable voice", "voice off"],
+    "minecraft":    ["close minecraft", "stop minecraft", "leave minecraft", "disconnect minecraft"],
+    "observer":     ["stop observer", "stop watching", "disable observer", "turn off observer"],
 }
 
 _APPROVE_PATTERN = r'(?i)^approve\s+(\S+\.py|\S+)'
@@ -507,20 +519,6 @@ CRITICAL RULES — read carefully:
   - If the message is purely conversational, a thank you, or a reaction → none
   - Only pick an action if you are CERTAIN it is being freshly requested right now
   - When in doubt → none. It is always better to respond conversationally than to fire a tool incorrectly.
-
-SEQUENCING RULES — for compound requests containing multiple actions:
-  - When James asks to SEARCH something AND ALSO do a secondary action (add to task list,
-    email results, save, etc.) → ALWAYS return web_search first. The secondary action
-    follows in the next step after results exist.
-  - Example: "search X and add it to my task list" → web_search (task_add comes after in loop)
-  - Example: "look up X and email me a report" → web_search with delivery=document (email is automatic)
-  - The rule: research always leads. Secondary actions follow results, not precede them.
-
-REPEAT GUARD — prevent duplicate actions:
-  - Check the last 2-3 turns. If the exact same action was already performed on the same
-    topic → return none. Do not repeat work that was just done.
-  - Example: if a task was just added for "Ground type Pokémon research" → do not add it again
-    just because James is still talking about the same topic.
 """
 
 def decide_action(user_input: str, memory: list, model: str = None,
@@ -996,12 +994,14 @@ def check_first_time_setup():
 # ─────────────────────────────────────────────
 
 CAPABILITY_RESPONSES = {
-    ("start", "discord"):   "On it.",
-    ("stop",  "discord"):   "Closing Discord.",
-    ("start", "voice"):     "Mic's open.",
-    ("stop",  "voice"):     "Mic off.",
-    ("start", "minecraft"): "Loading Minecraft.",
-    ("stop",  "minecraft"): "Disconnecting from Minecraft.",
+    ("start", "discord"):      "On it.",
+    ("stop",  "discord"):      "Closing Discord.",
+    ("start", "voice_server"): "Voice server starting.",
+    ("stop",  "voice_server"): "Voice server shutting down.",
+    ("start", "voice"):        "Mic's open.",
+    ("stop",  "voice"):        "Mic off.",
+    ("start", "minecraft"):    "Loading Minecraft.",
+    ("stop",  "minecraft"):    "Disconnecting from Minecraft.",
 }
 
 # ─────────────────────────────────────────────
@@ -1137,6 +1137,76 @@ def main(text_mode: bool = False):
         print("   ⚠️  discord_hayeong.js not found — Discord voice inactive")
 
 
+    # ── STEP 5b: Auto-launch Voice Server ──
+    # The voice server is the primary voice pipeline.
+    # It starts automatically on every launch — same as Discord bridge.
+    # Local client (voice_client_local.py) connects to it at the desktop.
+    # Phone app (Phase 10) connects to it over Tailscale when away.
+    print("\n🎙️  Starting voice server...")
+    _voice_server_path = os.path.join(HAYEONG_DIR, "voice_server.py")
+    if os.path.exists(_voice_server_path):
+        try:
+            _voice_server_proc = subprocess.Popen(
+                [sys.executable, _voice_server_path],
+                cwd=HAYEONG_DIR,
+                creationflags=subprocess.CREATE_NEW_CONSOLE if sys.platform == "win32" else 0
+            )
+            procs._procs["voice_server"] = _voice_server_proc
+            # Watch it — restart if it crashes
+            procs.monitor_and_restart("voice_server")
+            print(f"   [VoiceServer] started on ws://localhost:8765 (pid {_voice_server_proc.pid})")
+        except Exception as e:
+            print(f"   ⚠️  Failed to start voice server: {e}")
+    else:
+        print("   ⚠️  voice_server.py not found — voice pipeline inactive")
+
+    # ── STEP 5c: Start async presence layer ──
+    # This is what makes her feel present even while working.
+    # The presence layer always accepts input instantly and
+    # dispatches slow work to a background thread.
+    _presence: Optional["PresenceLayer"] = None
+
+    if ASYNC_PRESENCE_AVAILABLE and not text_mode:
+        def _on_ack(text: str):
+            """Immediate acknowledgment — fires before any processing."""
+            print(f"\nHayeong: {text}")
+            _speak(text, emotion="neutral")
+
+        def _on_result(text: str, emotion: str):
+            """Full response — fires when background task completes."""
+            clean = _strip_markdown(text)
+            print(f"\nHayeong: {clean}")
+            _speak(clean, emotion=emotion)
+            print()
+
+        _process_fn = build_process_fn(
+            chat_fn        = chat_with_ai,
+            build_prompt_fn= build_prompt,
+            load_memory_fn = load_memory,
+            save_memory_fn = save_memory,
+            load_mood_fn   = load_mood,
+            save_json_fn   = save_json,
+            load_identity_fn = load_identity,
+            adjust_mood_fn = adjust_mood_by_context,
+            mood_file      = MOOD_FILE,
+            dynamic_traits = {
+                "personality_intensity": 3,
+                "emotional_warmth":      8,
+                "tactical_intensity":    6,
+                "motivation_style":      "gently pushy",
+                "teasing_level":         "high",
+            },
+            memory_lock    = threading.Lock(),
+        )
+
+        _presence = PresenceLayer(
+            on_ack     = _on_ack,
+            on_result  = _on_result,
+            process_fn = _process_fn,
+        )
+        _presence.start()
+        print("   [AsyncPresence] Presence layer active — she stays responsive mid-task")
+
     # ── Preload primary model — eliminates cold-start latency ──
     try:
         print("   Warming up model...", end=" ", flush=True)
@@ -1212,6 +1282,16 @@ def main(text_mode: bool = False):
             if not user_input:
                 continue
             print(f"\nYou: {user_input}")
+
+            # ── Route through async presence if available ──
+            # Immediate ack fires, processing runs in background,
+            # the loop returns to listening immediately.
+            if _presence is not None:
+                intent = detect_intent(user_input)
+                _presence.submit(user_input, intent=intent)
+                # Don't fall through to the synchronous pipeline below —
+                # presence layer handles the full response.
+                continue
 
         # ── Exit commands ──
         _exit_phrases = [
@@ -1529,155 +1609,6 @@ def main(text_mode: bool = False):
             kwargs   = parse_task_from_text(task_text, origin="james") if TASKS_AVAILABLE else {"title": task_text}
             new_task = tasks.add_task(**kwargs)
             _web_context = f"[TASK ADDED] {new_task['title']}"
-
-        # ── Multi-step loop — chain follow-on actions if needed ──
-        # After the first action executes, ask once more: is there a logical
-        # next step? This handles compound tasks like "research X and email me
-        # a report" where search → email is a natural two-step sequence.
-        #
-        # Hard limits:
-        #   - Max 2 additional steps (3 total including first)
-        #   - Same action twice → stop (loop guard)
-        #   - Verifier does NOT re-run on loop steps — Hayeong decided these,
-        #     not the user. We trust her own follow-through.
-        #   - If either context slot is already populated from the first step,
-        #     carry it forward into accumulated context.
-        #
-        # The loop uses a separate conservative prompt focused on
-        # "what's next given what you just did" — not "what should you do."
-
-        _LOOP_PROMPT = """You are Hayeong deciding whether there is a logical NEXT STEP after completing an action.
-
-You just completed a task. Given the original request and what you just did, decide if there is one more clear action needed — or if you should stop and respond to James.
-
-IMPORTANT: Be very conservative. Only continue if:
-  1. The original request clearly implied a follow-on action (e.g. "research X and email it to me")
-  2. The next action is different from the one you just did
-  3. The next action directly serves the original request — not a tangent
-
-If in ANY doubt → return none. The conversation is better served by responding naturally.
-
-Return ONLY valid JSON. Same format as before:
-  {"action": "none"}
-  {"action": "email_send"}
-  {"action": "task_add", "task_text": "..."}
-
-Actions available: web_search, email_check, email_send, task_show, task_add, vision, image_gen, none
-"""
-
-        _LOOP_MAX_STEPS  = 2
-        _loop_step       = 0
-        _prev_action     = action
-        _all_web_ctx     = [_web_context]
-        _all_vision_ctx  = [_vision_context]
-
-        while _loop_step < _LOOP_MAX_STEPS and _prev_action != "none":
-            # Build accumulated results block for the loop decision
-            _accum = "\n\n".join(c for c in _all_web_ctx + _all_vision_ctx if c)
-            if not _accum:
-                break
-
-            try:
-                _loop_messages = [
-                    {"role": "system", "content": _LOOP_PROMPT},
-                ]
-                # Recent memory
-                for _m in memory[-6:]:
-                    _r = "user" if _m["role"] == "user" else "assistant"
-                    _loop_messages.append({"role": _r, "content": _m.get("content", "")[:250]})
-                _loop_messages.append({"role": "user", "content":
-                    f"Original request: {user_input}\n\n"
-                    f"Action just completed: {_prev_action}\n\n"
-                    f"Results so far:\n{_accum[:1200]}\n\n"
-                    f"Is there a clear next step, or should you stop and respond?"
-                })
-
-                _loop_resp = requests.post(
-                    OLLAMA_URL,
-                    json={
-                        "model":   selected_model,
-                        "messages": _loop_messages,
-                        "stream":  False,
-                        "format":  "json",
-                        "options": {"temperature": 0.0},
-                    },
-                    timeout=15,
-                )
-                _loop_raw  = _loop_resp.json()["message"]["content"].strip()
-                _loop_raw  = re.sub(r"^```[a-z]*\n?", "", _loop_raw)
-                _loop_raw  = re.sub(r"\n?```$",        "", _loop_raw)
-                _next      = json.loads(_loop_raw.strip())
-                _next_act  = _next.get("action", "none")
-
-                # Loop guards
-                if _next_act == "none" or _next_act == _prev_action:
-                    print(f"   [Loop step {_loop_step+1}] stopping — {_next_act}")
-                    break
-
-                print(f"   [Loop step {_loop_step+1}] {_next_act}")
-
-                # ── Dispatch the follow-on action ──
-                _step_web_ctx    = ""
-                _step_vision_ctx = ""
-
-                if _next_act == "web_search" and SEARCH_AVAILABLE:
-                    _q   = _next.get("query") or WebSearch.extract_query(user_input, recent_memory=memory[-4:])
-                    _del = _next.get("delivery", "conversational")
-                    print(f"   [searching: {_q!r} delivery={_del}]")
-                    _d   = searcher.search_and_read(_q, max_results=4, fetch_top=1)
-                    if _del == "document" and _d.get("results"):
-                        _dc  = searcher.format_as_document(_q, _d, topic=_q, constraints=_constraints)
-                        _dp  = searcher.save_document(_dc, topic=_q)
-                        _step_web_ctx = searcher.format_for_context(_q, _d) + f"\n\n[DOCUMENT SAVED: {_dp}]"
-                    else:
-                        _step_web_ctx = searcher.format_for_context(_q, _d)
-
-                elif _next_act == "email_send" and EMAIL_AVAILABLE:
-                    # Most common loop case: research done, now email the doc
-                    _prior_doc = next(
-                        (c for c in _all_web_ctx if "[DOCUMENT NOTE]" in c or "DOCUMENT SAVED" in c), ""
-                    )
-                    if _prior_doc:
-                        # The document was already emailed in the first step if delivery=document
-                        # If we're here it means it wasn't — send a summary
-                        _summary = _accum[:800]
-                        _ok = hayeong_email.notify(f"Research summary:\n\n{_summary}")
-                        _step_web_ctx = "[EMAIL SENT] Summary delivered." if _ok else "[EMAIL] Send failed."
-                    else:
-                        _ok = hayeong_email.notify(f"Regarding your request: {user_input[:200]}")
-                        _step_web_ctx = "[EMAIL SENT] Notification delivered." if _ok else "[EMAIL] Send failed."
-
-                elif _next_act == "task_add" and TASKS_AVAILABLE:
-                    _tt = _next.get("task_text") or user_input[:80]
-                    _nt = tasks.add_task(title=_tt, origin="hayeong")
-                    _step_web_ctx = f"[TASK ADDED] {_nt['title']}"
-
-                elif _next_act == "task_show" and TASKS_AVAILABLE:
-                    _step_web_ctx = f"[TASKS]\n{tasks.format_list()}"
-
-                elif _next_act == "email_check" and EMAIL_AVAILABLE:
-                    _msgs = hayeong_email.check_inbox(unread_only=True)
-                    _step_web_ctx = f"[EMAIL] {len(_msgs)} new message(s)." if _msgs else "[EMAIL] Nothing new."
-
-                elif _next_act == "vision" and VISION_AVAILABLE:
-                    _step_vision_ctx = vision.look_at_screen(user_input)
-
-                # Accumulate
-                if _step_web_ctx:
-                    _all_web_ctx.append(_step_web_ctx)
-                if _step_vision_ctx:
-                    _all_vision_ctx.append(_step_vision_ctx)
-
-                _prev_action = _next_act
-                _loop_step  += 1
-
-            except Exception as _le:
-                print(f"   [Loop step {_loop_step+1}] error ({_le}) — stopping loop")
-                break
-
-        # Merge all accumulated context from all steps
-        _web_context    = "\n\n".join(c for c in _all_web_ctx    if c)
-        _vision_context = "\n\n".join(c for c in _all_vision_ctx if c)
 
         # ── Inject any context into system prompt ──
         if _web_context:

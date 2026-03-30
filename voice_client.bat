@@ -1,0 +1,24 @@
+@echo off
+title Hayeong — Voice Client
+echo.
+echo ─────────────────────────────────────────
+echo   Hayeong Voice Client
+echo   Connecting to voice server...
+echo ─────────────────────────────────────────
+echo.
+
+cd /d H:\hayeong
+
+:: Activate the venv
+call H:\hayeong\.venv\Scripts\activate.bat
+
+:: Small delay — give the voice server a moment if Hayeong just launched
+timeout /t 2 /nobreak >nul
+
+:: Launch the local voice client
+python voice_client_local.py
+
+:: If it exits (F9 or Ctrl+C), pause so you can read any error messages
+echo.
+echo Voice client closed.
+pause
