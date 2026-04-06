@@ -1,5 +1,10 @@
 @echo off
 title Hayeong — Voice Client
+
+:: ROCm env vars — set here as a safety net for any indirect GPU imports
+set HSA_OVERRIDE_GFX_VERSION=11.0.0
+set ROCR_VISIBLE_DEVICES=0
+
 echo.
 echo ─────────────────────────────────────────
 echo   Hayeong Voice Client

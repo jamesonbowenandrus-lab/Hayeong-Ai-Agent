@@ -53,13 +53,6 @@ except ImportError:
     print("⚠️  async_presence.py not found — synchronous mode only")
 
 try:
-    from capability_loader import get_loader
-    CAPABILITY_LOADER_AVAILABLE = True
-except ImportError:
-    CAPABILITY_LOADER_AVAILABLE = False
-    print("⚠️  capability_loader.py not found — using legacy dispatch")
-
-try:
     from situation_tracker import SituationTracker
     SITUATION_TRACKER_AVAILABLE = True
 except ImportError:
@@ -1086,13 +1079,6 @@ def main(text_mode: bool = False):
     tasks  = TaskManager()    if TASKS_AVAILABLE       else None
     email  = hayeong_email    if EMAIL_AVAILABLE        else None
 
-    # ── Capability loader — dynamic hot-reloadable dispatch ──
-    _loader = None
-    if CAPABILITY_LOADER_AVAILABLE:
-        _loader = get_loader()
-        _loader.start()
-        print(f"   [CapabilityLoader] {len(_loader.list_loaded())} actions loaded: {_loader.list_loaded()}")
-
     # ── Email monitor — passive IMAP IDLE inbox watching ──
     email_monitor = None
     _pending_email_surface = []   # queue of important emails to surface naturally
@@ -1500,39 +1486,129 @@ def main(text_mode: bool = False):
         _web_context    = ""
         _vision_context = ""
 
-        if action != "none":
-            if _loader and _loader.handles(action):
-                # ── New path: capability loader (hot-reloadable) ──
-                _cap_context = {
-                    "memory":        memory,
-                    "mood":          mood_state,
-                    "decision":      decision,
-                    "model":         selected_model,
-                    "session":       session,
-                    "speak_fn":      _speak,
-                    "logger":        logger        if LOGGER_AVAILABLE       else None,
-                    "email":         email,
-                    "email_monitor": email_monitor if EMAIL_MONITOR_AVAILABLE else None,
-                    "email_address": hayeong_email.to_address if EMAIL_AVAILABLE else None,
-                    "tasks":         tasks,
-                    "constraints":   _constraints,
-                }
-                _cap_result = _loader.dispatch(action, user_input, _cap_context)
+        if action == "web_search" and SEARCH_AVAILABLE:
+            query         = decision.get("query") or WebSearch.extract_query(user_input, recent_memory=memory[-6:])
+            delivery      = decision.get("delivery", "conversational")
+            _is_news      = any(kw in user_input.lower() for kw in ["latest news", "news about", "what's in the news", "recent news", "breaking news"])
 
-                # Speak ack if capability provided one
-                if _cap_result.get("speak"):
-                    _speak(_cap_result["speak"], emotion=_cap_result.get("emotion", "neutral"))
-
-                # Inject context into prompt
-                if _cap_result.get("response"):
-                    _web_context = _cap_result["response"]
-
-                if not _cap_result.get("success"):
-                    print(f"   [Capability] {action} failed: {_cap_result.get('data', {}).get('reason', 'unknown')}")
-
+            if delivery == "document":
+                _speak("Sure, let me pull that together. I'll have the full breakdown for you shortly.", emotion="neutral")
             else:
-                # ── Legacy fallback — action not yet migrated to capability system ──
-                print(f"   [dispatch] no capability handler for {action!r} — falling through to conversation")
+                _speak("Let me look that up.", emotion="neutral")
+            print(f"   [searching: {query!r} delivery={delivery}]")
+
+            if _is_news:
+                data = {"query": query, "results": searcher.news(query, max_results=5), "full_text": {}}
+            else:
+                max_r = 6 if delivery == "document" else 4
+                data  = searcher.search_and_read(query, max_results=max_r, fetch_top=2 if delivery == "document" else 1)
+
+            n_results = len(data.get("results", []))
+            print(f"   [found {n_results} results]")
+
+            if delivery == "document" and n_results > 0:
+                doc_content = searcher.format_as_document(query, data, topic=query, constraints=_constraints)
+                doc_path    = searcher.save_document(doc_content, topic=query)
+                print(f"   [document saved: {doc_path}]")
+                _doc_emailed = False
+                if EMAIL_AVAILABLE:
+                    try:
+                        with open(doc_path, "r", encoding="utf-8") as _f:
+                            doc_text = _f.read()
+                        _ok = hayeong_email.send(
+                            to=hayeong_email.to_address,
+                            subject=f"Research: {query}",
+                            body=doc_text,
+                        )
+                        _doc_emailed = isinstance(_ok, bool) and _ok or (isinstance(_ok, dict) and _ok.get("success"))
+                        if _doc_emailed:
+                            print(f"   [document emailed]")
+                    except Exception as _e:
+                        print(f"   [email failed: {_e}]")
+                _doc_note = (
+                    f"You emailed James the full research document for '{query}'. "
+                    if _doc_emailed else
+                    f"You saved the full research document to: {doc_path}. "
+                )
+                _web_context = (
+                    searcher.format_for_context(query, data) +
+                    f"\n\n[DOCUMENT NOTE]: {_doc_note}"
+                    "Give James your brief personal take on the most interesting findings "
+                    "in 2-4 sentences, then mention you've sent/saved the full breakdown."
+                )
+            else:
+                _web_context = searcher.format_for_context(query, data)
+            if LOGGER_AVAILABLE:
+                logger.log_capability_used("web_search", action="search", outcome="success",
+                    details={"query": query, "results": n_results, "delivery": delivery})
+
+        elif action == "vision" and VISION_AVAILABLE:
+            mode = decision.get("mode", "screen")
+            if mode == "image":
+                _speak("Which image should I look at?", emotion="neutral")
+                image_path = input("Image path: ").strip()
+                _speak("Got it, analyzing now.", emotion="neutral")
+                _vision_context = vision.look_at_image(image_path, user_input)
+            elif mode == "deep":
+                _speak("Let me take a closer look.", emotion="neutral")
+                _vision_context = vision.look_at_screen_deep(user_input)
+            else:
+                _speak("Let me take a look.", emotion="neutral")
+                _vision_context = vision.look_at_screen(user_input)
+            if LOGGER_AVAILABLE:
+                logger.log_capability_used("vision", action="analyze", outcome="success")
+
+        elif action == "image_gen" and COMFYUI_AVAILABLE:
+            u = user_input.lower()
+            _speak("On it, let me generate that.", emotion="neutral")
+            if any(x in u for x in ["realistic", "make it real", "real photo"]):
+                _speak("Which image should I make realistic?", emotion="neutral")
+                image_path = input("Image path: ").strip()
+                result = comfyui.make_realistic(image_path)
+            elif any(x in u for x in ["screen", "on my screen"]):
+                result = comfyui.generate_from_screen(user_input)
+            elif any(x in u for x in ["this image", "this photo", "reference"]):
+                _speak("Which image should I use as reference?", emotion="neutral")
+                image_path = input("Image path: ").strip()
+                result = comfyui.generate_from_image(image_path, user_input)
+            else:
+                result = comfyui.generate(user_input)
+            if result.get("success"):
+                if LOGGER_AVAILABLE:
+                    logger.log_capability_used("comfyui", action="generate", outcome="success")
+            else:
+                print(f"   [image gen failed: {result.get('message')}]")
+
+        elif action == "email_check" and email:
+            if email_monitor:
+                unsurfaced = email_monitor.get_unsurfaced_important()
+                recent     = email_monitor.get_recent(5)
+                if unsurfaced:
+                    _web_context = f"[EMAIL] {len(unsurfaced)} important email(s) James hasn't seen. Show him the details."
+                elif recent:
+                    _web_context = f"[EMAIL] Inbox quiet. Last email: from {recent[0].get('from','').split('<')[0].strip()} — {recent[0].get('subject','(no subject)')}."
+                else:
+                    _web_context = "[EMAIL] Inbox is empty / nothing new."
+            else:
+                msgs = hayeong_email.check_inbox(unread_only=True)
+                _web_context = f"[EMAIL] {len(msgs)} new message(s)." if msgs else "[EMAIL] Nothing new in inbox."
+
+        elif action == "email_send" and email:
+            msg_text = re.sub(r'(?i)(email me|notify me|ping me|send me)[:\s]*', '', user_input).strip() or "Hello from Hayeong!"
+            ok = hayeong_email.notify(msg_text)
+            _web_context = "[EMAIL SENT] Notification delivered." if ok else "[EMAIL] Send failed — check config."
+
+        elif action == "task_show" and tasks:
+            task_list    = tasks.format_list()
+            _web_context = f"[TASKS]\n{task_list}"
+
+        elif action == "task_add" and tasks:
+            task_text = decision.get("task_text") or re.sub(
+                r'(?i)(add a task|add task|remember to|i need to)[:\s]*', '', user_input
+            ).strip() or user_input
+            kwargs   = parse_task_from_text(task_text, origin="james") if TASKS_AVAILABLE else {"title": task_text}
+            new_task = tasks.add_task(**kwargs)
+            _web_context = f"[TASK ADDED] {new_task['title']}"
 
         # ── Inject any context into system prompt ──
         if _web_context:

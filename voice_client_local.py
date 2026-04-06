@@ -44,14 +44,21 @@ INPUT_DEVICE  = 3          # HyperX QuadCast S — change if your device differs
 OUTPUT_DEVICE = 6          # SteelSeries Sonar — change if your device differs
 OUTPUT_SR     = 24000      # F5-TTS native output rate
 
-PTT_KEY         = keyboard.Key.shift_r
-MODE_SWITCH_KEY = keyboard.Key.f8
-QUIT_KEY        = keyboard.Key.f9
+# ── Key bindings ──
+# PTT_KEY:    hold to speak, release to send (default: Right Shift)
+# TOGGLE_KEY: press once to start listening, press again to stop
+#             Separated from PTT so right shift stays free for gaming/Discord
+# QUIT_KEY:   exit the client
+PTT_KEY         = keyboard.Key.shift_r   # hold to talk
+TOGGLE_KEY      = keyboard.Key.f7        # press once = start, again = stop
+MODE_SWITCH_KEY = keyboard.Key.f8        # switch between PTT and TOGGLE mode
+QUIT_KEY        = keyboard.Key.f9        # exit
 
-CHUNK_SECONDS   = 0.3      # recording chunk size
-MAX_RECORD_SECS = 15       # hard cap per utterance
-SILENCE_SECS    = 1.2      # TOGGLE mode: stop after this much silence
-VOLUME_THRESHOLD = 0.008   # ignore frames below this RMS
+CHUNK_SECONDS    = 0.3      # recording chunk size
+MAX_RECORD_SECS  = 15       # hard cap per utterance
+SILENCE_SECS     = 2.0      # TOGGLE mode: stop after this much silence (was 1.2 — too aggressive)
+MIN_RECORD_SECS  = 1.5      # always record at least this long before silence check fires
+VOLUME_THRESHOLD = 0.006    # slightly lower than before — more sensitive to quiet speech
 
 # ─────────────────────────────────────────────
 # AUDIO HELPERS
@@ -129,25 +136,32 @@ class VoiceClient:
 
         combined = np.concatenate(chunks, axis=0)
         print("🎙️  [PTT] Sending...      ")
-        return combined.astype(np.int16).tobytes()
+        # sd.rec() returns float32 in [-1.0, 1.0]
+        # Must scale to int16 range before sending — otherwise Whisper gets near-silence
+        return (combined * 32767).astype(np.int16).tobytes()
 
     def record_until_silence(self) -> bytes | None:
         """TOGGLE: record until silence detected."""
         chunks        = []
         silent_chunks = 0
         max_silent    = int(SILENCE_SECS / CHUNK_SECONDS)
+        min_chunks    = int(MIN_RECORD_SECS / CHUNK_SECONDS)  # always record this many first
         max_chunks    = int(MAX_RECORD_SECS / CHUNK_SECONDS)
         chunk_samples = int(CHUNK_SECONDS * SAMPLE_RATE)
         self.recording = True
         print("🎙️  [TOGGLE] Listening...", end="\r")
 
-        for _ in range(max_chunks):
+        for i in range(max_chunks):
             if not self.toggle_active:
                 break
             chunk = sd.rec(chunk_samples, samplerate=SAMPLE_RATE,
                            channels=1, device=INPUT_DEVICE)
             sd.wait()
             chunks.append(chunk)
+
+            # Don't check silence until minimum recording time has passed
+            if i < min_chunks:
+                continue
 
             if get_volume(chunk) < VOLUME_THRESHOLD:
                 silent_chunks += 1
@@ -164,7 +178,9 @@ class VoiceClient:
 
         combined = np.concatenate(chunks, axis=0)
         print("🎙️  [TOGGLE] Sending...   ")
-        return combined.astype(np.int16).tobytes()
+        # sd.rec() returns float32 in [-1.0, 1.0]
+        # Must scale to int16 range before sending — otherwise Whisper gets near-silence
+        return (combined * 32767).astype(np.int16).tobytes()
 
     # ─────────────────────────────────────────
     # SEND HELPERS (thread-safe → event loop)
@@ -201,20 +217,22 @@ class VoiceClient:
             self.should_quit = True
             return
 
-        if key == PTT_KEY:
-            if self.mode == self.MODE_PTT:
-                if not self.ptt_held and not self.recording:
-                    self.ptt_held = True
-                    t = threading.Thread(target=self._ptt_flow, daemon=True)
-                    t.start()
-            elif self.mode == self.MODE_TOGGLE:
-                if not self.toggle_active and not self.recording:
-                    self.toggle_active = True
-                    t = threading.Thread(target=self._toggle_flow, daemon=True)
-                    t.start()
-                elif self.toggle_active:
-                    self.toggle_active = False
-                    print("\n🛑 Stopped listening.")
+        # PTT mode — Right Shift held
+        if key == PTT_KEY and self.mode == self.MODE_PTT:
+            if not self.ptt_held and not self.recording:
+                self.ptt_held = True
+                t = threading.Thread(target=self._ptt_flow, daemon=True)
+                t.start()
+
+        # TOGGLE mode — F7 press: start listening / press again: stop
+        if key == TOGGLE_KEY and self.mode == self.MODE_TOGGLE:
+            if not self.toggle_active and not self.recording:
+                self.toggle_active = True
+                t = threading.Thread(target=self._toggle_flow, daemon=True)
+                t.start()
+            elif self.toggle_active:
+                self.toggle_active = False
+                print("\n🛑 Stopped listening.")
 
     def on_release(self, key):
         if key == PTT_KEY and self.mode == self.MODE_PTT:
@@ -230,7 +248,7 @@ class VoiceClient:
         pcm = self.record_until_silence()
         if pcm:
             self._enqueue(self._send_audio(pcm))
-        print(f"\n  Ready — press Right Shift to speak.")
+        print(f"\n  Ready — press F7 to speak.")
 
     # ─────────────────────────────────────────
     # WEBSOCKET RECEIVER
@@ -308,7 +326,8 @@ class VoiceClient:
                 self.ws = ws
                 print("✅ Connected to Hayeong\n")
                 print(f"  Mode: {self.mode.upper()}")
-                print("  PTT key:     Right Shift (hold)")
+                print("  PTT key:     Right Shift (hold to speak)")
+                print("  Toggle key:  F7 (press once = listen, again = stop)")
                 print("  Mode switch: F8")
                 print("  Quit:        F9")
                 print("─" * 52)

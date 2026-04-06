@@ -30,7 +30,7 @@
 #
 # AUDIO FORMAT:
 #   Incoming: int16, 16000Hz, mono
-#   Outgoing: float32, 24000Hz, stereo (matches F5-TTS native output)
+#   Outgoing: int16, 24000Hz, stereo-interleaved (matches F5-TTS native output)
 #   Chunk size: 4096 samples (~170ms at 24kHz) — smooth streaming
 #
 # INSTALL:
@@ -46,6 +46,15 @@
 #
 # CONNECT (remote via Tailscale):
 #   ws://<tailscale-ip>:8765/ws/voice
+
+# ─────────────────────────────────────────────
+# NOTE ON GPU / ROCm:
+# HSA env vars must be set BEFORE Python launches — not inside the script.
+# Set them in the bat file that starts this server:
+#   set HSA_OVERRIDE_GFX_VERSION=11.0.0
+#   set ROCR_VISIBLE_DEVICES=0
+# See voice_server.bat
+# ─────────────────────────────────────────────
 
 import asyncio
 import json
@@ -109,10 +118,20 @@ def _load_voice_modules():
     if _voice_loaded:
         return
     log.info("Loading voice modules (Whisper + F5-TTS)...")
-    from voice import speak, transcribe
-    _speak_fn       = speak
-    _transcribe_fn  = transcribe
-    _voice_loaded   = True
+    from voice import speak, transcribe, get_tts
+    _speak_fn      = speak
+    _transcribe_fn = transcribe
+
+    # Pre-load F5-TTS now so the first conversation isn't slow.
+    # Without this it cold-loads on first transcription — adds 15-30s delay.
+    log.info("Pre-loading F5-TTS model (this takes ~30s on first run)...")
+    try:
+        get_tts()  # forces lazy init now rather than mid-conversation
+        log.info("✅ F5-TTS loaded and ready")
+    except Exception as e:
+        log.warning(f"F5-TTS pre-load failed: {e} — will retry on first request")
+
+    _voice_loaded = True
     log.info("✅ Voice modules ready")
 
 def _load_core_modules():
@@ -171,11 +190,25 @@ app = FastAPI(title="Hayeong Voice Server", version="1.0")
 
 @app.get("/health")
 async def health():
+    import torch
+    # Check DirectML first — it uses privateuseone backend, not cuda
+    try:
+        import torch_directml
+        gpu_name      = f"DirectML ({torch_directml.device()})"
+        gpu_available = True
+    except ImportError:
+        gpu_available = torch.cuda.is_available()
+        gpu_name      = torch.cuda.get_device_name(0) if gpu_available else "none"
+
     return JSONResponse({
-        "status":       "online",
-        "voice_loaded": _voice_loaded,
-        "core_loaded":  _core_loaded,
-        "uptime_s":     round(time.time() - _server_start),
+        "status":        "online",
+        "voice_loaded":  _voice_loaded,
+        "core_loaded":   _core_loaded,
+        "uptime_s":      round(time.time() - _server_start),
+        "gpu":           gpu_name,
+        "gpu_available": gpu_available,
+        "f5_device":     "cpu",   # F5-TTS runs on CPU — DirectML not supported by library
+        "whisper_device":"cpu",
     })
 
 
@@ -448,11 +481,12 @@ async def voice_ws(websocket: WebSocket):
                     log.info(f"Transcribed: {text!r}")
                     await _send_json(websocket, {"type": "transcript", "text": text})
 
-                    # Full pipeline
-                    await _process_utterance(
+                    # Full pipeline — runs even if previous TTS is still generating
+                    # transcript already sent above so client shows "You:" immediately
+                    asyncio.create_task(_process_utterance(
                         websocket, text,
                         memory, mood_state, identity, dynamic_traits
-                    )
+                    ))
 
                 elif msg_type == "text_message":
                     # Direct text input — skip audio path entirely

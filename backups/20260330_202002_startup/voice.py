@@ -54,22 +54,14 @@ sd.default.channels   = (1, 2)
 
 try:
     import torch_directml
-    TORCH_DEVICE     = torch_directml.device()
-    TORCH_DEVICE_STR = str(TORCH_DEVICE)   # "privateuseone:0"
-    F5_DEVICE        = "cpu"               # F5-TTS doesn't support DirectML device objects
-                                           # CPU is fine — inference is still fast enough
+    TORCH_DEVICE = torch_directml.device()
     print(f"🖥️  Torch device: DirectML ({TORCH_DEVICE}) — AMD GPU via Windows DirectML")
-    print(f"   F5-TTS device: cpu (DirectML not supported by F5-TTS internals)")
 except ImportError:
     if torch.cuda.is_available():
-        TORCH_DEVICE     = "cuda"
-        TORCH_DEVICE_STR = "cuda"
-        F5_DEVICE        = "cuda"
+        TORCH_DEVICE = "cuda"
         print(f"🖥️  Torch device: cuda ({torch.cuda.get_device_name(0)})")
     else:
-        TORCH_DEVICE     = "cpu"
-        TORCH_DEVICE_STR = "cpu"
-        F5_DEVICE        = "cpu"
+        TORCH_DEVICE = "cpu"
         print("🖥️  Torch device: cpu — no GPU found, expect slow TTS")
 
 # ─────────────────────────────────────────────
@@ -119,9 +111,9 @@ _tts = None
 def get_tts():
     global _tts
     if _tts is None:
-        print(f"Loading F5-TTS model on {F5_DEVICE}...")
-        _tts = F5TTS(device=F5_DEVICE)
-        print(f"✅ F5-TTS loaded on {F5_DEVICE}")
+        print(f"Loading F5-TTS model on {TORCH_DEVICE}...")
+        _tts = F5TTS(device=TORCH_DEVICE)
+        print(f"✅ F5-TTS loaded on {TORCH_DEVICE}")
     return _tts
 
 # ─────────────────────────────────────────────

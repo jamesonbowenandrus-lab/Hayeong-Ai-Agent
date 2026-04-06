@@ -18,7 +18,12 @@
       {"id": "minecraft", "name": "Minecraft Bridge", "description": "In-game presence. Launch with: load minecraft", "status": "active", "approved_by": "built_in", "script": "minecraft_bridge.py"},
       {"id": "backup", "name": "Backup Manager", "description": "Automatic and manual backups. Runs on startup.", "status": "active", "approved_by": "built_in", "script": "backup_manager.py"},
       {"id": "identity_verification", "name": "Identity Verification", "description": "Passphrase-based session trust to verify it is James.", "status": "active", "approved_by": "built_in", "script": "identity_verification.py"},
-      {"id": "code_consultant", "name": "Code Consultant", "description": "Local code generation via DeepSeek Coder. Used for capability writing.", "status": "inactive", "approved_by": "built_in", "note": "Requires: ollama pull deepseek-coder-v2:16b", "script": "code_consultant.py"}
+      {"id": "code_consultant", "name": "Code Consultant", "description": "Local code generation via DeepSeek Coder. Used for capability writing.", "status": "inactive", "approved_by": "built_in", "note": "Requires: ollama pull deepseek-coder-v2:16b", "script": "code_consultant.py"},
+      {"id": "web_search", "name": "Web Search", "description": "Search the web via DuckDuckGo. Say: look up, search for, what is...", "status": "active", "approved_by": "built_in", "script": "capabilities/web_search_cap.py", "actions": ["web_search"]},
+      {"id": "vision_cap", "name": "Vision", "description": "Look at screen or analyze an image. Say: look at my screen, what do you see.", "status": "active", "approved_by": "built_in", "script": "capabilities/vision_cap.py", "actions": ["vision"]},
+      {"id": "image_gen_cap", "name": "Image Generation", "description": "Generate images via ComfyUI. Say: generate an image of...", "status": "active", "approved_by": "built_in", "script": "capabilities/image_gen_cap.py", "actions": ["image_gen"]},
+      {"id": "email_cap", "name": "Email", "description": "Check inbox and send notifications. Say: check your email, email me.", "status": "active", "approved_by": "built_in", "script": "capabilities/email_cap.py", "actions": ["email_check", "email_send"]},
+      {"id": "tasks_cap", "name": "Task Manager", "description": "Show and add tasks. Say: show tasks, add a task.", "status": "active", "approved_by": "built_in", "script": "capabilities/tasks_cap.py", "actions": ["task_show", "task_add"]}
     ]
   },
   "planned_capabilities": {
