@@ -176,6 +176,28 @@ class CapabilityLoader:
             log.debug(f"No handler for action: {action!r}")
             return result(success=False, data={"reason": "no_handler"})
 
+        # ── Pre-dispatch: ensure required applications are running ──
+        # If a capability needs ComfyUI, Ollama, etc., start them now
+        # before trying to run the capability. She never hits a tool
+        # that fails just because the underlying app wasn't running.
+        try:
+            from app_manager import get_app_manager
+            mgr      = get_app_manager()
+            ok, msgs = mgr.ensure_for_capability(action)
+            if msgs:
+                speak_fn = context.get("speak_fn")
+                for msg in msgs:
+                    log.info(f"  [AppManager] {msg}")
+                    # Speak first message so James knows what she's doing
+                    if speak_fn and msgs.index(msg) == 0:
+                        speak_fn(msg, emotion="neutral")
+            if not ok:
+                # At least one required app failed to start — warn but proceed
+                # She'll fail gracefully inside the capability if it can't connect
+                log.warning(f"  [AppManager] not all required apps started for {action!r}")
+        except ImportError:
+            pass  # app_manager not available yet — skip silently
+
         try:
             return module.handle(action, user_input, context)
         except Exception as e:

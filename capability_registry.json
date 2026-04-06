@@ -23,7 +23,35 @@
       {"id": "vision_cap", "name": "Vision", "description": "Look at screen or analyze an image. Say: look at my screen, what do you see.", "status": "active", "approved_by": "built_in", "script": "capabilities/vision_cap.py", "actions": ["vision"]},
       {"id": "image_gen_cap", "name": "Image Generation", "description": "Generate images via ComfyUI. Say: generate an image of...", "status": "active", "approved_by": "built_in", "script": "capabilities/image_gen_cap.py", "actions": ["image_gen"]},
       {"id": "email_cap", "name": "Email", "description": "Check inbox and send notifications. Say: check your email, email me.", "status": "active", "approved_by": "built_in", "script": "capabilities/email_cap.py", "actions": ["email_check", "email_send"]},
-      {"id": "tasks_cap", "name": "Task Manager", "description": "Show and add tasks. Say: show tasks, add a task.", "status": "active", "approved_by": "built_in", "script": "capabilities/tasks_cap.py", "actions": ["task_show", "task_add"]}
+      {"id": "tasks_cap", "name": "Task Manager", "description": "Show and add tasks. Say: show tasks, add a task.", "status": "active", "approved_by": "built_in", "script": "capabilities/tasks_cap.py", "actions": ["task_show", "task_add"]},
+      {"id": "app_control", "name": "Application Control", "description": "Start and close external applications. Say: start ComfyUI, close ComfyUI, app status.", "status": "active", "approved_by": "built_in", "script": "capabilities/app_control_cap.py", "actions": ["app_start", "app_close", "app_status"]}
+    ]
+  },
+  "applications": {
+    "description": "External applications Hayeong knows how to start and close. She starts these automatically when a capability needs them, or when asked directly.",
+    "apps": [
+      {
+        "id":              "comfyui",
+        "name":            "ComfyUI",
+        "start_cmd":       ["H:\\ComfyUI_windows_portable\\run_gpu.bat"],
+        "check_url":       "http://127.0.0.1:8188",
+        "needed_by":       ["image_gen"],
+        "vram_cost":       "high",
+        "idle_ok":         false,
+        "start_wait":      10,
+        "notes":           "Image generation backend. High VRAM — close when not generating images."
+      },
+      {
+        "id":              "ollama",
+        "name":            "Ollama",
+        "start_cmd":       ["ollama", "serve"],
+        "check_url":       "http://localhost:11434",
+        "needed_by":       ["web_search", "vision", "image_gen", "email_check", "email_send", "task_show", "task_add"],
+        "vram_cost":       "high",
+        "idle_ok":         true,
+        "start_wait":      5,
+        "notes":           "Core language model server. Should almost always be running."
+      }
     ]
   },
   "planned_capabilities": {
