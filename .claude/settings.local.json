@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls h:/hayeong/*.py)",
+      "Bash(xargs -I{} basename {})"
+    ]
+  }
+}

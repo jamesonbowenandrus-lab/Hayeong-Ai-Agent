@@ -21,7 +21,6 @@ import sys
 import time
 import threading
 import queue
-import subprocess
 import numpy as np
 import sounddevice as sd
 from typing import Optional
@@ -51,6 +50,13 @@ try:
 except ImportError:
     ASYNC_PRESENCE_AVAILABLE = False
     print("⚠️  async_presence.py not found — synchronous mode only")
+
+try:
+    from app_manager import get_app_manager
+    APP_MANAGER_AVAILABLE = True
+except ImportError:
+    APP_MANAGER_AVAILABLE = False
+    print("⚠️  app_manager.py not found — process management inactive")
 
 try:
     from capability_loader import get_loader
@@ -106,15 +112,6 @@ except ImportError:
     print("⚠️  email_monitor.py not found — passive email monitoring inactive")
 
 try:
-    from comfyui_bridge import ComfyUIBridge
-    comfyui = ComfyUIBridge()
-    COMFYUI_AVAILABLE = True
-except ImportError:
-    comfyui = None
-    COMFYUI_AVAILABLE = False
-    print("⚠️  comfyui_bridge.py not found — image generation inactive")
-
-try:
     from hayeong_logger import HayeongLogger
     logger = HayeongLogger()
     LOGGER_AVAILABLE = True
@@ -122,28 +119,6 @@ except ImportError:
     logger = None
     LOGGER_AVAILABLE = False
     print("⚠️  hayeong_logger.py not found — logging inactive")
-
-try:
-    from web_search import WebSearch
-    searcher = WebSearch()
-    SEARCH_AVAILABLE = searcher.is_available()
-    if not SEARCH_AVAILABLE:
-        print("⚠️  web_search: duckduckgo-search not installed — run: pip install duckduckgo-search")
-except ImportError:
-    searcher = None
-    SEARCH_AVAILABLE = False
-    print("⚠️  web_search.py not found — web search inactive")
-
-try:
-    from vision_bridge import VisionBridge
-    vision = VisionBridge()
-    VISION_AVAILABLE = vision.is_available()
-    if not VISION_AVAILABLE:
-        print("⚠️  vision_bridge: Pillow not installed — run: pip install Pillow")
-except ImportError:
-    vision = None
-    VISION_AVAILABLE = False
-    print("⚠️  vision_bridge.py not found — conversational vision inactive")
 
 # ─────────────────────────────────────────────
 # CONFIGURATION
@@ -163,165 +138,6 @@ VAD_MAX_SECONDS     = 12
 VAD_CHUNK_SECONDS   = 0.4
 
 # ─────────────────────────────────────────────
-# PROCESS MANAGER
-# Hayeong's control over her own capabilities.
-# She starts them, she stops them, she notices if they crash.
-# ─────────────────────────────────────────────
-
-class ProcessManager:
-    """
-    Manages Hayeong's child processes (Discord, voice PTT, Minecraft, etc.)
-    Each capability is a subprocess she owns and can start/stop/restart.
-    """
-
-    # Known capabilities: name → script filename
-    CAPABILITIES = {
-        "discord":      "discord_hayeong.py",
-        "voice_server": "voice_server.py",
-        "voice":        "voice_ptt.py",
-        "minecraft":    "minecraft_bridge.py",
-        "observer":     "screen_observer.py",
-    }
-
-    def __init__(self):
-        self._procs: dict[str, subprocess.Popen] = {}
-        self._lock  = threading.Lock()
-
-    def start(self, name: str) -> str:
-        script = self.CAPABILITIES.get(name)
-        if not script:
-            return f"I don't have a capability called '{name}'."
-
-        script_path = os.path.join(HAYEONG_DIR, script)
-        if not os.path.exists(script_path):
-            return f"Script not found: {script}"
-
-        with self._lock:
-            proc = self._procs.get(name)
-            if proc and proc.poll() is None:
-                return f"{name} is already running."
-
-            new_proc = subprocess.Popen(
-                [sys.executable, script_path],
-                cwd=HAYEONG_DIR,
-                creationflags=subprocess.CREATE_NEW_CONSOLE if sys.platform == "win32" else 0
-            )
-            self._procs[name] = new_proc
-            return f"started {name}"
-
-    def stop(self, name: str) -> str:
-        with self._lock:
-            proc = self._procs.get(name)
-            if not proc:
-                return f"{name} isn't running."
-            if proc.poll() is None:
-                proc.terminate()
-            del self._procs[name]
-            return f"stopped {name}"
-
-    def is_running(self, name: str) -> bool:
-        with self._lock:
-            proc = self._procs.get(name)
-            return proc is not None and proc.poll() is None
-
-    def status(self) -> dict:
-        with self._lock:
-            return {
-                name: ("running" if proc.poll() is None else "stopped")
-                for name, proc in self._procs.items()
-            }
-
-    def monitor_and_restart(self, name: str):
-        """
-        Call this in a background thread to auto-restart a capability if it crashes.
-        Hayeong notices and restarts it — she doesn't go quietly offline.
-        """
-        def _watch():
-            while True:
-                time.sleep(10)
-                with self._lock:
-                    proc = self._procs.get(name)
-                    if proc is None:
-                        break  # intentionally stopped
-                    if proc.poll() is not None:
-                        print(f"\n⚠️  {name} crashed — restarting...")
-                        script = self.CAPABILITIES[name]
-                        script_path = os.path.join(HAYEONG_DIR, script)
-                        new_proc = subprocess.Popen(
-                            [sys.executable, script_path],
-                            cwd=HAYEONG_DIR,
-                            creationflags=subprocess.CREATE_NEW_CONSOLE if sys.platform == "win32" else 0
-                        )
-                        self._procs[name] = new_proc
-                        print(f"✅ {name} restarted.")
-
-        t = threading.Thread(target=_watch, daemon=True)
-        t.start()
-
-    def stop_all(self):
-        with self._lock:
-            for name, proc in list(self._procs.items()):
-                if proc.poll() is None:
-                    proc.terminate()
-            self._procs.clear()
-
-
-# ─────────────────────────────────────────────
-# COMMAND INTENT DETECTION
-# Recognizes requests to start/stop capabilities
-# from natural language. Not a full NLU — just
-# pattern matching on the things she'd actually hear.
-# ─────────────────────────────────────────────
-
-_START_PATTERNS = {
-    "discord":      ["open discord", "start discord", "connect discord", "go on discord",
-                     "get on discord", "launch discord"],
-    "voice_server": ["start voice server", "restart voice server", "voice server up",
-                     "bring up voice server"],
-    "voice":        ["open your mic", "open mic", "start voice", "voice mode", "i want to talk",
-                     "let's talk out loud", "turn on your mic", "enable voice",
-                     "can you open your mic", "start listening"],
-    "minecraft":    ["load minecraft", "start minecraft", "open minecraft",
-                     "let's play minecraft", "join minecraft", "connect to minecraft",
-                     "can you load minecraft"],
-    "observer":     ["start observer", "start screen observer", "start watching",
-                     "enable observer", "turn on observer"],
-}
-
-_STOP_PATTERNS = {
-    "discord":      ["close discord", "stop discord", "disconnect discord", "leave discord"],
-    "voice_server": ["stop voice server", "shut down voice server", "voice server off"],
-    "voice":        ["close your mic", "mute", "stop voice", "stop listening",
-                     "turn off your mic", "disable voice", "voice off"],
-    "minecraft":    ["close minecraft", "stop minecraft", "leave minecraft", "disconnect minecraft"],
-    "observer":     ["stop observer", "stop watching", "disable observer", "turn off observer"],
-}
-
-_APPROVE_PATTERN = r'(?i)^approve\s+(\S+\.py|\S+)'
-_DENY_PATTERN    = r'(?i)^deny\s+(\S+\.py|\S+)'
-
-_SELFMOD_PATTERNS = [
-    "show proposals", "what did you change", "what have you changed",
-    "any proposals", "pending proposals", "weekly summary",
-    "what did you modify", "show me your changes"
-]
-
-def detect_capability_command(text: str) -> tuple[str, str] | tuple[None, None]:
-    """
-    Returns (action, capability_name) or (None, None).
-    action is "start" or "stop".
-    """
-    t = text.lower().strip()
-    for cap, patterns in _START_PATTERNS.items():
-        if any(p in t for p in patterns):
-            return "start", cap
-    for cap, patterns in _STOP_PATTERNS.items():
-        if any(p in t for p in patterns):
-            return "stop", cap
-    return None, None
-
-
-# ─────────────────────────────────────────────
 # WRAP-UP FAST PATH
 # Detects thank-you / acknowledgment / close-out messages before
 # any LLM call runs. These signals are unambiguous — running them
@@ -329,7 +145,7 @@ def detect_capability_command(text: str) -> tuple[str, str] | tuple[None, None]:
 # introduces failure risk (as seen: all three layers misfired on
 # "Thank you very much!").
 #
-# Same design principle as detect_capability_command():
+# Same principle as capability fast-paths:
 # when the signal is clear enough, don't ask an LLM.
 # ─────────────────────────────────────────────
 
@@ -486,33 +302,66 @@ def _strip_markdown(text: str) -> str:
 # the full natural response with zero parsing complexity.
 # ─────────────────────────────────────────────
 
-DECISION_PROMPT = """You are Hayeong's decision engine.
+# ─────────────────────────────────────────────
+# DECISION PROMPT — built dynamically from capability_registry.json
+# When new capabilities are added to the registry, this updates
+# automatically. main.py never needs to change for new capabilities.
+# ─────────────────────────────────────────────
+
+def build_decision_prompt() -> str:
+    """
+    Build the decision engine prompt from capability_registry.json.
+    The "Available actions" section is generated from registry entries
+    that have an "actions" field, using "action_hints" or "decision_hint"
+    for per-action descriptions.
+    """
+    registry_path = os.path.join(HAYEONG_DIR, "capability_registry.json")
+    action_lines  = []
+
+    try:
+        with open(registry_path, "r", encoding="utf-8") as f:
+            registry = json.load(f)
+
+        for section in ("built_in_capabilities", "self_generated_capabilities"):
+            for cap in registry.get(section, {}).get("capabilities", []):
+                if cap.get("status") != "active":
+                    continue
+                actions = cap.get("actions", [])
+                if not actions:
+                    continue
+
+                # Per-action hints take priority over a single decision_hint
+                action_hints = cap.get("action_hints", {})
+                fallback     = cap.get("decision_hint", cap.get("description", ""))
+
+                for action in actions:
+                    hint = action_hints.get(action, fallback)
+                    action_lines.append(f"  {action:<14}— {hint}")
+
+    except Exception as e:
+        print(f"   [DecisionPrompt] failed to load registry: {e}")
+
+    action_lines.append(f"  {'none':<14}— Normal conversation, no capability needed")
+    actions_section = "\n".join(action_lines)
+
+    return f"""You are Hayeong's decision engine.
 
 Based on the conversation and the latest message from James, decide what action (if any) is needed before you respond.
 
 Available actions:
-  web_search    — James wants something looked up online
-                  Include: query (what to search), delivery ("conversational" or "document")
-                  Use "document" when James asks for a report, comparison, or wants it emailed/saved
-  vision        — James wants you to look at his screen or an image
-                  Include: mode ("screen", "deep", or "image")
-  image_gen     — James wants you to generate or draw an image
-  email_check   — James wants to check his inbox
-  email_send    — James wants to send a notification or summary email
-  task_show     — James wants to see the task list
-  task_add      — James wants to add a task
-                  Include: task_text (what to add)
-  none          — Normal conversation, no capability needed
+{actions_section}
 
 Return ONLY valid JSON. No explanation, no markdown, no extra text.
 
 Examples:
-  {"action": "none"}
-  {"action": "web_search", "query": "zapmander vs whale pup Once Human", "delivery": "document"}
-  {"action": "web_search", "query": "RTX 5090 price", "delivery": "conversational"}
-  {"action": "email_check"}
-  {"action": "task_add", "task_text": "fix the voice bot"}
-  {"action": "vision", "mode": "screen"}
+  {{"action": "none"}}
+  {{"action": "web_search", "query": "zapmander vs whale pup Once Human", "delivery": "document"}}
+  {{"action": "web_search", "query": "RTX 5090 price", "delivery": "conversational"}}
+  {{"action": "email_check"}}
+  {{"action": "task_add", "task_text": "fix the voice bot"}}
+  {{"action": "vision", "mode": "screen"}}
+  {{"action": "image_gen", "prompt": "Hayeong in the orange frog jacket"}}
+  {{"action": "app_start", "app_id": "comfyui"}}
 
 CRITICAL RULES — read carefully:
   - If James just completed a task and is wrapping up ("thanks", "that's good", "sounds good",
@@ -527,6 +376,8 @@ CRITICAL RULES — read carefully:
   - Only pick an action if you are CERTAIN it is being freshly requested right now
   - When in doubt → none. It is always better to respond conversationally than to fire a tool incorrectly.
 """
+
+DECISION_PROMPT = build_decision_prompt()
 
 def decide_action(user_input: str, memory: list, model: str = None,
                   snapshot: dict = None) -> dict:
@@ -994,22 +845,6 @@ def check_first_time_setup():
         else:
             print("⚠️  Skipped.\n")
 
-# ─────────────────────────────────────────────
-# CAPABILITY RESPONSE
-# What Hayeong says when she starts/stops something.
-# Kept short and in-character — she does it, she doesn't announce it.
-# ─────────────────────────────────────────────
-
-CAPABILITY_RESPONSES = {
-    ("start", "discord"):      "On it.",
-    ("stop",  "discord"):      "Closing Discord.",
-    ("start", "voice_server"): "Voice server starting.",
-    ("stop",  "voice_server"): "Voice server shutting down.",
-    ("start", "voice"):        "Mic's open.",
-    ("stop",  "voice"):        "Mic off.",
-    ("start", "minecraft"):    "Loading Minecraft.",
-    ("stop",  "minecraft"):    "Disconnecting from Minecraft.",
-}
 
 # ─────────────────────────────────────────────
 # MAIN LOOP
@@ -1057,7 +892,8 @@ def main(text_mode: bool = False):
     mood_state = load_mood()
     arch       = HayeongArchitecture()
     session    = SessionTrust(environment="home")
-    procs      = ProcessManager()
+    app_mgr    = get_app_manager()
+    app_mgr.start_monitor()
     tracker    = SituationTracker() if SITUATION_TRACKER_AVAILABLE else None
 
     # Strip suspicion/verification messages from previous sessions.
@@ -1157,22 +993,8 @@ def main(text_mode: bool = False):
     # Local client (voice_client_local.py) connects to it at the desktop.
     # Phone app (Phase 10) connects to it over Tailscale when away.
     print("\n🎙️  Starting voice server...")
-    _voice_server_path = os.path.join(HAYEONG_DIR, "voice_server.py")
-    if os.path.exists(_voice_server_path):
-        try:
-            _voice_server_proc = subprocess.Popen(
-                [sys.executable, _voice_server_path],
-                cwd=HAYEONG_DIR,
-                creationflags=subprocess.CREATE_NEW_CONSOLE if sys.platform == "win32" else 0
-            )
-            procs._procs["voice_server"] = _voice_server_proc
-            # Watch it — restart if it crashes
-            procs.monitor_and_restart("voice_server")
-            print(f"   [VoiceServer] started on ws://localhost:8765 (pid {_voice_server_proc.pid})")
-        except Exception as e:
-            print(f"   ⚠️  Failed to start voice server: {e}")
-    else:
-        print("   ⚠️  voice_server.py not found — voice pipeline inactive")
+    _, _vs_msg = app_mgr.start("voice_server")
+    print(f"   [VoiceServer] {_vs_msg}")
 
     # ── STEP 5c: Start async presence layer ──
     # This is what makes her feel present even while working.
@@ -1246,7 +1068,7 @@ def main(text_mode: bool = False):
     print(f"   Session trust: {session.get_trust_label()}")
     if energy:
         print(f"   Energy level: {energy.level}/5 ({energy.get_full_state()['label']})")
-    print(f"   Running: {list(procs._procs.keys()) or 'discord'}")
+    print(f"   Running: {app_mgr.list_running() or ['none']}")
     if tasks:
         active = tasks._log.get("active", [])
         if active:
@@ -1281,7 +1103,7 @@ def main(text_mode: bool = False):
                 print("\nShutting down...")
                 save_memory(memory)
                 save_json(MOOD_FILE, mood_state)
-                procs.stop_all()
+                app_mgr.stop_all()
                 if energy:
                     energy.save_on_shutdown()
                 if LOGGER_AVAILABLE:
@@ -1318,7 +1140,7 @@ def main(text_mode: bool = False):
             _speak("Talk to you later.", emotion="neutral")
             save_memory(memory)
             save_json(MOOD_FILE, mood_state)
-            procs.stop_all()
+            app_mgr.stop_all()
             if energy:
                 energy.save_on_shutdown()
             if LOGGER_AVAILABLE:
@@ -1514,7 +1336,6 @@ def main(text_mode: bool = False):
                     "email":         email,
                     "email_monitor": email_monitor if EMAIL_MONITOR_AVAILABLE else None,
                     "email_address": hayeong_email.to_address if EMAIL_AVAILABLE else None,
-                    "tasks":         tasks,
                     "constraints":   _constraints,
                 }
                 _cap_result = _loader.dispatch(action, user_input, _cap_context)
