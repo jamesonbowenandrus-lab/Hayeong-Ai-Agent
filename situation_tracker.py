@@ -59,6 +59,7 @@ import requests
 from collections import deque
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
 # ─────────────────────────────────────────────
 # CONFIG
@@ -228,6 +229,7 @@ class SituationTracker:
             fallback = self._fallback_snapshot(user_input)
             self._current = fallback
             self._backlog.append(fallback)
+            # Note: _save_session not called here — fallback data is not worth persisting
             return fallback
 
     # ─────────────────────────────────────────────
@@ -374,16 +376,26 @@ class SituationTracker:
             "timestamp":          datetime.now().strftime("%H:%M:%S"),
         }
 
-    def _save_session(self):
+    def _save_session(self, is_fallback: bool = False):
         """
         Persist the current session's backlog to disk.
         Survives Hayeong restarts mid-session (rare but possible).
         Written compactly — small file, fast I/O.
+
+        Fallback snapshots are NOT saved — they contain no real situational
+        data and would corrupt the backlog trajectory.
+
+        Also writes current_state at the top level for the Phase 11
+        shared state bus (other processes can read this file to know
+        Hayeong's current situation without an LLM call).
         """
+        if is_fallback:
+            return   # Never persist fake data
         try:
             data = {
-                "saved_at": datetime.now().isoformat(),
-                "backlog":  list(self._backlog),
+                "saved_at":     datetime.now().isoformat(),
+                "current_state": self._current,   # Phase 11: shared state bus hook
+                "backlog":      list(self._backlog),
             }
             with open(SESSION_FILE, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2)
@@ -394,6 +406,7 @@ class SituationTracker:
         """
         Load the previous session's backlog on startup.
         Only loads if the file is from today — stale sessions are ignored.
+        Also restores current_state if present (Phase 11 shared state bus).
         """
         if not SESSION_FILE.exists():
             return
@@ -406,7 +419,62 @@ class SituationTracker:
                 return   # Different day — don't carry over
             for snap in data.get("backlog", []):
                 self._backlog.append(snap)
+            if data.get("current_state"):
+                self._current = data["current_state"]
             if self._backlog:
                 print(f"   [SituationTracker] Resumed session — {len(self._backlog)} snapshot(s) loaded.")
         except Exception:
             pass
+
+
+# ─────────────────────────────────────────────
+# MODULE-LEVEL HELPERS
+# Used by decide_action() and context_verifier() in main.py
+# so the snapshot formatting logic lives here — not scattered
+# as inline duplicates across the codebase.
+# ─────────────────────────────────────────────
+
+def format_snapshot_for_decision(snapshot: dict) -> str:
+    """
+    Compact one-line snapshot string for injection into decide_action().
+
+    Keeps the token count low — decide_action() is already doing real work.
+    This just tells the model what phase and topic we're in so it doesn't
+    fire tools when James is wrapping up or switching topics.
+
+    Example output:
+      [SITUATION: phase=wrapping_up topic='Pokémon list for Once Human' just_completed='search results delivered']
+    """
+    if not snapshot:
+        return ""
+    s = snapshot
+    parts = [
+        f"[SITUATION: phase={s.get('phase', '?')}",
+        f"topic={s.get('current_topic', '?')!r}",
+    ]
+    if s.get("task_switching"):
+        parts.append("SWITCHING=true")
+    if s.get("just_completed"):
+        parts.append(f"just_completed={s['just_completed']!r}")
+    constraints = s.get("active_constraints", [])
+    if constraints:
+        parts.append(f"constraints={constraints}")
+    parts.append("]")
+    return " ".join(parts)
+
+
+def format_snapshot_for_verifier(snapshot: dict) -> str:
+    """
+    Structured snapshot string for injection into context_verifier().
+
+    The verifier needs a bit more detail than decide_action() — specifically
+    the active constraints and task_switching flag — but still compact.
+
+    Example output:
+      Situation: {"phase": "mid_task", "current_topic": "...", ...}
+    """
+    if not snapshot:
+        return ""
+    keys = ["phase", "current_topic", "active_constraints", "task_switching", "james_intent"]
+    subset = {k: snapshot[k] for k in keys if k in snapshot}
+    return "Situation: " + json.dumps(subset)

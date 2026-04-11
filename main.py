@@ -13,6 +13,19 @@
 #
 # To start everything: just run main.py. That's it.
 
+# ── Singleton lock — only one instance of Hayeong may run at a time ──
+import sys as _sys
+try:
+    from filelock import FileLock, Timeout
+    _lock = FileLock("hayeong.lock", timeout=0)
+    _lock.acquire()
+except ImportError:
+    print("⚠️  filelock not installed — run: pip install filelock")
+    _sys.exit(1)
+except Timeout:
+    print("Hayeong is already running.")
+    _sys.exit(1)
+
 import requests
 import re
 import json
@@ -23,6 +36,7 @@ import threading
 import queue
 import numpy as np
 import sounddevice as sd
+from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
 from context_router import ContextRouter, check_gpu_status
@@ -32,7 +46,10 @@ from voice import (
     transcribe, speak, listen_for_wake_word,
     record_seconds, get_volume, show_thinking,
     SAMPLE_RATE, INPUT_DEVICE, VOLUME_THRESHOLD,
-    split_sentences, get_tts, get_voice_modulation,
+    split_sentences, get_pipeline, get_tts,
+    KOKORO_AVAILABLE, F5TTS_AVAILABLE,
+    HAYEONG_VOICE, get_voice_modulation,
+    REF_AUDIO, REF_TEXT,
     OUTPUT_DEVICE
 )
 from long_term_memory import recall_for_prompt, remember, categorize, import_from_memory_json
@@ -66,10 +83,16 @@ except ImportError:
     print("⚠️  capability_loader.py not found — using legacy dispatch")
 
 try:
-    from situation_tracker import SituationTracker
+    from situation_tracker import (
+        SituationTracker,
+        format_snapshot_for_decision,
+        format_snapshot_for_verifier,
+    )
     SITUATION_TRACKER_AVAILABLE = True
 except ImportError:
     SITUATION_TRACKER_AVAILABLE = False
+    format_snapshot_for_decision = lambda s: ""
+    format_snapshot_for_verifier = lambda s: ""
     print("⚠️  situation_tracker.py not found — shared situational awareness inactive")
 
 try:
@@ -119,6 +142,14 @@ except ImportError:
     logger = None
     LOGGER_AVAILABLE = False
     print("⚠️  hayeong_logger.py not found — logging inactive")
+
+try:
+    from presence_governor import is_james_present, get_mode as get_presence_mode, start_monitoring as start_presence_monitoring
+    PRESENCE_GOVERNOR_AVAILABLE = True
+except ImportError:
+    PRESENCE_GOVERNOR_AVAILABLE = False
+    is_james_present = lambda: True   # safe fallback — assume present, never run background tasks
+    get_presence_mode = lambda: "present"
 
 # ─────────────────────────────────────────────
 # CONFIGURATION
@@ -411,21 +442,8 @@ def decide_action(user_input: str, memory: list, model: str = None,
             + system_content
         )
     # Inject situation snapshot — shared awareness of what phase/topic we're in
-    if snapshot:
-        from situation_tracker import SituationTracker
-        # Build compact decision-friendly string from snapshot
-        s = snapshot
-        parts = [f"[SITUATION: phase={s.get('phase','?')}",
-                 f"topic={s.get('current_topic','?')!r}"]
-        if s.get("task_switching"):
-            parts.append("SWITCHING=true")
-        if s.get("just_completed"):
-            parts.append(f"just_completed={s['just_completed']!r}")
-        constraints = s.get("active_constraints", [])
-        if constraints:
-            parts.append(f"constraints={constraints}")
-        parts.append("]")
-        snap_line = " ".join(parts)
+    snap_line = format_snapshot_for_decision(snapshot)
+    if snap_line:
         system_content = snap_line + "\n\n" + system_content
 
     messages = [{"role": "system", "content": system_content}]
@@ -523,8 +541,9 @@ def context_verifier(user_input: str, action: str, decision: dict,
         history_lines.append(f"{role}: {m.get('content', '')[:250]}")
     history_block = "\n".join(history_lines)
 
+    snap_line = format_snapshot_for_verifier(snapshot)
     check_input = (
-        f"{('Situation: ' + json.dumps({k: snapshot[k] for k in ['phase','current_topic','active_constraints','task_switching'] if k in snapshot}) + chr(10)) if snapshot else ''}"
+        f"{snap_line + chr(10) if snap_line else ''}"
         f"Recent conversation:\n{history_block}\n\n"
         f"Latest message from James: {user_input}\n\n"
         f"Planned action: {action}\n"
@@ -563,6 +582,35 @@ def context_verifier(user_input: str, action: str, decision: dict,
         return {"verified": True, "constraints": [], "reasoning": "verifier error — defaulting open"}
 
 
+_FAST_EMOTION_MAP: list[tuple[list[str], str]] = [
+    # Each entry: ([keywords], emotion_key)
+    # Listed in priority order — first match wins.
+    (["i'm sorry", "sorry to hear", "that's hard", "that must be", "i understand"], "warm"),
+    (["sad", "miss you", "lonely", "tired", "hurts", "hard day"], "weighted"),
+    (["haha", "funny", "that's hilarious", "lol", "actually laughing"], "amused"),
+    (["nice", "proud", "nailed it", "exactly right", "well done", "good call"], "proud"),
+    (["let me think", "interesting question", "hmm", "complex", "good point"], "curious"),
+    (["on it", "searching", "let me check", "pulling that up", "one sec"], "focused"),
+    (["honestly", "look", "straight up", "real talk"], "ai_pride"),
+    (["okay so", "alright", "here's the thing", "so basically"], "neutral"),
+]
+
+def infer_emotion_fast(text: str) -> str:
+    """
+    Keyword-based emotion inference from response content.
+    No LLM call — runs in microseconds.
+    Used to set voice modulation from the first sentence rather than
+    waiting for the full response.
+
+    Returns an emotion key from EMOTION_VOICE_MAP, or "neutral" if no match.
+    """
+    t = text.lower()
+    for keywords, emotion in _FAST_EMOTION_MAP:
+        if any(k in t for k in keywords):
+            return emotion
+    return "neutral"
+
+
 def stream_response_and_speak(system_prompt: str, memory: list, emotion: str = "neutral", text_mode: bool = False, model: str = None) -> str:
     """
     Streams the LLM response and speaks it via TTS.
@@ -576,10 +624,25 @@ def stream_response_and_speak(system_prompt: str, memory: list, emotion: str = "
         role = "user" if entry["role"] == "user" else "assistant"
         messages.append({"role": role, "content": entry["content"]})
 
-    sentence_queue = queue.Queue()
-    full_response  = []
-    token_buffer   = []
-    tts_done       = threading.Event()
+    # ── Three-thread pipeline ──
+    # Thread 1 (main): token consumer + sentence detector  → sentence_queue
+    # Thread 2:        TTS synthesizer                     → audio_queue
+    # Thread 3:        audio playback                      (blocks on sd.wait, not TTS)
+    #
+    # No thread blocks another — synthesizer doesn't wait for playback to finish,
+    # and playback doesn't wait for the next sentence to be synthesized.
+    # First word reaches the speaker as soon as Sentence 1 is synthesized,
+    # regardless of how long the full response takes.
+
+    sentence_queue  = queue.Queue()
+    audio_queue     = queue.Queue(maxsize=2)   # cap at 2 pre-synthesized chunks
+    full_response   = []
+    token_buffer    = []
+    tts_done        = threading.Event()
+    # Emotion detected from response content — updated on first sentence,
+    # read by synthesizer per sentence. Mutable list so closure can write to it.
+    _emotion_live   = [emotion]
+    _first_sentence = [True]    # flag: fast inference runs once on sentence 1 only
 
     def _is_sentence_end(text: str) -> bool:
         """
@@ -596,79 +659,97 @@ def stream_response_and_speak(system_prompt: str, memory: list, emotion: str = "
         last = text[-1]
         if last not in '.!?':
             return False
-        # Don't split if the character before the punctuation is a digit
-        # Catches: "2.", "3.0", "v2.", "12."
         if last == '.' and text[-2].isdigit():
             return False
-        # Don't split on very short "words" before a period — likely abbreviations
-        # e.g. "e.g.", "approx.", single capital letters ("A.")
         words = text.split()
         if words:
-            last_word = words[-1]  # includes the punctuation
+            last_word = words[-1]
             bare = last_word.rstrip('.!?')
             if len(bare) <= 2:
                 return False
         return True
 
-    def tts_worker():
-        # Skip TTS entirely in text mode
-        if text_mode:
-            while True:
-                sentence = sentence_queue.get()
-                if sentence is None:
-                    break
-            tts_done.set()
-            return
+    def _synthesize(sentence: str, speed: float, sample_rate: int) -> np.ndarray | None:
+        """Generate audio for one sentence. Returns float32 stereo array or None."""
+        chunks = []
+        if KOKORO_AVAILABLE:
+            pipeline = get_pipeline()
+            if pipeline is not None:
+                try:
+                    for _, _, audio in pipeline(sentence, voice=HAYEONG_VOICE, speed=speed):
+                        chunks.append(audio)
+                except Exception as e:
+                    print(f"⚠️  Kokoro error: {e}")
+        if not chunks and F5TTS_AVAILABLE:
+            tts = get_tts()
+            if tts is not None:
+                try:
+                    wav, sr, _ = tts.infer(
+                        ref_file=REF_AUDIO, ref_text=REF_TEXT,
+                        gen_text=sentence, nfe_step=64, speed=speed,
+                    )
+                    chunks.append(wav)
+                    sample_rate = sr
+                except Exception as e:
+                    print(f"⚠️  F5-TTS error: {e}")
+        if not chunks:
+            return None
+        audio = np.concatenate(chunks)
+        if audio.dtype != np.float32:
+            audio = audio.astype(np.float32)
+        peak = np.abs(audio).max()
+        if peak > 1.0:
+            audio = audio / peak
+        if audio.ndim == 1:
+            audio = np.stack([audio, audio], axis=1)
+        silence = np.zeros((int(0.6 * sample_rate), 2), dtype=np.float32)
+        return np.vstack([audio, silence])
 
-        modulation  = get_voice_modulation(emotion)
-        speed       = modulation["speed"]
-        tts         = get_tts()
-        sample_rate = 24000
+    def tts_synthesizer():
+        """Thread 2: pulls sentences, synthesizes audio, pushes to audio_queue."""
+        if text_mode:
+            while sentence_queue.get() is not None:
+                pass
+            audio_queue.put(None)
+            return
 
         while True:
             try:
                 sentence = sentence_queue.get(timeout=15)
             except queue.Empty:
                 break
-
             if sentence is None:
+                audio_queue.put(None)
                 break
             if not sentence.strip():
                 continue
+            # Use the live emotion (may have been updated by first-sentence inference)
+            speed = get_voice_modulation(_emotion_live[0])["speed"]
+            audio = _synthesize(sentence, speed, 24000)
+            if audio is not None:
+                audio_queue.put(audio)   # blocks if queue full — back-pressure
 
+    def playback_worker():
+        """Thread 3: pulls synthesized audio chunks and plays them sequentially."""
+        while True:
             try:
-                wav, sr, _ = tts.infer(
-                    ref_file = "voice_prep/samples/source_5secs.wav",
-                    ref_text = "Before the video starts, I want to make a quick announcement.",
-                    gen_text = sentence,
-                    nfe_step = 64,
-                    speed    = speed,
-                )
-                sample_rate = sr
-
-                audio = wav
-                if audio.dtype != np.float32:
-                    audio = audio.astype(np.float32)
-                peak = np.abs(audio).max()
-                if peak > 1.0:
-                    audio = audio / peak
-                if audio.ndim == 1:
-                    audio = np.stack([audio, audio], axis=1)
-
-                silence = np.zeros((int(0.6 * sample_rate), 2), dtype=np.float32)
-                audio   = np.vstack([audio, silence])
-
-                sd.play(audio, samplerate=sample_rate, device=OUTPUT_DEVICE)
+                audio = audio_queue.get(timeout=20)
+            except queue.Empty:
+                break
+            if audio is None:
+                break
+            try:
+                sd.play(audio, samplerate=24000, device=OUTPUT_DEVICE)
                 sd.wait()
                 time.sleep(0.1)
-
             except Exception as e:
-                print(f"⚠️  TTS error: {e}")
-
+                print(f"⚠️  Playback error: {e}")
         tts_done.set()
 
-    tts_thread = threading.Thread(target=tts_worker, daemon=True)
-    tts_thread.start()
+    synth_thread    = threading.Thread(target=tts_synthesizer, daemon=True)
+    playback_thread = threading.Thread(target=playback_worker,  daemon=True)
+    synth_thread.start()
+    playback_thread.start()
 
     def _stream(model: str):
         try:
@@ -713,6 +794,13 @@ def stream_response_and_speak(system_prompt: str, memory: list, emotion: str = "
         if _is_sentence_end(buffer_text):
             if len(buffer_text.split()) >= 6:
                 clean = _strip_markdown(buffer_text)
+                # Fast emotion inference on first sentence — updates voice modulation
+                # before the synthesizer processes it, no LLM call needed.
+                if _first_sentence[0]:
+                    inferred = infer_emotion_fast(clean)
+                    if inferred != "neutral":
+                        _emotion_live[0] = inferred
+                    _first_sentence[0] = False
                 sentence_queue.put(clean)
                 if text_mode:
                     # Already printed the prefix — just stream the sentence inline
@@ -896,6 +984,10 @@ def main(text_mode: bool = False):
     app_mgr.start_monitor()
     tracker    = SituationTracker() if SITUATION_TRACKER_AVAILABLE else None
 
+    # Persistent executor for parallel memory lookups.
+    # max_workers=1 — ChromaDB is not thread-safe for concurrent reads.
+    _mem_executor = ThreadPoolExecutor(max_workers=1)
+
     # Strip suspicion/verification messages from previous sessions.
     # These carry over into context and make Hayeong behave like she's
     # still suspicious even in a fresh session. Clean them out on startup.
@@ -918,6 +1010,13 @@ def main(text_mode: bool = False):
 
     energy = EnergyManager()  if ENERGY_AVAILABLE   else None
     mixer  = MindStateMixer() if MIND_MIXER_AVAILABLE else None
+
+    # ── Presence governor — detect whether James is at the machine ──
+    if PRESENCE_GOVERNOR_AVAILABLE:
+        print(f"   [PresenceGovernor] Mode: {get_presence_mode()}")
+        def _on_presence_change(new_mode: str):
+            print(f"   [PresenceGovernor] → {new_mode.upper()}")
+        start_presence_monitoring(on_change=_on_presence_change, interval=30)
     smm    = SelfModManager() if SELF_MOD_AVAILABLE   else None
     tasks  = TaskManager()    if TASKS_AVAILABLE       else None
     email  = hayeong_email    if EMAIL_AVAILABLE        else None
@@ -1002,7 +1101,7 @@ def main(text_mode: bool = False):
     # dispatches slow work to a background thread.
     _presence: Optional["PresenceLayer"] = None
 
-    if ASYNC_PRESENCE_AVAILABLE and not text_mode:
+    if ASYNC_PRESENCE_AVAILABLE:
         def _on_ack(text: str):
             """Immediate acknowledgment — fires before any processing."""
             print(f"\nHayeong: {text}")
@@ -1103,6 +1202,8 @@ def main(text_mode: bool = False):
                 print("\nShutting down...")
                 save_memory(memory)
                 save_json(MOOD_FILE, mood_state)
+                if _presence is not None:
+                    _presence.stop()
                 app_mgr.stop_all()
                 if energy:
                     energy.save_on_shutdown()
@@ -1110,6 +1211,14 @@ def main(text_mode: bool = False):
                     logger.end_session()
                 break
             if not user_input:
+                continue
+
+            # ── Route through async presence if available ──
+            if _presence is not None:
+                intent = detect_intent(user_input)
+                _presence.submit(user_input, intent=intent)
+                # Don't fall through to the synchronous pipeline —
+                # presence layer handles the full response.
                 continue
         else:
             listen_for_wake_word()
@@ -1140,6 +1249,8 @@ def main(text_mode: bool = False):
             _speak("Talk to you later.", emotion="neutral")
             save_memory(memory)
             save_json(MOOD_FILE, mood_state)
+            if _presence is not None:
+                _presence.stop()
             app_mgr.stop_all()
             if energy:
                 energy.save_on_shutdown()
@@ -1156,6 +1267,12 @@ def main(text_mode: bool = False):
                 role="james",
                 content=user_input,
             )
+
+        # ── Parallel memory lookup — fires NOW, retrieved before prompt assembly ──
+        # ChromaDB lookup runs in the background while mood update, passphrase
+        # check, model routing, snapshot, and decide_action all run sequentially.
+        # By the time we need the result it's usually already done.
+        _mem_future = _mem_executor.submit(recall_for_prompt, user_input, 4)
  
         # ── Rest command — "take a rest", "go rest", "recharge" ──
         # Hayeong rests and restores energy. Not a subprocess — handled here.
@@ -1229,7 +1346,7 @@ def main(text_mode: bool = False):
         who = session.get_privacy_context()
         memory.append({"role": "user", "content": user_input})
 
-        long_term_context = recall_for_prompt(user_input, n_results=4)
+        long_term_context = _mem_future.result(timeout=10)
         state_of_mind     = detect_state_of_mind("casual", "home", mood_state)
         system_prompt     = build_system_prompt(
             who=who, situation="casual", environment="home", state_of_mind=state_of_mind
@@ -1253,7 +1370,7 @@ def main(text_mode: bool = False):
                 mixer.blend_states(blend)
                 mixer.step()
             who           = session.get_privacy_context()
-            long_term_ctx = recall_for_prompt(user_input, n_results=4)
+            long_term_ctx = _mem_future.result(timeout=10)
             system_prompt = build_system_prompt(
                 who=who, situation="casual", environment="home",
                 state_of_mind=detect_state_of_mind("casual", "home", mood_state)

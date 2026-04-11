@@ -4,7 +4,7 @@
 # WHY THIS ARCHITECTURE:
 #   The same server handles both desktop use and the future iOS/iPad app.
 #   Local client connects over localhost. Phone connects over Tailscale.
-#   The middle — Whisper → Hayeong → F5-TTS — is identical in both cases.
+#   The middle — Whisper → Hayeong → Kokoro TTS — is identical in both cases.
 #   Build once, inherit everywhere.
 #
 # ENDPOINTS:
@@ -30,7 +30,7 @@
 #
 # AUDIO FORMAT:
 #   Incoming: int16, 16000Hz, mono
-#   Outgoing: int16, 24000Hz, stereo-interleaved (matches F5-TTS native output)
+#   Outgoing: int16, 24000Hz, stereo-interleaved (matches Kokoro native output)
 #   Chunk size: 4096 samples (~170ms at 24kHz) — smooth streaming
 #
 # INSTALL:
@@ -48,21 +48,16 @@
 #   ws://<tailscale-ip>:8765/ws/voice
 
 # ─────────────────────────────────────────────
-# NOTE ON GPU / ROCm:
-# HSA env vars must be set BEFORE Python launches — not inside the script.
-# Set them in the bat file that starts this server:
-#   set HSA_OVERRIDE_GFX_VERSION=11.0.0
-#   set ROCR_VISIBLE_DEVICES=0
-# See voice_server.bat
+# NOTE ON GPU:
+# RTX 3090 — full CUDA. No environment variable workarounds needed.
+# Kokoro TTS and Whisper both use standard PyTorch CUDA.
 # ─────────────────────────────────────────────
 
 import asyncio
 import json
 import logging
-import os
 import sys
 import tempfile
-import threading
 import time
 from pathlib import Path
 
@@ -96,8 +91,6 @@ log = logging.getLogger("voice_server")
 
 _voice_loaded   = False
 _core_loaded    = False
-_whisper_model  = None
-_tts_instance   = None
 _speak_fn       = None
 _transcribe_fn  = None
 _chat_fn        = None
@@ -117,19 +110,28 @@ def _load_voice_modules():
     global _voice_loaded, _speak_fn, _transcribe_fn
     if _voice_loaded:
         return
-    log.info("Loading voice modules (Whisper + F5-TTS)...")
-    from voice import speak, transcribe, get_tts
+    log.info("Loading voice modules (Whisper + Kokoro TTS)...")
+    from voice import speak, transcribe, get_pipeline, KOKORO_AVAILABLE, get_tts, F5TTS_AVAILABLE
     _speak_fn      = speak
     _transcribe_fn = transcribe
 
-    # Pre-load F5-TTS now so the first conversation isn't slow.
-    # Without this it cold-loads on first transcription — adds 15-30s delay.
-    log.info("Pre-loading F5-TTS model (this takes ~30s on first run)...")
-    try:
-        get_tts()  # forces lazy init now rather than mid-conversation
-        log.info("✅ F5-TTS loaded and ready")
-    except Exception as e:
-        log.warning(f"F5-TTS pre-load failed: {e} — will retry on first request")
+    # Pre-load TTS now so the first conversation isn't slow.
+    if KOKORO_AVAILABLE:
+        log.info("Pre-loading Kokoro TTS (downloads on first run if needed)...")
+        try:
+            get_pipeline()
+            log.info("✅ Kokoro TTS loaded and ready")
+        except Exception as e:
+            log.warning(f"Kokoro pre-load failed: {e} — will retry on first request")
+    elif F5TTS_AVAILABLE:
+        log.info("Kokoro not available — pre-loading F5-TTS fallback...")
+        try:
+            get_tts()
+            log.info("✅ F5-TTS loaded and ready (fallback)")
+        except Exception as e:
+            log.warning(f"F5-TTS pre-load failed: {e} — will retry on first request")
+    else:
+        log.warning("No TTS engine available — voice output disabled")
 
     _voice_loaded = True
     log.info("✅ Voice modules ready")
@@ -191,14 +193,11 @@ app = FastAPI(title="Hayeong Voice Server", version="1.0")
 @app.get("/health")
 async def health():
     import torch
-    # Check DirectML first — it uses privateuseone backend, not cuda
-    try:
-        import torch_directml
-        gpu_name      = f"DirectML ({torch_directml.device()})"
-        gpu_available = True
-    except ImportError:
-        gpu_available = torch.cuda.is_available()
-        gpu_name      = torch.cuda.get_device_name(0) if gpu_available else "none"
+    gpu_available = torch.cuda.is_available()
+    gpu_name      = torch.cuda.get_device_name(0) if gpu_available else "none"
+
+    from voice import KOKORO_AVAILABLE, F5TTS_AVAILABLE
+    tts_engine = "kokoro" if KOKORO_AVAILABLE else ("f5_tts_fallback" if F5TTS_AVAILABLE else "none")
 
     return JSONResponse({
         "status":        "online",
@@ -207,8 +206,9 @@ async def health():
         "uptime_s":      round(time.time() - _server_start),
         "gpu":           gpu_name,
         "gpu_available": gpu_available,
-        "f5_device":     "cpu",   # F5-TTS runs on CPU — DirectML not supported by library
-        "whisper_device":"cpu",
+        "tts_device":    "cuda" if gpu_available else "cpu",
+        "tts_engine":    tts_engine,
+        "whisper_device": "cpu",
     })
 
 
@@ -272,33 +272,49 @@ def _get_ai_response(user_text: str, memory: list, mood_state: dict,
 
 def _generate_tts_audio(text: str, emotion: str = "neutral") -> np.ndarray | None:
     """
-    Generate F5-TTS audio. Returns float32 numpy array or None on failure.
+    Generate TTS audio via Kokoro (primary) or F5-TTS (fallback).
+    Returns float32 numpy array (stereo, 24000 Hz) or None on failure.
     Runs in a thread executor.
     """
     if not _voice_loaded:
         return None
     try:
-        import io
-        import soundfile as sf
-        from voice import get_tts, get_voice_modulation, split_sentences, REF_AUDIO, REF_TEXT
+        from voice import (
+            get_pipeline, KOKORO_AVAILABLE, HAYEONG_VOICE,
+            get_tts, F5TTS_AVAILABLE, REF_AUDIO, REF_TEXT,
+            get_voice_modulation, split_sentences,
+        )
 
-        tts        = get_tts()
-        modulation = get_voice_modulation(emotion)
-        speed      = modulation["speed"]
-        sentences  = split_sentences(text)
-        chunks     = []
+        modulation  = get_voice_modulation(emotion)
+        speed       = modulation["speed"]
+        sentences   = split_sentences(text)
+        chunks      = []
         sample_rate = 24000
 
-        for sentence in sentences:
-            wav, sr, _ = tts.infer(
-                ref_file = REF_AUDIO,
-                ref_text = REF_TEXT,
-                gen_text = sentence,
-                nfe_step = 64,
-                speed    = speed,
-            )
-            chunks.append(wav)
-            sample_rate = sr
+        # ── Primary: Kokoro ──
+        if KOKORO_AVAILABLE:
+            pipeline = get_pipeline()
+            if pipeline is not None:
+                for sentence in sentences:
+                    generator = pipeline(sentence, voice=HAYEONG_VOICE, speed=speed)
+                    for _, _, audio in generator:
+                        chunks.append(audio)
+
+        # ── Fallback: F5-TTS ──
+        if not chunks and F5TTS_AVAILABLE:
+            tts = get_tts()
+            if tts is not None:
+                log.info("Kokoro unavailable — using F5-TTS fallback")
+                for sentence in sentences:
+                    wav, sr, _ = tts.infer(
+                        ref_file = REF_AUDIO,
+                        ref_text = REF_TEXT,
+                        gen_text = sentence,
+                        nfe_step = 64,
+                        speed    = speed,
+                    )
+                    chunks.append(wav)
+                    sample_rate = sr
 
         if not chunks:
             return None
@@ -327,7 +343,7 @@ def _generate_tts_audio(text: str, emotion: str = "neutral") -> np.ndarray | Non
         return combined
 
     except Exception as e:
-        log.error(f"F5-TTS error: {e}")
+        log.error(f"TTS error: {e}")
         return None
 
 
