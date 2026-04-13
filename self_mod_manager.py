@@ -21,6 +21,13 @@ import difflib
 import datetime
 from pathlib import Path
 
+try:
+    from rollback_manager import RollbackManager, snapshot_file as _snapshot_file
+    _rollback = RollbackManager()
+    ROLLBACK_AVAILABLE = True
+except ImportError:
+    ROLLBACK_AVAILABLE = False
+
 BASE_DIR = Path(__file__).parent
 
 # Directories
@@ -102,6 +109,10 @@ class SelfModManager:
         if target_path.exists():
             backup_path = self._backup_file(target_path, "pre_overwrite")
 
+        # Capture before-state for rollback log (before write)
+        if ROLLBACK_AVAILABLE:
+            before = _snapshot_file(target_path)
+
         # Write the file
         with open(target_path, "w", encoding="utf-8") as f:
             f.write(code)
@@ -118,6 +129,20 @@ class SelfModManager:
             diff=None,
             backup_path=str(backup_path) if backup_path else None,
         )
+
+        # Rollback audit log
+        if ROLLBACK_AVAILABLE:
+            _rollback.log_action(
+                action_type   = "write_file",
+                description   = f"Wrote new capability: {filename} — {reason}",
+                before_state  = before,
+                after_state   = {"path": str(target_path), "content": code},
+                triggered_by  = "self_mod",
+                approved_by   = "pending_james",
+                reversible    = True,
+                rollback_cmd  = "delete_file" if not before["existed"] else "restore_file",
+                rollback_args = {"path": str(target_path)},
+            )
 
         print(f"[SelfMod] New capability written: {filename} (inactive — pending James approval)")
         print(f"          Reason: {reason}")
@@ -145,9 +170,12 @@ class SelfModManager:
         if not target_path.exists():
             raise FileNotFoundError(f"Capability not found: {filename}. Use write_capability() instead.")
 
-        # Read old content for diff
+        # Read old content for diff + rollback snapshot
         with open(target_path, "r", encoding="utf-8") as f:
             old_code = f.read()
+
+        if ROLLBACK_AVAILABLE:
+            before = {"path": str(target_path), "existed": True, "content": old_code}
 
         # Create backup before modifying
         backup_path = self._backup_file(target_path, "pre_modify")
@@ -166,6 +194,20 @@ class SelfModManager:
             diff=diff,
             backup_path=str(backup_path),
         )
+
+        # Rollback audit log
+        if ROLLBACK_AVAILABLE:
+            _rollback.log_action(
+                action_type   = "modify_file",
+                description   = f"Modified capability: {filename} — {reason}",
+                before_state  = before,
+                after_state   = {"path": str(target_path), "content": new_code},
+                triggered_by  = "self_mod",
+                approved_by   = "autonomous",
+                reversible    = True,
+                rollback_cmd  = "restore_file",
+                rollback_args = {"path": str(target_path)},
+            )
 
         print(f"[SelfMod] Capability modified: {filename}")
         print(f"          Reason: {reason}")

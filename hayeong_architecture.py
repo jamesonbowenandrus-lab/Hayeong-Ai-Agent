@@ -10,6 +10,13 @@ import datetime
 import subprocess
 from pathlib import Path
 
+try:
+    from rollback_manager import RollbackManager as _RollbackManager
+    _arch_rollback = _RollbackManager()
+    _ROLLBACK_AVAILABLE = True
+except ImportError:
+    _ROLLBACK_AVAILABLE = False
+
 
 # ─────────────────────────────────────────────
 # PATHS
@@ -128,10 +135,55 @@ class CapabilityManager:
             "dependencies": dependencies or [],
             "notes": ""
         }
+
+        # Snapshot registry before modification for rollback
+        if _ROLLBACK_AVAILABLE:
+            try:
+                before_content = CAPABILITY_PATH.read_text(encoding="utf-8") if CAPABILITY_PATH.exists() else None
+                before_state = {"path": str(CAPABILITY_PATH), "existed": CAPABILITY_PATH.exists(), "content": before_content}
+            except Exception:
+                before_state = {}
+
         self.registry["self_generated_capabilities"]["capabilities"].append(new_cap)
         self.registry["last_updated"] = datetime.datetime.now().isoformat()
         save_json(CAPABILITY_PATH, self.registry)
+
+        # Log to rollback audit trail
+        if _ROLLBACK_AVAILABLE:
+            try:
+                after_content = CAPABILITY_PATH.read_text(encoding="utf-8")
+                _arch_rollback.log_action(
+                    action_type   = "capability_registered",
+                    description   = f"Registered capability: {capability_id} ({name}) — {created_reason}",
+                    before_state  = before_state,
+                    after_state   = {"path": str(CAPABILITY_PATH), "content": after_content},
+                    triggered_by  = "hayeong_architecture",
+                    approved_by   = "autonomous",
+                    reversible    = True,
+                    rollback_cmd  = "restore_file",
+                    rollback_args = {"path": str(CAPABILITY_PATH)},
+                )
+            except Exception:
+                pass
+
         return True
+
+    def sync_mood_to_behavioral_state(self, mood: dict):
+        """
+        Map mood values → behavioral interior state.
+        Replaces the free function mood_to_behavioral_state() in main.py.
+        Call after any mood update so behavioral state stays in sync.
+        """
+        p = mood.get("playfulness", 0)
+        f = mood.get("focus", 0)
+        m = mood.get("motivation", 0)
+
+        if p >= 3:    emotion, intensity = "amused",    6
+        elif f >= 3:  emotion, intensity = "focused",   7
+        elif m <= -2: emotion, intensity = "withdrawn", 4
+        else:         emotion, intensity = "neutral",   3
+
+        self.behavioral.update_interior(primary_emotion=emotion, intensity=intensity)
 
     def write_generated_script(self, filename: str, code: str) -> Path:
         """

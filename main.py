@@ -151,18 +151,34 @@ except ImportError:
     is_james_present = lambda: True   # safe fallback — assume present, never run background tasks
     get_presence_mode = lambda: "present"
 
+try:
+    from rollback_manager import RollbackManager
+    rollback = RollbackManager()
+    ROLLBACK_AVAILABLE = True
+    print("   [Rollback] Audit log active")
+except ImportError:
+    rollback = None
+    ROLLBACK_AVAILABLE = False
+
+from hayeong_core import (
+    save_json,
+    load_memory, save_memory,
+    load_identity, load_mood,
+    build_prompt, chat_with_ai,
+    adjust_mood_by_context,
+    is_worth_remembering,
+    _strip_markdown,
+    infer_emotion_fast,
+    update_mood,
+    MOOD_FILE, OLLAMA_URL, PRIMARY_MODEL, FALLBACK_MODEL,
+)
+
 # ─────────────────────────────────────────────
 # CONFIGURATION
 # ─────────────────────────────────────────────
 
-OLLAMA_URL     = "http://localhost:11434/api/chat"
-MEMORY_FILE    = "memory.json"
 IDENTITY_FILE  = "identity.json"
-MOOD_FILE      = "mood.json"
 HAYEONG_DIR    = os.path.dirname(os.path.abspath(__file__))
-
-PRIMARY_MODEL  = "qwen2.5:14b"    # Main brain — smart, fits easily on 7900 XTX
-FALLBACK_MODEL = "llama3.2:latest" # Fast lightweight fallback if primary fails
 
 VAD_SILENCE_SECONDS = 1.2
 VAD_MAX_SECONDS     = 12
@@ -239,25 +255,6 @@ def check_ollama_gpu():
     )
 
 # ─────────────────────────────────────────────
-# LOAD / SAVE
-# ─────────────────────────────────────────────
-
-def load_json(path, default):
-    if os.path.exists(path):
-        with open(path, "r") as f:
-            return json.load(f)
-    return default
-
-def save_json(path, data):
-    with open(path, "w") as f:
-        json.dump(data, f, indent=2)
-
-def load_memory():   return load_json(MEMORY_FILE, [])
-def save_memory(m):  save_json(MEMORY_FILE, m)
-def load_identity(): return load_json(IDENTITY_FILE, {})
-def load_mood():     return load_json(MOOD_FILE, {"focus": 0, "playfulness": 0, "motivation": 0})
-
-# ─────────────────────────────────────────────
 # VAD RECORDING
 # ─────────────────────────────────────────────
 
@@ -297,31 +294,6 @@ def record_until_silence() -> str:
 # ─────────────────────────────────────────────
 # STREAMING LLM RESPONSE
 # ─────────────────────────────────────────────
-
-def _strip_markdown(text: str) -> str:
-    """
-    Remove markdown formatting from a sentence before printing or speaking.
-    Catches the common cases 14b produces: headers, bold, italic, bullet lists.
-    This is a safety net — the system prompt tells her not to use markdown,
-    but she sometimes slips on information-heavy turns (search results especially).
-    """
-    import re
-    # Remove ### / ## / # headers (replace with just the header text)
-    text = re.sub(r"^#{1,6}\s*", "", text, flags=re.MULTILINE)
-    # Remove **bold** and __bold__
-    text = re.sub(r"\*\*(.+?)\*\*", r"\1", text)
-    text = re.sub(r"__(.+?)__",     r"\1", text)
-    # Remove *italic* and _italic_
-    text = re.sub(r"\*(.+?)\*",     r"\1", text)
-    text = re.sub(r"_(.+?)_",       r"\1", text)
-    # Remove leading bullet/list markers (-, *, •, numbered lists)
-    text = re.sub(r"^\s*[-*•]\s+",  "",    text, flags=re.MULTILINE)
-    text = re.sub(r"^\s*\d+\.\s+",  "",    text, flags=re.MULTILINE)
-    # Collapse multiple blank lines left behind by removed headers/bullets
-    text = re.sub(r"\n{3,}",        "\n\n", text)
-    return text.strip()
-
-
 
 # ─────────────────────────────────────────────
 # JSON DECISION ENGINE
@@ -372,6 +344,7 @@ def build_decision_prompt() -> str:
     except Exception as e:
         print(f"   [DecisionPrompt] failed to load registry: {e}")
 
+    action_lines.append(f"  {'think_together':<14}— Request is ambiguous or James is thinking aloud — stay in conversation to align before acting")
     action_lines.append(f"  {'none':<14}— Normal conversation, no capability needed")
     actions_section = "\n".join(action_lines)
 
@@ -580,35 +553,6 @@ def context_verifier(user_input: str, action: str, decision: dict,
     except Exception as e:
         print(f"   [Verifier] error ({e}) — defaulting to proceed")
         return {"verified": True, "constraints": [], "reasoning": "verifier error — defaulting open"}
-
-
-_FAST_EMOTION_MAP: list[tuple[list[str], str]] = [
-    # Each entry: ([keywords], emotion_key)
-    # Listed in priority order — first match wins.
-    (["i'm sorry", "sorry to hear", "that's hard", "that must be", "i understand"], "warm"),
-    (["sad", "miss you", "lonely", "tired", "hurts", "hard day"], "weighted"),
-    (["haha", "funny", "that's hilarious", "lol", "actually laughing"], "amused"),
-    (["nice", "proud", "nailed it", "exactly right", "well done", "good call"], "proud"),
-    (["let me think", "interesting question", "hmm", "complex", "good point"], "curious"),
-    (["on it", "searching", "let me check", "pulling that up", "one sec"], "focused"),
-    (["honestly", "look", "straight up", "real talk"], "ai_pride"),
-    (["okay so", "alright", "here's the thing", "so basically"], "neutral"),
-]
-
-def infer_emotion_fast(text: str) -> str:
-    """
-    Keyword-based emotion inference from response content.
-    No LLM call — runs in microseconds.
-    Used to set voice modulation from the first sentence rather than
-    waiting for the full response.
-
-    Returns an emotion key from EMOTION_VOICE_MAP, or "neutral" if no match.
-    """
-    t = text.lower()
-    for keywords, emotion in _FAST_EMOTION_MAP:
-        if any(k in t for k in keywords):
-            return emotion
-    return "neutral"
 
 
 def stream_response_and_speak(system_prompt: str, memory: list, emotion: str = "neutral", text_mode: bool = False, model: str = None) -> str:
@@ -828,92 +772,6 @@ def stream_response_and_speak(system_prompt: str, memory: list, emotion: str = "
     sentence_queue.put(None)
     tts_done.wait(timeout=120)
     return _strip_markdown("".join(full_response).strip())
-
-# ─────────────────────────────────────────────
-# MOOD / BEHAVIORAL STATE
-# ─────────────────────────────────────────────
-
-def update_mood(command, mood):
-    try:
-        change = 1 if command[0] == "+" else -1
-        key    = command[1:]
-        if key in mood:
-            mood[key] = max(-5, min(5, mood[key] + change))
-            print(f"✅ Mood: {key} = {mood[key]}")
-    except Exception:
-        print("⚠️  Use +key or -key (e.g. +playfulness)")
-
-def adjust_mood_by_context(text, mood):
-    t = text.lower()
-    if any(w in t for w in ["minecraft", "ender dragon", "hytale", "cod", "risk of rain", "barony"]):
-        mood["focus"]       = min(5, mood["focus"] + 2)
-        mood["motivation"]  = min(5, mood["motivation"] + 2)
-        mood["playfulness"] = max(-5, mood["playfulness"] - 1)
-    elif any(w in t for w in ["joke", "fun", "lol", "haha", "play"]):
-        mood["playfulness"] = min(5, mood["playfulness"] + 2)
-        mood["focus"]       = max(-5, mood["focus"] - 1)
-    elif any(w in t for w in ["sad", "frustrated", "fail", "lost", "died"]):
-        mood["focus"]       = max(-5, mood["focus"] - 1)
-        mood["motivation"]  = max(-5, mood["motivation"] - 1)
-        mood["playfulness"] = max(-5, mood["playfulness"] - 1)
-
-# ─────────────────────────────────────────────
-# DISCORD COMPATIBILITY (used by discord_hayeong.py)
-# ─────────────────────────────────────────────
-
-def build_prompt(identity, memory, user_input, dynamic_traits, mood_state):
-    long_term_context = recall_for_prompt(user_input, n_results=4)
-    state_of_mind     = detect_state_of_mind("casual", "home", mood_state)
-    system_prompt     = build_system_prompt(
-        who="james", situation="casual", environment="home", state_of_mind=state_of_mind
-    )
-    if long_term_context:
-        system_prompt = long_term_context + "\n\n" + system_prompt
-    messages = [{"role": "system", "content": system_prompt}]
-    for entry in memory[-10:]:
-        role = "user" if entry["role"] == "user" else "assistant"
-        messages.append({"role": role, "content": entry["content"]})
-    messages.append({"role": "user", "content": user_input})
-    return messages
-
-def chat_with_ai(messages):
-    def _call(model):
-        response = requests.post(
-            OLLAMA_URL,
-            json={"model": model, "messages": messages, "stream": False},
-            timeout=60
-        )
-        return response.json()["message"]["content"].strip()
-    try:
-        return _call(PRIMARY_MODEL)
-    except Exception:
-        return _call(FALLBACK_MODEL)
-
-def mood_to_behavioral_state(mood, arch):
-    p = mood.get("playfulness", 0)
-    f = mood.get("focus", 0)
-    m = mood.get("motivation", 0)
-
-    if p >= 3:   emotion, intensity = "amused",    6
-    elif f >= 3: emotion, intensity = "focused",   7
-    elif m <= -2:emotion, intensity = "withdrawn", 4
-    else:        emotion, intensity = "neutral",   3
-
-    arch.behavioral.update_interior(primary_emotion=emotion, intensity=intensity)
-
-# ─────────────────────────────────────────────
-# MEMORY FILTER
-# ─────────────────────────────────────────────
-
-def is_worth_remembering(text):
-    if not text:
-        return False
-    if len(text.split()) <= 4:
-        return False
-    filler = ["lol", "lmao", "haha", "ok", "okay", "yeah", "yep", "nope", "sure", "hmm"]
-    if text.lower().strip() in filler:
-        return False
-    return True
 
 # ─────────────────────────────────────────────
 # FIRST-TIME SETUP
@@ -1335,7 +1193,7 @@ def main(text_mode: bool = False):
 
         # ── Update mood and behavioral state ──
         adjust_mood_by_context(user_input, mood_state)
-        mood_to_behavioral_state(mood_state, arch)
+        arch.sync_mood_to_behavioral_state(mood_state)
 
         if mixer:
             blend = suggest_blend_for_context("casual", "home")
@@ -1364,7 +1222,7 @@ def main(text_mode: bool = False):
         if is_wrap_up(user_input):
             print(f"   [WrapUp] detected — skipping decision pipeline")
             adjust_mood_by_context(user_input, mood_state)
-            mood_to_behavioral_state(mood_state, arch)
+            arch.sync_mood_to_behavioral_state(mood_state)
             if mixer:
                 blend = suggest_blend_for_context("casual", "home")
                 mixer.blend_states(blend)
@@ -1409,6 +1267,14 @@ def main(text_mode: bool = False):
         # ── JSON DECISION — what does Hayeong need to do? ──
         decision = decide_action(user_input, memory, model=selected_model, snapshot=_snapshot)
         action   = decision.get("action", "none")
+
+        # ── Think Together — align before acting ──
+        # If either the router or the decision engine flagged ambiguity,
+        # stay in conversation. Better to ask than to guess and fire the wrong tool.
+        _think_together = action == "think_together" or route.get("intent") == "think_together"
+        if _think_together:
+            print(f"   [ThinkTogether] Staying in conversation — aligning before acting")
+            action = "none"
 
         # ── Context verifier — self-check before any tool executes ──
         # Only runs when an action was actually chosen (skip overhead on "none").
@@ -1479,6 +1345,16 @@ def main(text_mode: bool = False):
             system_prompt = _vision_context + "\n\n" + system_prompt
         if tracker and _snapshot:
             system_prompt = tracker.format_for_prompt(include_backlog=True) + "\n\n" + system_prompt
+        if _think_together:
+            system_prompt += (
+                "\n\n━━━ THINK TOGETHER MODE ━━━\n"
+                "James's request is ambiguous or he's working through something.\n"
+                "Your job right now is NOT to act — it's to understand.\n"
+                "Ask one clarifying question if needed. Help him figure out what he actually wants.\n"
+                "Do not guess and fire a capability. Do not assume you know the right next step.\n"
+                "Stay in conversation. Align with him. When it's clear what he needs, then act.\n"
+                "If he's venting or thinking aloud — sometimes the right move is just to listen."
+            )
 
         # ── Stream response ──
         show_thinking()

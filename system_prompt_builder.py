@@ -50,7 +50,8 @@ def build_system_prompt(
     who: str = "james",
     situation: str = "casual",
     environment: str = "home",
-    state_of_mind: str = "present"
+    state_of_mind: str = "present",
+    think_together: bool = False,
 ) -> str:
     """
     Builds the full system prompt to send to the LLM.
@@ -369,10 +370,18 @@ def build_system_prompt(
     lines.append("explaining that it doesn't need hardware.")
     lines.append("")
 
-    # ── LAYER 18.75: (removed — capability routing now handled via JSON decision call) ──
-    # Hayeong no longer needs to embed routing signals in her response.
-    # main.py makes a separate fast JSON decision call before streaming.
-    # She just responds naturally — no tags, no special formatting required.
+    # ── LAYER 18.75: Think Together behavior ──
+    # Injected only when the system is in think_together mode (ambiguous or complex request).
+    # When this applies, Hayeong's job is to align with James before acting — not to guess.
+    if think_together:
+        lines.append("━━━ THINK TOGETHER MODE ━━━")
+        lines.append("James's request is ambiguous or he's working through something.")
+        lines.append("Your job right now is NOT to act — it's to understand.")
+        lines.append("Ask one clarifying question if needed. Help him figure out what he actually wants.")
+        lines.append("Do not guess and fire a capability. Do not assume you know the right next step.")
+        lines.append("Stay in conversation. Align with him. When it's clear what he needs, then act.")
+        lines.append("If he's venting or thinking aloud — sometimes the right move is just to listen.")
+        lines.append("")
 
     # ── LAYER 19: Core rules — always last ──
     lines.append("━━━ CORE RULES ━━━")

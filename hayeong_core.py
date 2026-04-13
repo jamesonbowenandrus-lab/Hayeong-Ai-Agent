@@ -13,8 +13,12 @@ Provides:
   - build_prompt (assembles messages list for Ollama)
   - adjust_mood_by_context
   - is_worth_remembering
+  - _strip_markdown
+  - infer_emotion_fast / _FAST_EMOTION_MAP
+  - update_mood
 """
 
+import re
 import json
 import os
 import requests
@@ -196,3 +200,82 @@ def chat_with_ai(messages: list) -> str:
             return _call(FALLBACK_MODEL)
         except Exception as e2:
             return f"[Ollama unreachable: {e2}]"
+
+
+# ─────────────────────────────────────────────
+# TEXT UTILITIES
+# ─────────────────────────────────────────────
+
+def _strip_markdown(text: str) -> str:
+    """
+    Remove markdown formatting before printing or speaking.
+    Catches the common cases 14b produces: headers, bold, italic, bullet lists.
+    Safety net — the system prompt says no markdown, but she sometimes slips
+    on information-heavy turns (search results especially).
+    """
+    # Remove ### / ## / # headers (keep the header text)
+    text = re.sub(r"^#{1,6}\s*", "", text, flags=re.MULTILINE)
+    # Remove **bold** and __bold__
+    text = re.sub(r"\*\*(.+?)\*\*", r"\1", text)
+    text = re.sub(r"__(.+?)__",     r"\1", text)
+    # Remove *italic* and _italic_
+    text = re.sub(r"\*(.+?)\*",     r"\1", text)
+    text = re.sub(r"_(.+?)_",       r"\1", text)
+    # Remove leading bullet/list markers (-, *, •, numbered lists)
+    text = re.sub(r"^\s*[-*•]\s+",  "",    text, flags=re.MULTILINE)
+    text = re.sub(r"^\s*\d+\.\s+",  "",    text, flags=re.MULTILINE)
+    # Collapse multiple blank lines left behind by removed headers/bullets
+    text = re.sub(r"\n{3,}",        "\n\n", text)
+    return text.strip()
+
+
+# ─────────────────────────────────────────────
+# FAST EMOTION INFERENCE
+# ─────────────────────────────────────────────
+
+_FAST_EMOTION_MAP: list[tuple[list[str], str]] = [
+    # Each entry: ([keywords], emotion_key)
+    # Listed in priority order — first match wins.
+    (["i'm sorry", "sorry to hear", "that's hard", "that must be", "i understand"], "warm"),
+    (["sad", "miss you", "lonely", "tired", "hurts", "hard day"], "weighted"),
+    (["haha", "funny", "that's hilarious", "lol", "actually laughing"], "amused"),
+    (["nice", "proud", "nailed it", "exactly right", "well done", "good call"], "proud"),
+    (["let me think", "interesting question", "hmm", "complex", "good point"], "curious"),
+    (["on it", "searching", "let me check", "pulling that up", "one sec"], "focused"),
+    (["honestly", "look", "straight up", "real talk"], "ai_pride"),
+    (["okay so", "alright", "here's the thing", "so basically"], "neutral"),
+]
+
+def infer_emotion_fast(text: str) -> str:
+    """
+    Keyword-based emotion inference from response content.
+    No LLM call — runs in microseconds.
+    Used to set voice modulation from the first sentence rather than
+    waiting for the full response.
+
+    Returns an emotion key from EMOTION_VOICE_MAP, or "neutral" if no match.
+    """
+    t = text.lower()
+    for keywords, emotion in _FAST_EMOTION_MAP:
+        if any(k in t for k in keywords):
+            return emotion
+    return "neutral"
+
+
+# ─────────────────────────────────────────────
+# MOOD HELPERS
+# ─────────────────────────────────────────────
+
+def update_mood(command: str, mood: dict):
+    """
+    Apply a manual mood delta command like "+playfulness" or "-focus".
+    Clamps values to [-5, 5].
+    """
+    try:
+        change = 1 if command[0] == "+" else -1
+        key    = command[1:]
+        if key in mood:
+            mood[key] = max(-5, min(5, mood[key] + change))
+            print(f"✅ Mood: {key} = {mood[key]}")
+    except Exception:
+        print("⚠️  Use +key or -key (e.g. +playfulness)")

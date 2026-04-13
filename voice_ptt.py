@@ -35,7 +35,7 @@ from voice import (
     get_tts, get_voice_modulation,
     SAMPLE_RATE, INPUT_DEVICE, VOLUME_THRESHOLD, OUTPUT_DEVICE
 )
-from main import (
+from hayeong_core import (
     chat_with_ai, build_prompt, adjust_mood_by_context,
     load_memory, save_memory, load_mood, save_json,
     load_identity, is_worth_remembering, MOOD_FILE

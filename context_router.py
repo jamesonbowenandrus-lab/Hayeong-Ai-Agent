@@ -182,6 +182,32 @@ INTENT_DEFINITIONS = {
             "approve", "deny", "pending",
         ],
     },
+    "think_together": {
+        "description": (
+            "The request is ambiguous, complex with multiple valid approaches, or James seems to be "
+            "processing something out loud rather than asking for a specific action. "
+            "Use this when it's unclear what he actually wants done — he might be thinking aloud, "
+            "working through a decision, or asking for input before committing to anything. "
+            "Think Together means Hayeong stays in conversation mode to align before acting, "
+            "rather than guessing and firing the wrong tool."
+        ),
+        "examples": [
+            "I've been thinking about what we should do next",
+            "can you handle that thing",
+            "I'm not sure what to do about the build",
+            "what do you think we should do",
+            "help me think through this",
+            "I dunno, maybe we should just",
+            "I need to figure out what to do about",
+        ],
+        "keywords": [
+            "help me think", "think through", "not sure how", "i've been thinking",
+            "what do you think we should", "help me figure out", "i don't know what to do",
+            "i'm not sure what", "what should we do", "thinking about what",
+            "can you handle that", "that thing we talked about", "you know what i mean",
+            "figure this out", "work through this",
+        ],
+    },
     "conversation": {
         "description": "Normal chat, questions, reactions, replies — anything that doesn't need a specific tool.",
         "examples": [],
@@ -308,6 +334,11 @@ CRITICAL RULES:
   me the report" = web_search, not email.
 - EMAIL ONLY: Only classify as email if the primary task IS the email action itself
   (check inbox, send a notification, get a summary of emails).
+- THINK TOGETHER: If James is thinking aloud, processing a decision, or the request is
+  ambiguous with multiple valid interpretations — classify as think_together, NOT a tool.
+  Hayeong should align with him conversationally before acting. Better to ask than to guess
+  and fire the wrong capability. Example: "I've been thinking about what we should do" or
+  "can you handle that thing" = think_together.
 - When in doubt, use "conversation".
 
 Respond with ONLY this JSON — no explanation, no markdown:
@@ -379,7 +410,7 @@ def _classify_with_keywords(text: str) -> dict:
 
     priority = [
         "capability", "vision", "image_generation", "web_search",
-        "email", "task", "self_mod", "conversation",
+        "email", "task", "self_mod", "think_together", "conversation",
     ]
 
     for intent in priority:
