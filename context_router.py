@@ -104,6 +104,26 @@ INTENT_DEFINITIONS = {
             "take a look", "glance at", "check my screen",
         ],
     },
+    "image_collab": {
+        "description": (
+            "James wants to work WITH Hayeong on designing or refining an image over "
+            "multiple iterations. Different from a single generation request — this is "
+            "an ongoing creative session where she has opinions and engages with the output."
+        ),
+        "examples": [
+            "let's work on your look",
+            "let's design your character",
+            "can we work on your image together",
+            "let's iterate on this",
+            "let's do a design session",
+            "work with me on generating",
+        ],
+        "keywords": [
+            "work on your look", "design session", "work together on",
+            "let's design", "collaborate on", "design your character",
+            "your reference sheet", "work on the image together",
+        ],
+    },
     "image_generation": {
         "description": "James wants Hayeong to generate, draw, or create an image.",
         "examples": [
@@ -182,6 +202,29 @@ INTENT_DEFINITIONS = {
             "approve", "deny", "pending",
         ],
     },
+    "income": {
+        "description": (
+            "Anything related to Hayeong's income generation — proposing opportunities, "
+            "checking goal progress, researching niches, approving proposals, logging sales."
+        ),
+        "examples": [
+            "how much have you earned so far",
+            "do you have any income ideas",
+            "what proposals are waiting",
+            "I approve that proposal",
+            "how close are we to the workstation goal",
+            "find a good niche for digital art sales",
+            "log a sale",
+        ],
+        "keywords": [
+            "earned", "workstation goal", "income", "income proposal", "niche research",
+            "etsy", "gumroad", "listing", "product idea", "how much have you earned",
+            "fund", "log a sale", "revenue", "workstation fund",
+            "show earnings", "earnings report", "monthly report",
+            "how did we do", "this month's income", "generate report",
+            "how much this month", "income summary",
+        ],
+    },
     "think_together": {
         "description": (
             "The request is ambiguous, complex with multiple valid approaches, or James seems to be "
@@ -254,9 +297,15 @@ _CAPABILITY_PHRASES = {
                              "turn on your mic", "enable voice", "start listening"],
     ("stop",  "voice"):     ["close your mic", "mute", "stop voice", "turn off your mic",
                              "disable voice", "stop listening"],
-    ("start", "minecraft"): ["load minecraft", "start minecraft", "open minecraft",
-                             "let's play minecraft", "join minecraft"],
-    ("stop",  "minecraft"): ["close minecraft", "stop minecraft", "leave minecraft"],
+    ("start", "minecraft"): [
+        "load minecraft", "start minecraft", "open minecraft",
+        "let's play minecraft", "join minecraft", "play minecraft",
+        "let's play", "want to play minecraft", "boot up minecraft",
+    ],
+    ("stop",  "minecraft"): [
+        "close minecraft", "stop minecraft", "leave minecraft",
+        "done playing", "quit minecraft", "shut down minecraft",
+    ],
     ("start", "observer"):  ["start observer", "start screen observer", "start watching",
                              "enable observer"],
     ("stop",  "observer"):  ["stop observer", "stop watching", "disable observer",
@@ -409,8 +458,8 @@ def _classify_with_keywords(text: str) -> dict:
     t = text.lower().strip()
 
     priority = [
-        "capability", "vision", "image_generation", "web_search",
-        "email", "task", "self_mod", "think_together", "conversation",
+        "capability", "vision", "image_collab", "image_generation", "web_search",
+        "email", "task", "income", "self_mod", "think_together", "conversation",
     ]
 
     for intent in priority:

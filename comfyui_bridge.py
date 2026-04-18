@@ -479,14 +479,42 @@ def get_latest_output(prefix: str = "Hayeong_gen") -> Optional[str]:
 # MAIN BRIDGE CLASS
 # ─────────────────────────────────────────────
 
+# ─────────────────────────────────────────────
+# HAYEONG'S CHARACTER PROMPT
+# Proven base prompt for generating Hayeong.
+# Used by generate_self() and as the starting point for character design sessions.
+# ─────────────────────────────────────────────
+
+HAYEONG_BASE_PROMPT = (
+    "score_9, score_8_up, score_7_up, source_anime, "
+    "short dark navy blue hair, side swept bangs, longer front bangs, "
+    "bright blue eyes, soft pale skin, light freckles across nose and cheeks, "
+    "orange frog hoodie hood down, hood resting on back, "
+    "clean lineart, flat color shading, cel shading, anime screencap style, "
+    "single character, looking at viewer"
+)
+
+HAYEONG_BASE_NEGATIVE = (
+    "score_1, score_2, score_3, ugly, deformed, bad anatomy, blurry, "
+    "watermark, low quality, bad hands, extra limbs, poorly drawn face, "
+    "multiple characters, duplicate, hood up"
+)
+
+
 class ComfyUIBridge:
     """
     Hayeong's ComfyUI integration layer.
-    Handles all image generation requests.
+    Handles all image generation requests, including iterative collaboration.
     """
-    
+
     def __init__(self):
         self.running = check_comfyui_running()
+        self._session_state = {
+            "last_positive_prompt": "",
+            "last_image_path":      "",
+            "iteration_count":      0,
+            "session_description":  "",   # what James said this session is for
+        }
         if self.running:
             log("ComfyUI bridge initialized — ComfyUI is running")
         else:
@@ -549,12 +577,17 @@ class ComfyUIBridge:
         
         # Get result
         image_path = get_latest_output("Hayeong_gen")
-        
+
+        # Save to session state for iteration
+        self._session_state["last_positive_prompt"] = prompt_data["positive"]
+        self._session_state["last_image_path"]      = image_path or ""
+        self._session_state["iteration_count"]      = 0   # reset on fresh generation
+
         return {
-            "success": True,
+            "success":    True,
             "image_path": image_path,
             "prompt_used": prompt_data["positive"],
-            "message": f"Done! I generated the image and saved it to {image_path}. I used this prompt: {prompt_data['positive'][:100]}..."
+            "message": f"Done! Saved to {image_path}."
         }
     
     
@@ -753,10 +786,10 @@ Rules:
         }
 
 
-    def suggest_prompt_improvements(self, current_prompt: str, feedback: str) -> str:
+    def suggest_prompt_improvements(self, current_prompt: str, feedback: str) -> dict:
         """
-        Given feedback on a generated image, suggest prompt improvements.
-        E.g. "the hood was still up" → suggests what to add/remove
+        Given feedback on a generated image, return structured prompt changes.
+        Returns {"add_positive": str, "add_negative": str, "remove_positive": str, "reasoning": str}
         """
         try:
             response = requests.post(OLLAMA_URL, json={
@@ -764,20 +797,177 @@ Rules:
                 "messages": [
                     {
                         "role": "system",
-                        "content": "You are an expert at ComfyUI prompt engineering for Pony Diffusion. Given a current prompt and feedback about what was wrong with the generated image, suggest specific additions to the positive and negative prompts to fix the issue. Be concise and specific."
+                        "content": (
+                            "You are an expert ComfyUI prompt engineer for Pony Diffusion XL. "
+                            "Given feedback about a generated image, return a JSON object with: "
+                            "add_positive (tags to add to positive prompt), "
+                            "add_negative (tags to add to negative prompt), "
+                            "remove_positive (tags to remove from positive prompt), "
+                            "reasoning (one sentence explaining the changes). "
+                            "Return ONLY valid JSON. No markdown, no explanation."
+                        )
                     },
                     {
                         "role": "user",
-                        "content": f"Current prompt: {current_prompt}\n\nFeedback about the image: {feedback}\n\nWhat should I add to the positive and negative prompts to fix this?"
+                        "content": (
+                            f"Current positive prompt: {current_prompt}\n\n"
+                            f"Feedback about the image: {feedback}\n\n"
+                            f"What prompt changes will fix this?"
+                        )
                     }
                 ],
-                "stream": False
+                "stream": False,
+                "format": "json",
+                "options": {"temperature": 0.1},
             }, timeout=30)
-            
-            return response.json()["message"]["content"]
-            
+
+            parsed = json.loads(response.json()["message"]["content"])
+            return {
+                "add_positive":    parsed.get("add_positive",    ""),
+                "add_negative":    parsed.get("add_negative",    ""),
+                "remove_positive": parsed.get("remove_positive", ""),
+                "reasoning":       parsed.get("reasoning",       ""),
+            }
         except Exception as e:
-            return f"Couldn't get suggestions right now: {e}"
+            log(f"Prompt improvement error: {e}")
+            return {"add_positive": "", "add_negative": "", "remove_positive": "", "reasoning": ""}
+
+    def _apply_improvements(self, base_prompt: str, improvements: dict) -> dict:
+        """Apply structured prompt improvements to a base prompt."""
+        positive = base_prompt
+
+        # Remove tags
+        for tag in improvements.get("remove_positive", "").split(","):
+            tag = tag.strip()
+            if tag:
+                positive = positive.replace(tag, "").replace(",,", ",").strip(", ")
+
+        # Add positive tags
+        add_pos = improvements.get("add_positive", "").strip()
+        if add_pos:
+            positive = positive.rstrip(", ") + ", " + add_pos
+
+        # Build negative — start from base negative and add any new negatives
+        negative = HAYEONG_BASE_NEGATIVE
+        add_neg  = improvements.get("add_negative", "").strip()
+        if add_neg:
+            negative = negative.rstrip(", ") + ", " + add_neg
+
+        return {
+            "positive":  positive,
+            "negative":  negative,
+            "width":     832,
+            "height":    1216,
+            "steps":     30,
+            "cfg":       6,
+            "sampler":   "dpmpp_2m",
+            "scheduler": "karras",
+        }
+
+    def iterate(self, feedback: str, previous_prompt: str = None) -> dict:
+        """
+        Refine the last generation based on feedback.
+
+        feedback:        James's comment on what to change
+        previous_prompt: The positive prompt from the last generation.
+                         If None, loads from session state.
+
+        Returns same shape as generate(), plus "changes_made".
+        """
+        if not self.is_available():
+            return {"success": False, "image_path": None,
+                    "message": "ComfyUI isn't running."}
+
+        if not previous_prompt:
+            previous_prompt = self._session_state.get("last_positive_prompt", "")
+
+        if not previous_prompt:
+            return {"success": False, "image_path": None,
+                    "message": "I don't have a previous prompt to iterate from. Generate something first."}
+
+        improvements    = self.suggest_prompt_improvements(previous_prompt, feedback)
+        new_prompt_data = self._apply_improvements(previous_prompt, improvements)
+
+        log(f"Iterating — changes: {improvements.get('reasoning', '')}")
+        log(f"New positive: {new_prompt_data['positive'][:120]}")
+
+        workflow  = build_workflow(new_prompt_data)
+        prompt_id = submit_workflow(workflow)
+        if not prompt_id:
+            return {"success": False, "image_path": None,
+                    "message": "Failed to submit refined generation."}
+
+        success    = wait_for_completion(prompt_id)
+        image_path = get_latest_output("Hayeong_gen") if success else None
+
+        if success:
+            self._session_state["last_positive_prompt"] = new_prompt_data["positive"]
+            self._session_state["last_image_path"]      = image_path or ""
+            self._session_state["iteration_count"]      = \
+                self._session_state.get("iteration_count", 0) + 1
+
+        count = self._session_state.get("iteration_count", 1)
+        return {
+            "success":      success,
+            "image_path":   image_path,
+            "prompt_used":  new_prompt_data.get("positive", ""),
+            "changes_made": improvements.get("reasoning", "Refined based on feedback."),
+            "message": (
+                f"Iteration {count} done. "
+                f"{improvements.get('reasoning', 'Refined based on feedback.')} "
+                f"Saved to {image_path}."
+            ) if success else "Iteration failed.",
+        }
+
+    def generate_self(self, additional_description: str = "") -> dict:
+        """
+        Generate Hayeong using her established character prompt.
+        Starting point for character design sessions.
+
+        additional_description: optional context ("standing in a park",
+                                 "looking confident", etc.)
+        """
+        if not self.is_available():
+            return {"success": False, "image_path": None,
+                    "message": "ComfyUI isn't running."}
+
+        prompt = HAYEONG_BASE_PROMPT
+        if additional_description:
+            prompt += f", {additional_description.strip().strip(',')}"
+
+        prompt_data = {
+            "positive":  prompt,
+            "negative":  HAYEONG_BASE_NEGATIVE,
+            "width":     832,
+            "height":    1216,
+            "steps":     30,
+            "cfg":       6,
+            "sampler":   "dpmpp_2m",
+            "scheduler": "karras",
+        }
+
+        log(f"Generating self — prompt: {prompt[:120]}")
+
+        workflow  = build_workflow(prompt_data)
+        prompt_id = submit_workflow(workflow)
+        if not prompt_id:
+            return {"success": False, "image_path": None,
+                    "message": "Failed to submit."}
+
+        success    = wait_for_completion(prompt_id)
+        image_path = get_latest_output("Hayeong_gen") if success else None
+
+        if success:
+            self._session_state["last_positive_prompt"] = prompt_data["positive"]
+            self._session_state["last_image_path"]      = image_path or ""
+            self._session_state["iteration_count"]      = 0
+
+        return {
+            "success":     success,
+            "image_path":  image_path,
+            "prompt_used": prompt_data["positive"],
+            "message": f"Generated. Saved to {image_path}." if success else "Generation failed.",
+        }
 
 
 # ─────────────────────────────────────────────

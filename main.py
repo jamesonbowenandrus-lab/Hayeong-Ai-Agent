@@ -30,7 +30,6 @@ import requests
 import re
 import json
 import os
-import sys
 import time
 import threading
 import queue
@@ -53,7 +52,7 @@ from voice import (
     OUTPUT_DEVICE
 )
 from long_term_memory import recall_for_prompt, remember, categorize, import_from_memory_json
-from system_prompt_builder import build_system_prompt, detect_state_of_mind
+from system_prompt_builder import build_system_prompt, detect_state_of_mind, get_minecraft_context
 from hayeong_architecture import HayeongArchitecture
 from backup_manager import startup_sequence
 from identity_verification import (
@@ -159,6 +158,37 @@ try:
 except ImportError:
     rollback = None
     ROLLBACK_AVAILABLE = False
+
+try:
+    from filler_system import FillerGate
+    FILLER_AVAILABLE = True
+except ImportError:
+    FILLER_AVAILABLE = False
+
+try:
+    from income_manager import IncomeManager
+    income_mgr = IncomeManager()
+    INCOME_AVAILABLE = True
+    print(f"   [Income] {income_mgr.summary().splitlines()[0]}")
+    _income_pending = income_mgr.get_pending_proposals()
+    if _income_pending:
+        print(f"   [Income] {len(_income_pending)} proposal(s) waiting for your review.")
+    # Auto-generate last month's summary on the 1st of each month
+    from datetime import date as _date
+    if _date.today().day == 1:
+        try:
+            import calendar as _cal
+            _today     = _date.today()
+            _prev_m    = _today.month - 1 or 12
+            _prev_y    = _today.year if _today.month > 1 else _today.year - 1
+            _sum_path  = income_mgr.generate_monthly_summary(_prev_y, _prev_m)
+            if _sum_path:
+                print(f"   [Income] Monthly summary generated: {_sum_path}")
+        except Exception as _e:
+            print(f"   [Income] Summary generation error: {_e}")
+except ImportError:
+    income_mgr = None
+    INCOME_AVAILABLE = False
 
 from hayeong_core import (
     save_json,
@@ -555,7 +585,7 @@ def context_verifier(user_input: str, action: str, decision: dict,
         return {"verified": True, "constraints": [], "reasoning": "verifier error — defaulting open"}
 
 
-def stream_response_and_speak(system_prompt: str, memory: list, emotion: str = "neutral", text_mode: bool = False, model: str = None) -> str:
+def stream_response_and_speak(system_prompt: str, memory: list, emotion: str = "neutral", text_mode: bool = False, model: str = None, cancel_filler_fn=None) -> str:
     """
     Streams the LLM response and speaks it via TTS.
     Returns the full response text.
@@ -583,6 +613,7 @@ def stream_response_and_speak(system_prompt: str, memory: list, emotion: str = "
     full_response   = []
     token_buffer    = []
     tts_done        = threading.Event()
+    _first_token    = [True]    # cancelled once, then ignored
     # Emotion detected from response content — updated on first sentence,
     # read by synthesizer per sentence. Mutable list so closure can write to it.
     _emotion_live   = [emotion]
@@ -730,6 +761,11 @@ def stream_response_and_speak(system_prompt: str, memory: list, emotion: str = "
         if not token:
             continue
 
+        # Cancel filler gate on first token — LLM has started responding
+        if _first_token[0]:
+            if cancel_filler_fn is not None:
+                cancel_filler_fn()
+            _first_token[0] = False
 
         full_response.append(token)
         token_buffer.append(token)
@@ -913,35 +949,7 @@ def main(text_mode: bool = False):
         if not text_mode:
             speak(text, emotion=emotion)
 
-    # ── STEP 5: Auto-launch Discord ──
-    # Start Python bridge server first (JS bot connects to it)
-    print("\n📡 Starting Discord bridge...")
-    try:
-        from discord_bridge import run_bridge_server
-        import threading as _threading
-        _bridge_thread = _threading.Thread(target=run_bridge_server, daemon=True)
-        _bridge_thread.start()
-        print("   [DiscordBridge] Python bridge server started on port 9877")
-    except ImportError:
-        print("   ⚠️  discord_bridge.py not found — bridge inactive")
-
-    # Launch the JS Discord bot (replaces discord_hayeong.py)
-    import subprocess as _subprocess
-    _js_bot_path = os.path.join(HAYEONG_DIR, "discord_hayeong.js")
-    if os.path.exists(_js_bot_path):
-        try:
-            _js_proc = _subprocess.Popen(
-                ["node", _js_bot_path],
-                cwd=HAYEONG_DIR,
-                creationflags=_subprocess.CREATE_NEW_CONSOLE if sys.platform == "win32" else 0
-            )
-            print(f"   [Discord JS] started (pid {_js_proc.pid})")
-        except FileNotFoundError:
-            print("   ⚠️  node not found — install Node.js to run discord_hayeong.js")
-        except Exception as e:
-            print(f"   ⚠️  Failed to start Discord JS bot: {e}")
-    else:
-        print("   ⚠️  discord_hayeong.js not found — Discord voice inactive")
+    # Discord deferred — scrapped for now. Revisit when voice pipeline is stable.
 
 
     # ── STEP 5b: Auto-launch Voice Server ──
@@ -1017,6 +1025,18 @@ def main(text_mode: bool = False):
     except Exception:
         print("(warmup failed — first response may be slow)")
 
+    # ── Pre-warm filler cache ──
+    if FILLER_AVAILABLE and not text_mode:
+        try:
+            print("   Warming filler cache...", end=" ", flush=True)
+            from filler_system import _get_cached_audio, FILLERS
+            _fw_speed = get_voice_modulation("neutral")["speed"]
+            for _fw_variants in FILLERS.values():
+                _get_cached_audio(_fw_variants[0], _fw_speed)
+            print("ready.")
+        except Exception as _fw_e:
+            print(f"(skipped — {_fw_e})")
+
     print("\n✅ Hayeong is ready.")
     if text_mode:
         print("   Mode: TEXT CHAT — type your message and press Enter. Type 'exit' to quit.")
@@ -1053,6 +1073,7 @@ def main(text_mode: bool = False):
                 print()
 
         # ── Get input — text or voice ──
+        _filler_gate = None   # reset each turn; voice path overwrites below
         if text_mode:
             try:
                 user_input = input("You: ").strip()
@@ -1063,6 +1084,11 @@ def main(text_mode: bool = False):
                 if _presence is not None:
                     _presence.stop()
                 app_mgr.stop_all()
+                try:
+                    from capabilities.minecraft_cap import _stop_all as _mc_stop
+                    _mc_stop()
+                except Exception:
+                    pass
                 if energy:
                     energy.save_on_shutdown()
                 if LOGGER_AVAILABLE:
@@ -1085,6 +1111,19 @@ def main(text_mode: bool = False):
             if not user_input:
                 continue
             print(f"\nYou: {user_input}")
+
+            # ── Start filler gate ──
+            # Fires contextual audio if LLM doesn't respond within threshold.
+            # Cancelled the moment the first token arrives.
+            _filler_gate = None
+            if FILLER_AVAILABLE:
+                _fg_intent = detect_intent(user_input)
+                _filler_gate = FillerGate(
+                    intent=_fg_intent,
+                    base_speed=get_voice_modulation("neutral")["speed"],
+                    output_device=OUTPUT_DEVICE,
+                )
+                _filler_gate.start()
 
             # ── Route through async presence if available ──
             # Immediate ack fires, processing runs in background,
@@ -1110,6 +1149,11 @@ def main(text_mode: bool = False):
             if _presence is not None:
                 _presence.stop()
             app_mgr.stop_all()
+            try:
+                from capabilities.minecraft_cap import _stop_all as _mc_stop
+                _mc_stop()
+            except Exception:
+                pass
             if energy:
                 energy.save_on_shutdown()
             if LOGGER_AVAILABLE:
@@ -1242,6 +1286,7 @@ def main(text_mode: bool = False):
                 emotion=arch.behavioral.state["interior_state"]["current"]["primary_emotion"],
                 text_mode=text_mode,
                 model=selected_model if 'selected_model' in dir() else PRIMARY_MODEL,
+                cancel_filler_fn=_filler_gate.cancel if _filler_gate else None,
             )
             if ai_response:
                 memory.append({"role": "AI", "content": ai_response})
@@ -1275,6 +1320,11 @@ def main(text_mode: bool = False):
         if _think_together:
             print(f"   [ThinkTogether] Staying in conversation — aligning before acting")
             action = "none"
+
+        # ── Image Collab — collaborative design session flag ──
+        _image_collab = route.get("intent") == "image_collab"
+        if _image_collab:
+            print(f"   [ImageCollab] Design session mode — Hayeong will engage as collaborator")
 
         # ── Context verifier — self-check before any tool executes ──
         # Only runs when an action was actually chosen (skip overhead on "none").
@@ -1345,6 +1395,12 @@ def main(text_mode: bool = False):
             system_prompt = _vision_context + "\n\n" + system_prompt
         if tracker and _snapshot:
             system_prompt = tracker.format_for_prompt(include_backlog=True) + "\n\n" + system_prompt
+
+        # Minecraft live context — injected when a session is active
+        mc_context = get_minecraft_context()
+        if mc_context:
+            system_prompt = mc_context + "\n\n" + system_prompt
+
         if _think_together:
             system_prompt += (
                 "\n\n━━━ THINK TOGETHER MODE ━━━\n"
@@ -1355,15 +1411,30 @@ def main(text_mode: bool = False):
                 "Stay in conversation. Align with him. When it's clear what he needs, then act.\n"
                 "If he's venting or thinking aloud — sometimes the right move is just to listen."
             )
+        if _image_collab:
+            system_prompt += (
+                "\n\n━━━ COLLABORATIVE DESIGN SESSION ━━━\n"
+                "James wants to work WITH you on designing or refining an image — "
+                "not just receive a result.\n"
+                "You have opinions. Notice what looks right and what doesn't. "
+                "Suggest what to iterate on.\n"
+                "Engage with each generation as a creative collaborator, not a button.\n"
+                "If an image came out wrong, say so. If something looks good, say that too.\n"
+                "The session continues until both of you are happy with the result."
+            )
 
         # ── Stream response ──
         show_thinking()
 
+        # Suppress TTS when Minecraft is active — text-only in-game
+        _effective_text_mode = text_mode or bool(mc_context)
+
         ai_response = stream_response_and_speak(
             system_prompt, memory,
             emotion=current_emotion,
-            text_mode=text_mode,
+            text_mode=_effective_text_mode,
             model=selected_model,
+            cancel_filler_fn=_filler_gate.cancel if _filler_gate else None,
         )
 
         if not ai_response:

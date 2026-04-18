@@ -10,20 +10,25 @@ import time
 import signal
 import sys
 import datetime
+from pathlib import Path
 from long_term_memory import remember, categorize, CATEGORY_MINECRAFT
-from main import (
+from hayeong_core import (
     chat_with_ai,
     load_identity, load_memory, load_mood,
-    save_memory, save_json, adjust_mood_by_context
+    save_memory, save_json, adjust_mood_by_context,
+    MOOD_FILE,
 )
 
 HOST = "127.0.0.1"
 PORT = 9876
 
+BASE_DIR          = Path(__file__).parent
+MC_STATE_FILE     = BASE_DIR / "minecraft_state.json"
+MC_KNOWLEDGE_FILE = BASE_DIR / "minecraft_knowledge.json"
+
 identity   = load_identity()
 memory     = load_memory()
 mood_state = load_mood()
-MOOD_FILE  = "mood.json"
 
 # -------------------------
 # USERNAME → REAL NAME MAP
@@ -62,6 +67,152 @@ def real_name(username):
 
 def is_james(username):
     return real_name(username) == "James"
+
+# ─────────────────────────────────────────────
+# SHARED STATE — written every event, read by main.py for context injection
+# ─────────────────────────────────────────────
+
+def update_shared_state(game_state: dict, event_type: str):
+    state = {
+        "active":           True,
+        "last_updated":     datetime.datetime.now().isoformat(),
+        "event_type":       event_type,
+        "health":           game_state.get("health", 20),
+        "food":             game_state.get("food", 20),
+        "position":         game_state.get("position", {}),
+        "time_of_day":      game_state.get("time_of_day", 0),
+        "dimension":        game_state.get("dimension", "overworld"),
+        "nearby_mobs":      game_state.get("nearby_mobs", []),
+        "nearby_players":   game_state.get("nearby_players", []),
+        "inventory":        game_state.get("inventory", []),
+        "inventory_layout": game_state.get("inventory_layout", []),
+        "held_item":        game_state.get("held_item", ""),
+    }
+    try:
+        with open(MC_STATE_FILE, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2)
+    except Exception as e:
+        print(f"⚠️ State write error: {e}")
+
+
+def clear_shared_state():
+    try:
+        with open(MC_STATE_FILE, "w", encoding="utf-8") as f:
+            json.dump({"active": False,
+                       "last_updated": datetime.datetime.now().isoformat()}, f)
+    except Exception:
+        pass
+
+
+# ─────────────────────────────────────────────
+# MINECRAFT KNOWLEDGE BASE — persists across sessions
+# ─────────────────────────────────────────────
+
+FOOD_ITEMS = [
+    "bread", "cooked_beef", "cooked_porkchop", "cooked_chicken",
+    "cooked_mutton", "cooked_salmon", "cooked_cod", "apple",
+    "golden_apple", "carrot", "baked_potato", "cooked_rabbit",
+]
+
+
+def load_mc_knowledge() -> dict:
+    if MC_KNOWLEDGE_FILE.exists():
+        try:
+            with open(MC_KNOWLEDGE_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {
+        "version": 1,
+        "inventory_philosophy": {"observations": [], "rules_inferred": []},
+        "survival_knowledge": {
+            "combat": [], "food_management": [],
+            "exploration": [], "building": [],
+        },
+        "james_preferences": {"playstyle": "", "noted_behaviors": []},
+        "session_history": [],
+    }
+
+
+def save_mc_knowledge(knowledge: dict):
+    knowledge["last_updated"] = datetime.datetime.now().isoformat()
+    with open(MC_KNOWLEDGE_FILE, "w", encoding="utf-8") as f:
+        json.dump(knowledge, f, indent=2, ensure_ascii=False)
+
+
+def _update_observation(observations: list, pattern: str):
+    for obs in observations:
+        if obs["pattern"] == pattern:
+            obs["observed_count"] += 1
+            obs["last_seen"]  = datetime.date.today().isoformat()
+            obs["confidence"] = (
+                "high"   if obs["observed_count"] >= 5 else
+                "medium" if obs["observed_count"] >= 2 else "low"
+            )
+            return
+    observations.append({
+        "pattern":        pattern,
+        "confidence":     "low",
+        "observed_count": 1,
+        "last_seen":      datetime.date.today().isoformat(),
+    })
+
+
+def observe_inventory(game_state: dict, event_context: str = ""):
+    """Notice patterns in James's inventory. Call on significant events, not every heartbeat."""
+    knowledge = load_mc_knowledge()
+    layout    = game_state.get("inventory_layout", [])
+    if not layout:
+        return
+
+    observations   = knowledge["inventory_philosophy"]["observations"]
+    hotbar_items   = [s["item"] for s in layout if s.get("zone") == "hotbar"]
+    food_in_hotbar = [i for i in hotbar_items if any(f in i for f in FOOD_ITEMS)]
+    total_food     = sum(s["count"] for s in layout
+                        if any(f in s.get("item", "") for f in FOOD_ITEMS))
+
+    if food_in_hotbar:
+        _update_observation(observations,
+            f"James keeps food ({', '.join(set(food_in_hotbar))}) in hotbar")
+
+    if total_food > 0 and event_context:
+        _update_observation(observations,
+            f"Carries {total_food} food items when: {event_context}")
+
+    knowledge["inventory_philosophy"]["observations"] = observations[:50]
+    save_mc_knowledge(knowledge)
+
+
+def _write_session_summary(session_memory: list, knowledge: dict):
+    mc_events = [m for m in session_memory
+                 if m.get("content", "").startswith("[MC]")]
+    if not mc_events:
+        return
+    knowledge.setdefault("session_history", []).append({
+        "date":  datetime.date.today().isoformat(),
+        "turns": len(mc_events),
+    })
+    knowledge["session_history"] = knowledge["session_history"][-20:]
+    save_mc_knowledge(knowledge)
+    remember(
+        f"Minecraft session {datetime.date.today().isoformat()}. "
+        f"{len(mc_events)} exchanges with James. Inventory patterns logged.",
+        category=CATEGORY_MINECRAFT,
+        speaker="hayeong",
+    )
+
+
+# ─────────────────────────────────────────────
+# TEACHING MODE SIGNALS
+# ─────────────────────────────────────────────
+
+_TEACHING_SIGNALS = [
+    "watch what i", "i'm packing", "pay attention",
+    "note this", "remember this", "learn from this",
+    "i'm bringing", "going mining", "going exploring",
+    "heading to the nether", "heading out",
+]
+
 
 # -------------------------
 # Shutdown handler
@@ -221,6 +372,8 @@ def handle_client(conn, addr):
     last_autonomous = 0
     last_chat_time  = 0
     last_actions    = []
+    _teaching_mode    = False
+    _teaching_context = ""
 
     # Timing config
     HEARTBEAT_INTERVAL = 30   # seconds between autonomous actions
@@ -252,31 +405,41 @@ def handle_client(conn, addr):
                 extra      = {k: v for k, v in event.items() if k not in ("type", "state")}
                 now        = time.time()
 
+                # ---- Write live game state for context injection ----
+                update_shared_state(game_state, event_type)
+
                 # ---- Heartbeat throttling ----
                 if event_type == "heartbeat":
-                    # Only act if enough time has passed
                     if now - last_autonomous < HEARTBEAT_INTERVAL:
+                        # Still update inventory knowledge on teaching heartbeats
+                        if _teaching_mode:
+                            observe_inventory(game_state, _teaching_context)
                         continue
-                    # Danger overrides the throttle
                     mobs   = game_state.get("nearby_mobs", [])
                     health = game_state.get("health", 20)
-                    if not mobs and health >= 8:
-                        last_autonomous = now
-                    else:
-                        last_autonomous = now  # reset even for danger
+                    last_autonomous = now
 
                 print("📨 [" + event_type + "]", json.dumps(extra)[:50] if extra else "")
+
+                # ---- Teaching mode detection ----
+                if event_type == "chat":
+                    msg_lower = extra.get("message", "").lower()
+                    if any(sig in msg_lower for sig in _TEACHING_SIGNALS):
+                        _teaching_mode    = True
+                        _teaching_context = extra.get("message", "")
+                        print(f"📚 Teaching mode activated: {_teaching_context}")
+                    elif _teaching_mode and is_james(extra.get("sender", "")):
+                        # James said something else — observe current inventory before continuing
+                        observe_inventory(game_state, _teaching_context)
+                        _teaching_mode = False
 
                 action = get_action(game_state, event_type, extra, last_actions)
 
                 # ---- Suppress spammy AUTONOMOUS chat only ----
-                # Never suppress responses to direct player messages
                 if action.get("action") == "chat":
                     if event_type == "chat":
-                        # Always respond when directly spoken to
                         last_chat_time = now
                     elif now - last_chat_time < CHAT_COOLDOWN:
-                        # Suppress unprompted chatter during cooldown
                         print("🔇 Autonomous chat suppressed (cooldown)")
                         action = {"action": "idle"}
                     else:
@@ -294,17 +457,19 @@ def handle_client(conn, addr):
                 if len(last_actions) > 6:
                     last_actions.pop(0)
 
-                # Save to memory
+                # ---- Save to memory ----
                 if event_type == "chat":
                     msg    = extra.get("message", "")
                     sender = extra.get("sender", "?")
                     if msg:
                         adjust_mood_by_context(msg, mood_state)
                         memory.append({"role": "user", "content": "[MC] " + real_name(sender) + ": " + msg})
-                        # Store in long-term memory
                         remember("[MC] " + real_name(sender) + ": " + msg, category=CATEGORY_MINECRAFT, speaker="james")
+
                 if action.get("action") == "chat":
                     mc_msg = "[MC] " + action.get("message", "")
+                    # Print to terminal so James can see replies even outside game
+                    print(f"\nHayeong [MC]: {action.get('message', '')}")
                     memory.append({"role": "AI", "content": mc_msg})
                     remember(mc_msg, category=CATEGORY_MINECRAFT, speaker="hayeong")
                     save_memory(memory)
@@ -320,6 +485,8 @@ def handle_client(conn, addr):
     finally:
         print("🔴 Bot disconnected")
         conn.close()
+        clear_shared_state()
+        _write_session_summary(memory, load_mc_knowledge())
 
 # -------------------------
 # Server loop

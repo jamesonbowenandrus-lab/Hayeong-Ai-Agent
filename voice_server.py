@@ -89,6 +89,25 @@ log = logging.getLogger("voice_server")
 # LAZY IMPORTS — load heavy models once on first use
 # ─────────────────────────────────────────────
 
+try:
+    from filler_system import FillerGate as _FillerGate
+    FILLER_AVAILABLE = True
+except ImportError:
+    FILLER_AVAILABLE = False
+
+
+def _quick_intent(text: str) -> str:
+    """Fast keyword intent for filler category selection. No LLM call."""
+    t = text.lower()
+    if any(w in t for w in ["search", "look up", "find", "what is", "news"]):
+        return "search"
+    if any(w in t for w in ["look at", "screen", "see", "image", "generate"]):
+        return "vision"
+    if any(w in t for w in ["task", "remind", "add", "show tasks"]):
+        return "task"
+    return "generic"
+
+
 _voice_loaded   = False
 _core_loaded    = False
 _speak_fn       = None
@@ -380,11 +399,25 @@ async def _process_utterance(ws: WebSocket, user_text: str,
         # 1. AI response (in thread — blocks GPU)
         await _send_json(ws, {"type": "thinking"})
 
+        # ── Start filler gate (own thread, non-blocking) ──
+        _filler_gate = None
+        if FILLER_AVAILABLE:
+            _filler_gate = _FillerGate(
+                intent=_quick_intent(user_text),
+                base_speed=0.88,
+                output_device=None,
+            )
+            _filler_gate.start()
+
         loop     = asyncio.get_event_loop()
         response, emotion = await loop.run_in_executor(
             None, _get_ai_response,
             user_text, memory, mood_state, identity, dynamic_traits
         )
+
+        # ── Cancel filler — LLM has responded ──
+        if _filler_gate:
+            _filler_gate.cancel()
 
         # 2. Send text response immediately so client can display it
         await _send_json(ws, {
