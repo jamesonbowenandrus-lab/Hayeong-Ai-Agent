@@ -70,13 +70,27 @@ def handle(action: str, user_input: str, context: dict) -> dict:
         if last_prompt:
             gen_result = bridge.iterate(feedback=user_input, previous_prompt=last_prompt)
             if gen_result.get("success"):
-                response_ctx = (
-                    f"[IMAGE ITERATION]: {gen_result['image_path']}\n"
-                    f"Changes made: {gen_result.get('changes_made', '')}\n"
-                    f"Tell James the iteration is ready. Share what you changed and "
-                    f"what you notice about the result — what's better, what's still off. "
-                    f"Ask if it's closer to what he wanted or if you should adjust further."
-                )
+                visual      = gen_result.get("visual_impression", "")
+                prev_visual = gen_result.get("prev_impression", "")
+                if visual:
+                    response_ctx = (
+                        f"[IMAGE ITERATION {bridge._session_state.get('iteration_count', 1)}]:"
+                        f" {gen_result['image_path']}\n"
+                        f"Changes made: {gen_result.get('changes_made', '')}\n"
+                        f"What you see now: {visual}\n"
+                        f"What you saw before: {prev_visual}\n\n"
+                        f"Compare honestly — did the feedback get addressed? "
+                        f"What improved? What's still off? "
+                        f"Tell James what you notice and ask if this is closer or if you should keep going."
+                    )
+                else:
+                    response_ctx = (
+                        f"[IMAGE ITERATION]: {gen_result['image_path']}\n"
+                        f"Changes made: {gen_result.get('changes_made', '')}\n"
+                        f"Vision model wasn't available to analyze the output. "
+                        f"Tell James the iteration is done and ask him to look — "
+                        f"let him tell you what changed."
+                    )
                 return result(
                     success=True,
                     response=response_ctx,
@@ -95,14 +109,25 @@ def handle(action: str, user_input: str, context: dict) -> dict:
         additional = decision.get("prompt", "")
         gen_result = bridge.generate_self(additional)
         if gen_result.get("success"):
-            response_ctx = (
-                f"[IMAGE GENERATED — SELF]: {gen_result['image_path']}\n"
-                f"Prompt used: {gen_result.get('prompt_used', '')[:120]}\n"
-                f"Tell James you generated yourself and share your honest reaction "
-                f"to how it came out — what looks right, what doesn't, what you'd "
-                f"want to change. This is a design session, not a delivery. "
-                f"Ask if he wants to iterate on anything."
-            )
+            visual = gen_result.get("visual_impression", "")
+            if visual:
+                response_ctx = (
+                    f"[IMAGE GENERATED — SELF]: {gen_result['image_path']}\n"
+                    f"What you actually see: {visual}\n\n"
+                    f"React to what you see — not what you intended. "
+                    f"If the hood is up when it should be down, say so. "
+                    f"If the freckles came out right, say so. "
+                    f"If the eyes look soft when they should be direct, say so. "
+                    f"This is a design session. Have an opinion. "
+                    f"Ask James if he wants to iterate on anything specific."
+                )
+            else:
+                response_ctx = (
+                    f"[IMAGE GENERATED — SELF]: {gen_result['image_path']}\n"
+                    f"Vision model wasn't available to analyze the output. "
+                    f"Tell James the image is ready and ask him to take a look — "
+                    f"you'll react once you can see it."
+                )
             return result(
                 success=True,
                 response=response_ctx,
@@ -123,13 +148,26 @@ def handle(action: str, user_input: str, context: dict) -> dict:
 
         if gen_result.get("success"):
             image_path = gen_result.get("image_path", "")
-            response_ctx = (
-                f"[IMAGE GENERATED]: {image_path}\n"
-                f"Prompt used: {gen_result.get('prompt_used', prompt)[:120]}\n"
-                f"The image is ready. React to it honestly — notice what looks right, "
-                f"what's off, what you'd want to change. This is a collaboration, not a "
-                f"delivery. Tell James what you see and ask if he wants to iterate."
-            )
+            visual     = gen_result.get("visual_impression", "")
+            if visual:
+                response_ctx = (
+                    f"[IMAGE GENERATED]: {image_path}\n"
+                    f"Prompt used: {gen_result.get('prompt_used', prompt)[:120]}\n"
+                    f"What you actually see in the image: {visual}\n\n"
+                    f"React to what you see — not what you intended. "
+                    f"If the hood is up when it should be down, say so. "
+                    f"If the freckles came out right, say so. "
+                    f"This is a collaboration. Have an opinion. "
+                    f"Ask James if he wants to iterate on anything specific."
+                )
+            else:
+                response_ctx = (
+                    f"[IMAGE GENERATED]: {image_path}\n"
+                    f"Prompt used: {gen_result.get('prompt_used', prompt)[:120]}\n"
+                    f"Vision model wasn't available to analyze the output. "
+                    f"Tell James the image is ready and ask him to take a look — "
+                    f"you'll react once you can see it."
+                )
             return result(
                 success=True,
                 response=response_ctx,

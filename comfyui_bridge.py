@@ -510,10 +510,11 @@ class ComfyUIBridge:
     def __init__(self):
         self.running = check_comfyui_running()
         self._session_state = {
-            "last_positive_prompt": "",
-            "last_image_path":      "",
-            "iteration_count":      0,
-            "session_description":  "",   # what James said this session is for
+            "last_positive_prompt":   "",
+            "last_image_path":        "",
+            "last_visual_impression": "",   # what she actually saw in the last output
+            "iteration_count":        0,
+            "session_description":    "",   # what James said this session is for
         }
         if self.running:
             log("ComfyUI bridge initialized — ComfyUI is running")
@@ -578,16 +579,20 @@ class ComfyUIBridge:
         # Get result
         image_path = get_latest_output("Hayeong_gen")
 
-        # Save to session state for iteration
-        self._session_state["last_positive_prompt"] = prompt_data["positive"]
-        self._session_state["last_image_path"]      = image_path or ""
-        self._session_state["iteration_count"]      = 0   # reset on fresh generation
+        # Vision analysis — she looks at what actually rendered
+        visual_impression = self._vision_check(image_path)
+
+        self._session_state["last_positive_prompt"]   = prompt_data["positive"]
+        self._session_state["last_image_path"]        = image_path or ""
+        self._session_state["last_visual_impression"] = visual_impression
+        self._session_state["iteration_count"]        = 0
 
         return {
-            "success":    True,
-            "image_path": image_path,
-            "prompt_used": prompt_data["positive"],
-            "message": f"Done! Saved to {image_path}."
+            "success":           True,
+            "image_path":        image_path,
+            "prompt_used":       prompt_data["positive"],
+            "visual_impression": visual_impression,
+            "message":           f"Done! Saved to {image_path}.",
         }
     
     
@@ -786,6 +791,28 @@ Rules:
         }
 
 
+    def _vision_check(self, image_path: str) -> str:
+        """Run moondream on a generated image. Returns description or empty string."""
+        if not image_path or not os.path.exists(image_path):
+            return ""
+        try:
+            desc = analyze_image_with_vision(
+                image_path,
+                question=(
+                    "Describe this anime image honestly and specifically. "
+                    "Focus on: hair color and style, eye color and expression, "
+                    "clothing details (especially hood position — is it up or down?), "
+                    "skin tone, any freckles, overall pose and mood. "
+                    "Be direct about what's working and what looks off."
+                ),
+                deep=False,   # moondream — fast, non-competing with ComfyUI
+            )
+            # analyze_image_with_vision returns an error string rather than raising
+            return "" if "vision analysis failed" in desc else desc
+        except Exception as e:
+            log(f"Vision check error: {e}")
+            return ""
+
     def suggest_prompt_improvements(self, current_prompt: str, feedback: str) -> dict:
         """
         Given feedback on a generated image, return structured prompt changes.
@@ -900,18 +927,24 @@ Rules:
         success    = wait_for_completion(prompt_id)
         image_path = get_latest_output("Hayeong_gen") if success else None
 
+        prev_impression = self._session_state.get("last_visual_impression", "")
+        visual_impression = self._vision_check(image_path) if success else ""
+
         if success:
-            self._session_state["last_positive_prompt"] = new_prompt_data["positive"]
-            self._session_state["last_image_path"]      = image_path or ""
-            self._session_state["iteration_count"]      = \
+            self._session_state["last_positive_prompt"]   = new_prompt_data["positive"]
+            self._session_state["last_image_path"]        = image_path or ""
+            self._session_state["last_visual_impression"] = visual_impression
+            self._session_state["iteration_count"]        = \
                 self._session_state.get("iteration_count", 0) + 1
 
         count = self._session_state.get("iteration_count", 1)
         return {
-            "success":      success,
-            "image_path":   image_path,
-            "prompt_used":  new_prompt_data.get("positive", ""),
-            "changes_made": improvements.get("reasoning", "Refined based on feedback."),
+            "success":           success,
+            "image_path":        image_path,
+            "prompt_used":       new_prompt_data.get("positive", ""),
+            "changes_made":      improvements.get("reasoning", "Refined based on feedback."),
+            "visual_impression": visual_impression,
+            "prev_impression":   prev_impression,
             "message": (
                 f"Iteration {count} done. "
                 f"{improvements.get('reasoning', 'Refined based on feedback.')} "
@@ -957,15 +990,19 @@ Rules:
         success    = wait_for_completion(prompt_id)
         image_path = get_latest_output("Hayeong_gen") if success else None
 
+        visual_impression = self._vision_check(image_path) if success else ""
+
         if success:
-            self._session_state["last_positive_prompt"] = prompt_data["positive"]
-            self._session_state["last_image_path"]      = image_path or ""
-            self._session_state["iteration_count"]      = 0
+            self._session_state["last_positive_prompt"]   = prompt_data["positive"]
+            self._session_state["last_image_path"]        = image_path or ""
+            self._session_state["last_visual_impression"] = visual_impression
+            self._session_state["iteration_count"]        = 0
 
         return {
-            "success":     success,
-            "image_path":  image_path,
-            "prompt_used": prompt_data["positive"],
+            "success":           success,
+            "image_path":        image_path,
+            "prompt_used":       prompt_data["positive"],
+            "visual_impression": visual_impression,
             "message": f"Generated. Saved to {image_path}." if success else "Generation failed.",
         }
 
