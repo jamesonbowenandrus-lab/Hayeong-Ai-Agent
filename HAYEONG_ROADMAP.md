@@ -1586,6 +1586,14 @@ is a working proof of concept for the Phase 12 Vision Layer expansion.
 | 78 | Vision layer mode priority — structured data → cache → moondream → llava | 12 | 🔲 Pending |
 | 79 | Vision cache invalidation — time-based first, pixel-gate upgrade later | 12.2 | 🔲 Pending |
 | 80 | Stuck detection stub — flag escalates to deep vision (Mode 4) | 12 | 🔲 Pending |
+| 81 | MC voice input — `_run_mc_voice_input()` thread + `submit_voice_input()` API | 4.5 | ✅ Done |
+| 82 | MC comprehension — `james_mined` events, `RESOURCE_CONCEPTS`, `_record_james_action()` | 4.5 | ✅ Done |
+| 83 | MC knowledge check — `_check_knowledge_for_task()` injected into chat prompts | 4.5 | ✅ Done |
+| 84 | MC goal context — session goal injected into every prompt | 4.5 | ✅ Done |
+| 85 | MC constraint system — `james_constraints` in knowledge, extracted from chat | 4.5 | ✅ Done |
+| 86 | MC outcome observation — before/after snapshot on every action | 4.5 | ✅ Done |
+| 87 | MC optimization layer — she offers better paths, James decides | 4.5 | ✅ Done |
+| 88 | MC uncertainty handling — neither-knows reasoning and logging | 4.5 | ✅ Done |
 
 ---
 

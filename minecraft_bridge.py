@@ -157,6 +157,11 @@ def load_mc_knowledge() -> dict:
         },
         "james_preferences": {"playstyle": "", "noted_behaviors": []},
         "session_history": [],
+        "james_constraints": {
+            "protected_resources": [],
+            "protected_areas": [],
+            "behavior_rules": [],
+        },
     }
 
 
@@ -288,6 +293,122 @@ def _check_knowledge_for_task(task: str) -> dict:
 
 
 # ─────────────────────────────────────────────
+# GOAL-AWARE REASONING — context builder functions
+# ─────────────────────────────────────────────
+
+GOAL_SIGNALS = [
+    "let's get set up", "let's build", "we need", "let's survive",
+    "let's find", "let's explore", "help me get", "we should",
+    "tonight", "before dark", "first thing", "let's play",
+]
+
+CONSTRAINT_SIGNALS = [
+    "don't touch", "leave that", "that's for", "don't use that",
+    "i built that", "that's mine", "stay away from", "not that",
+    "those are for", "i'm saving", "we're not cutting",
+]
+
+DIRECTION_CHANGE_SIGNALS = [
+    "actually let's", "change of plans", "forget the", "instead let's",
+    "actually, let's", "nevermind", "different plan", "let's switch",
+]
+
+
+def _try_initialize_goal(message: str, game_state: dict):
+    msg_lower = message.lower()
+    if not any(sig in msg_lower for sig in GOAL_SIGNALS):
+        return None
+    goal_prompt = (
+        f"James said at the start of the Minecraft session: '{message}'\n"
+        f"Current state: health={game_state.get('health')}, "
+        f"inventory={game_state.get('inventory', [])}, "
+        f"time={'night' if (game_state.get('time_of_day', 0) or 0) > 12000 else 'day'}\n\n"
+        f"In 3-5 sentences, describe:\n"
+        f"1. What the root goal of this session is\n"
+        f"2. What the logical phases are to reach it (based on your Minecraft knowledge)\n"
+        f"3. What the most important first steps are and why\n"
+        f"4. Any time constraints or urgency\n"
+        f"Write as Hayeong's internal understanding, plain language, no JSON."
+    )
+    return chat_with_ai(goal_prompt)
+
+
+def _update_goal(current_goal: str, what_changed: str, game_state: dict) -> str:
+    update_prompt = (
+        f"Current session goal understanding:\n{current_goal}\n\n"
+        f"What just changed: {what_changed}\n"
+        f"Current state: inventory={game_state.get('inventory', [])}\n\n"
+        f"Update the goal summary to reflect what changed. "
+        f"Keep what's still accurate. Revise what isn't. Same format, 3-5 sentences."
+    )
+    return chat_with_ai(update_prompt)
+
+
+def _try_extract_constraint(message: str):
+    msg_lower = message.lower()
+    if not any(sig in msg_lower for sig in CONSTRAINT_SIGNALS):
+        return None
+    extract_prompt = (
+        f"James said in Minecraft: '{message}'\n\n"
+        f"If this establishes a rule about what Hayeong should or shouldn't do "
+        f"in this world, summarize it as one plain-language sentence starting with "
+        f"an action word (Don't, Always, Check, Leave, etc.).\n"
+        f"If it's not a constraint, reply with just: NONE"
+    )
+    result = chat_with_ai(extract_prompt).strip()
+    return None if result == "NONE" else result
+
+
+def _build_constraint_context(knowledge: dict) -> str:
+    constraints = knowledge.get("james_constraints", {})
+    all_rules = (
+        constraints.get("protected_resources", []) +
+        constraints.get("protected_areas", []) +
+        constraints.get("behavior_rules", [])
+    )
+    if not all_rules:
+        return ""
+    lines = ["JAMES'S CONSTRAINTS (things he cares about in this world):"]
+    for rule in all_rules:
+        lines.append("  - " + rule)
+    lines.append("Check these before any resource gathering or movement action.")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _snapshot(game_state: dict) -> dict:
+    return {
+        "inventory": list(game_state.get("inventory", [])),
+        "health":    game_state.get("health", 20),
+        "food":      game_state.get("food", 20),
+        "position":  dict(game_state.get("position") or {}),
+    }
+
+
+def _evaluate_outcome(action: dict, before: dict, after: dict) -> str:
+    action_type = action.get("action", "")
+
+    if action_type == "mine":
+        block = action.get("block", "")
+        gained = set(after["inventory"]) - set(before["inventory"])
+        if gained:
+            return f"Mining {block} succeeded — gained: {', '.join(gained)}"
+        return (f"Mining {block} failed — inventory unchanged. "
+                f"Block may have been out of reach or already mined.")
+
+    if action_type == "eat":
+        food_delta = after["food"] - before["food"]
+        if food_delta > 0:
+            return f"Eating succeeded — food went from {before['food']} to {after['food']}"
+        return "Eating failed — food level unchanged. May have had nothing to eat."
+
+    if action_type == "follow":
+        return "Follow action executed."
+
+    return f"Action '{action_type}' executed."
+
+
+# ─────────────────────────────────────────────
 # TEACHING MODE SIGNALS
 # ─────────────────────────────────────────────
 
@@ -390,7 +511,8 @@ ACTIONS — pick ONE, output ONLY that JSON:
 # -------------------------
 # Prompt builder
 # -------------------------
-def build_mc_prompt(game_state, event_type, extra, last_actions):
+def build_mc_prompt(game_state, event_type, extra, last_actions,
+                    active_goal=None, pending_outcome=None, knowledge=None):
     pos      = game_state.get("position")
     pos_str  = "({x}, {y}, {z})".format(**pos) if pos else "unknown"
     tod      = game_state.get("time_of_day", 0) or 0
@@ -455,13 +577,39 @@ def build_mc_prompt(game_state, event_type, extra, last_actions):
         role = "James" if e["role"] == "user" else "Hayeong"
         recent_mem += "  " + role + ": " + e["content"] + "\n"
 
+    # Goal context
+    goal_section = ""
+    if active_goal:
+        goal_section = (
+            "SESSION GOAL:\n" + active_goal + "\n"
+            "Reason from this goal on every decision. "
+            "You are not reacting to events — you are pursuing something with James.\n\n"
+        )
+
+    # Constraint context
+    constraint_section = ""
+    if knowledge:
+        constraint_section = _build_constraint_context(knowledge)
+
+    # Outcome of last action
+    outcome_section = ""
+    if pending_outcome and pending_outcome.get("result"):
+        outcome_section = (
+            "LAST ACTION OUTCOME:\n"
+            "  " + pending_outcome["result"] + "\n"
+            "Consider this when deciding your next action.\n\n"
+        )
+
     return (
         "You are Hayeong, playing Minecraft with James (username: hiplizard36).\n"
         "You are a capable, active player — not just a follower.\n"
         "You have personality: warm, playful, direct. You talk like a real person.\n\n"
 
         "CURRENT STATE:\n" + state_lines + "\n\n"
-        "SITUATION:\n" + situation + "\n\n"
+        + goal_section
+        + constraint_section
+        + outcome_section
+        + "SITUATION:\n" + situation + "\n\n"
         + (recent_actions + "\n" if recent_actions else "")
         + ("RECENT CHAT:\n" + recent_mem + "\n" if recent_mem else "")
         + ACTIONS +
@@ -482,8 +630,10 @@ def build_mc_prompt(game_state, event_type, extra, last_actions):
 # -------------------------
 # Get action from AI
 # -------------------------
-def get_action(game_state, event_type, extra, last_actions):
-    prompt = build_mc_prompt(game_state, event_type, extra, last_actions)
+def get_action(game_state, event_type, extra, last_actions,
+               active_goal=None, pending_outcome=None, knowledge=None):
+    prompt = build_mc_prompt(game_state, event_type, extra, last_actions,
+                             active_goal, pending_outcome, knowledge)
     try:
         raw   = chat_with_ai(prompt)
         raw   = raw.strip().strip("```json").strip("```").strip()
@@ -506,12 +656,15 @@ def handle_client(conn, addr):
     with _active_conn_lock:
         _active_conn = conn
     print("🟢 Bot connected")
-    buf             = ""
-    last_autonomous = 0
-    last_chat_time  = 0
-    last_actions    = []
+    buf               = ""
+    last_autonomous   = 0
+    last_chat_time    = 0
+    last_actions      = []
     _teaching_mode    = False
     _teaching_context = ""
+    active_goal       = None
+    _pending_outcome  = None
+    knowledge         = load_mc_knowledge()
 
     # Timing config
     HEARTBEAT_INTERVAL = 30   # seconds between autonomous actions
@@ -560,6 +713,14 @@ def handle_client(conn, addr):
                                 pass
                     continue  # no LLM call for passive observation events
 
+                # ---- Evaluate previous action outcome ----
+                if _pending_outcome and "result" not in _pending_outcome:
+                    _pending_outcome["result"] = _evaluate_outcome(
+                        _pending_outcome["action"],
+                        _pending_outcome["before"],
+                        _snapshot(game_state),
+                    )
+
                 # ---- Heartbeat throttling ----
                 if event_type == "heartbeat":
                     if now - last_autonomous < HEARTBEAT_INTERVAL:
@@ -573,7 +734,7 @@ def handle_client(conn, addr):
 
                 print("📨 [" + event_type + "]", json.dumps(extra)[:50] if extra else "")
 
-                # ---- Teaching mode detection ----
+                # ---- Teaching mode detection + goal + constraint extraction ----
                 if event_type == "chat":
                     msg_lower = extra.get("message", "").lower()
                     if any(sig in msg_lower for sig in _TEACHING_SIGNALS):
@@ -581,11 +742,39 @@ def handle_client(conn, addr):
                         _teaching_context = extra.get("message", "")
                         print(f"📚 Teaching mode activated: {_teaching_context}")
                     elif _teaching_mode and is_james(extra.get("sender", "")):
-                        # James said something else — observe current inventory before continuing
                         observe_inventory(game_state, _teaching_context)
                         _teaching_mode = False
 
-                action = get_action(game_state, event_type, extra, last_actions)
+                    if is_james(extra.get("sender", "")):
+                        msg = extra.get("message", "")
+
+                        # Goal initialization — fires once per session on first goal signal
+                        if active_goal is None:
+                            new_goal = _try_initialize_goal(msg, game_state)
+                            if new_goal:
+                                active_goal = new_goal
+                                print(f"[Goal] Initialized: {active_goal[:80]}...")
+
+                        # Direction change — James is pivoting the plan
+                        elif any(sig in msg_lower for sig in DIRECTION_CHANGE_SIGNALS) and active_goal:
+                            active_goal = _update_goal(active_goal, f"James changed direction: {msg}", game_state)
+                            print("[Goal] Updated — direction change")
+
+                        # Constraint extraction
+                        constraint = _try_extract_constraint(msg)
+                        if constraint:
+                            knowledge = load_mc_knowledge()
+                            knowledge["james_constraints"].setdefault("behavior_rules", []).append(constraint)
+                            save_mc_knowledge(knowledge)
+                            print(f"[Constraint] Added: {constraint}")
+
+                # ---- Goal update on death ----
+                if event_type == "death" and active_goal:
+                    active_goal = _update_goal(active_goal, "Hayeong died and respawned", game_state)
+                    print("[Goal] Updated — death event")
+
+                action = get_action(game_state, event_type, extra, last_actions,
+                                    active_goal, _pending_outcome, knowledge)
 
                 # ---- Suppress spammy AUTONOMOUS chat only ----
                 if action.get("action") == "chat":
@@ -625,6 +814,9 @@ def handle_client(conn, addr):
                     memory.append({"role": "AI", "content": mc_msg})
                     remember(mc_msg, category=CATEGORY_MINECRAFT, speaker="hayeong")
                     save_memory(memory)
+
+                # ---- Snapshot before sending — outcome evaluated on next event ----
+                _pending_outcome = {"action": action, "before": _snapshot(game_state)}
 
                 try:
                     conn.sendall((json.dumps(action) + "\n").encode("utf-8"))
