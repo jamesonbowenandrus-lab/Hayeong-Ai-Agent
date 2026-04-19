@@ -104,7 +104,7 @@ which is why it means something.
 ## PHASE 2 — AI MODEL ARCHITECTURE & STORAGE
 *Priority: High. Foundational for all capability growth.*
 
-### 2.1 — H: Drive Consolidation 🔲
+### 2.1 — H: Drive Consolidation ✅
 **What:** Relocate all AI models, Ollama storage, Python environment, and project files
 to the H: drive (M.2). Goal: move the drive, move Hayeong.
 
@@ -1503,7 +1503,7 @@ is a working proof of concept for the Phase 12 Vision Layer expansion.
 | 2 | Energy system implemented | 1 | ✅ Done |
 | 3 | AI Pride / Aviators system live | 1 | ✅ Done |
 | 4 | Hood-up embarrassment + apology rules | 1 | ✅ Done |
-| 5 | H: Drive migration complete | 2 | 🔲 Pending |
+| 5 | H: Drive migration complete | 2 | ✅ Done |
 | 6 | Multi-model routing operational | 2 | ✅ Done |
 | 7 | Web search live (DuckDuckGo + page fetch) | 2 | ✅ Done |
 | 8 | Context-aware intent router (14b reasoning) | 2 | 🔲 Pending (replacing 7b router) |
@@ -1604,5 +1604,5 @@ is a working proof of concept for the Phase 12 Vision Layer expansion.
 
 ---
 
-*Roadmap v2.4 — Updated Session 6 — April 11, 2026*
-*Changes: Milestones 68-80 added. GPU split confirmed (3090: LLM+Voice, 7900 XTX: Vision+Gaming). Whisper moved to CUDA. Kokoro TTS migration complete (voice.py + voice_server.py). Three-thread TTS pipeline (synth/playback decoupled). Parallel ChromaDB memory lookup via ThreadPoolExecutor. presence_governor.py added. filler_system.py added. Vision layer mode priority and stuck detection noted as pending.*
+*Roadmap v2.5 — Updated Session 7 — April 18, 2026*
+*Changes: Milestone 5 marked complete (H: drive migration done — confirmed retroactively). Phase 2.1 header updated to ✅. Filler system wired into main pipeline (Milestone 77).*

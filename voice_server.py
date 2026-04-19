@@ -90,9 +90,10 @@ log = logging.getLogger("voice_server")
 # ─────────────────────────────────────────────
 
 try:
-    from filler_system import FillerGate as _FillerGate
+    from filler_system import FillerTimer as _FillerGate
     FILLER_AVAILABLE = True
 except ImportError:
+    _FillerGate = None
     FILLER_AVAILABLE = False
 
 

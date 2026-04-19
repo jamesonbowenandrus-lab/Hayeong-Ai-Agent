@@ -6,6 +6,7 @@ import socket
 import os
 import json
 import threading
+import queue
 import time
 import signal
 import sys
@@ -114,6 +115,31 @@ FOOD_ITEMS = [
     "golden_apple", "carrot", "baked_potato", "cooked_rabbit",
 ]
 
+RESOURCE_CONCEPTS = {
+    "oak_log":               {"category": "wood",      "tool": "axe",                    "uses": ["crafting", "building", "fuel"]},
+    "birch_log":             {"category": "wood",      "tool": "axe",                    "uses": ["crafting", "building", "fuel"]},
+    "spruce_log":            {"category": "wood",      "tool": "axe",                    "uses": ["crafting", "building", "fuel"]},
+    "jungle_log":            {"category": "wood",      "tool": "axe",                    "uses": ["crafting", "building", "fuel"]},
+    "acacia_log":            {"category": "wood",      "tool": "axe",                    "uses": ["crafting", "building", "fuel"]},
+    "dark_oak_log":          {"category": "wood",      "tool": "axe",                    "uses": ["crafting", "building", "fuel"]},
+    "coal_ore":              {"category": "fuel",      "tool": "pickaxe",                "uses": ["fuel", "torches", "smelting"]},
+    "deepslate_coal_ore":    {"category": "fuel",      "tool": "pickaxe",                "uses": ["fuel", "torches", "smelting"]},
+    "iron_ore":              {"category": "metal",     "tool": "pickaxe",                "uses": ["tools", "armor", "crafting"]},
+    "deepslate_iron_ore":    {"category": "metal",     "tool": "pickaxe",                "uses": ["tools", "armor", "crafting"]},
+    "gold_ore":              {"category": "metal",     "tool": "pickaxe",                "uses": ["golden_tools", "armor", "piglin_trade"]},
+    "deepslate_gold_ore":    {"category": "metal",     "tool": "pickaxe",                "uses": ["golden_tools", "armor", "piglin_trade"]},
+    "diamond_ore":           {"category": "precious",  "tool": "iron_pickaxe_or_better", "uses": ["best_tools", "best_armor", "enchanting_table"]},
+    "deepslate_diamond_ore": {"category": "precious",  "tool": "iron_pickaxe_or_better", "uses": ["best_tools", "best_armor", "enchanting_table"]},
+    "emerald_ore":           {"category": "trade",     "tool": "iron_pickaxe_or_better", "uses": ["trading_with_villagers"]},
+    "lapis_ore":             {"category": "enchanting","tool": "pickaxe",                "uses": ["enchanting", "dye"]},
+    "deepslate_lapis_ore":   {"category": "enchanting","tool": "pickaxe",                "uses": ["enchanting", "dye"]},
+    "redstone_ore":          {"category": "redstone",  "tool": "iron_pickaxe_or_better", "uses": ["circuits", "mechanisms", "comparators"]},
+    "ancient_debris":        {"category": "nether",    "tool": "diamond_pickaxe",        "uses": ["netherite_ingot", "best_gear"]},
+    "cobblestone":           {"category": "building",  "tool": "pickaxe",                "uses": ["building", "tools", "furnace"]},
+    "stone":                 {"category": "building",  "tool": "pickaxe",                "uses": ["building", "tools", "furnace"]},
+    "gravel":                {"category": "building",  "tool": "shovel",                 "uses": ["paths", "flint"]},
+}
+
 
 def load_mc_knowledge() -> dict:
     if MC_KNOWLEDGE_FILE.exists():
@@ -127,7 +153,7 @@ def load_mc_knowledge() -> dict:
         "inventory_philosophy": {"observations": [], "rules_inferred": []},
         "survival_knowledge": {
             "combat": [], "food_management": [],
-            "exploration": [], "building": [],
+            "exploration": [], "building": [], "resource_gathering": [],
         },
         "james_preferences": {"playstyle": "", "noted_behaviors": []},
         "session_history": [],
@@ -202,6 +228,65 @@ def _write_session_summary(session_memory: list, knowledge: dict):
     )
 
 
+def _record_james_action(action_type: str, target: str, game_state: dict):
+    """Learn from what James is doing — store in resource_gathering knowledge."""
+    knowledge = load_mc_knowledge()
+    rg        = knowledge["survival_knowledge"].setdefault("resource_gathering", [])
+    concept   = RESOURCE_CONCEPTS.get(target, {})
+    pos       = game_state.get("position", {})
+    y_level   = pos.get("y") if pos else None
+
+    if concept:
+        pattern = (
+            f"James {action_type}s {target} (category={concept['category']}) "
+            f"using {concept['tool']}"
+        )
+    else:
+        pattern = f"James {action_type}s {target}"
+    if y_level is not None:
+        pattern += f" at y={y_level}"
+
+    _update_observation(rg, pattern)
+    knowledge["survival_knowledge"]["resource_gathering"] = rg[:60]
+    save_mc_knowledge(knowledge)
+
+
+def _check_knowledge_for_task(task: str) -> dict:
+    """Look up relevant knowledge before acting on James's request. Returns hint dict."""
+    task_lower = task.lower()
+    knowledge  = load_mc_knowledge()
+    rg         = knowledge["survival_knowledge"].get("resource_gathering", [])
+
+    relevant = []
+    for obs in rg:
+        if obs.get("confidence") in ("medium", "high"):
+            pat   = obs["pattern"].lower()
+            words = [w for w in task_lower.split() if len(w) > 3]
+            if any(w in pat for w in words):
+                relevant.append(obs["pattern"])
+
+    concept_hints = []
+    for block, info in RESOURCE_CONCEPTS.items():
+        if block.replace("_", " ") in task_lower or block in task_lower:
+            concept_hints.append(
+                f"{block}: needs {info['tool']}, used for {', '.join(info['uses'][:2])}"
+            )
+
+    if not relevant and not concept_hints:
+        return {"relevant": False, "known_info": "", "confidence": "none"}
+
+    parts = []
+    if concept_hints:
+        parts.append("Known: " + "; ".join(concept_hints[:2]))
+    if relevant:
+        parts.append("Observed: " + "; ".join(relevant[:2]))
+    return {
+        "relevant": True,
+        "known_info": " | ".join(parts),
+        "confidence": "high" if relevant else "medium",
+    }
+
+
 # ─────────────────────────────────────────────
 # TEACHING MODE SIGNALS
 # ─────────────────────────────────────────────
@@ -212,6 +297,52 @@ _TEACHING_SIGNALS = [
     "i'm bringing", "going mining", "going exploring",
     "heading to the nether", "heading out",
 ]
+
+
+# ─────────────────────────────────────────────
+# VOICE INPUT QUEUE — voice text pushed here, consumed by _run_mc_voice_input
+# ─────────────────────────────────────────────
+_voice_queue      = queue.Queue()
+_active_conn      = None
+_active_conn_lock = threading.Lock()
+
+
+def submit_voice_input(text: str):
+    """Called from main loop when Minecraft is active — routes speech to MC bridge."""
+    _voice_queue.put(text)
+
+
+def _run_mc_voice_input():
+    """Consumer: pulls voice transcriptions, synthesizes chat events, sends actions to bot."""
+    print("🎤 [Minecraft] Voice input thread started")
+    while True:
+        try:
+            text = _voice_queue.get(timeout=1.0)
+        except queue.Empty:
+            continue
+
+        with _active_conn_lock:
+            conn = _active_conn
+        if conn is None:
+            continue
+
+        game_state: dict = {}
+        try:
+            if MC_STATE_FILE.exists():
+                with open(MC_STATE_FILE, encoding="utf-8") as f:
+                    game_state = json.load(f)
+        except Exception:
+            pass
+
+        extra  = {"sender": "hiplizard36", "message": text}
+        action = get_action(game_state, "chat", extra, [])
+
+        if action.get("action") != "idle":
+            try:
+                conn.sendall((json.dumps(action) + "\n").encode("utf-8"))
+                print(f"🎤 [Voice→MC] {text!r} → {action}")
+            except Exception as e:
+                print(f"⚠️ Voice→MC send error: {e}")
 
 
 # -------------------------
@@ -290,6 +421,10 @@ def build_mc_prompt(game_state, event_type, extra, last_actions):
         sender  = real_name(extra.get("sender", "?"))
         msg     = extra.get("message", "")
         situation = sender + " said: \"" + msg + "\""
+        if is_james(extra.get("sender", "")):
+            kc = _check_knowledge_for_task(msg)
+            if kc["relevant"]:
+                situation += "\n[Knowledge context: " + kc["known_info"] + "]"
     elif event_type == "spawn":
         situation = "You just spawned. Say a short hello to James."
     elif event_type == "player_joined":
@@ -367,6 +502,9 @@ def get_action(game_state, event_type, extra, last_actions):
 # Handle bot connection
 # -------------------------
 def handle_client(conn, addr):
+    global _active_conn
+    with _active_conn_lock:
+        _active_conn = conn
     print("🟢 Bot connected")
     buf             = ""
     last_autonomous = 0
@@ -407,6 +545,20 @@ def handle_client(conn, addr):
 
                 # ---- Write live game state for context injection ----
                 update_shared_state(game_state, event_type)
+
+                # ---- Learn from James's mining ----
+                if event_type == "james_mined":
+                    block_name = extra.get("block", "")
+                    if block_name:
+                        _record_james_action("mine", block_name, game_state)
+                        if _teaching_mode:
+                            ack = {"action": "chat",
+                                   "message": f"Got it — I saw you mine {block_name.replace('_', ' ')}."}
+                            try:
+                                conn.sendall((json.dumps(ack) + "\n").encode("utf-8"))
+                            except Exception:
+                                pass
+                    continue  # no LLM call for passive observation events
 
                 # ---- Heartbeat throttling ----
                 if event_type == "heartbeat":
@@ -483,6 +635,8 @@ def handle_client(conn, addr):
     except Exception as e:
         print("⚠️ Handler error:", e)
     finally:
+        with _active_conn_lock:
+            _active_conn = None
         print("🔴 Bot disconnected")
         conn.close()
         clear_shared_state()

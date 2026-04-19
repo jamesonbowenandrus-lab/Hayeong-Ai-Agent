@@ -80,6 +80,10 @@ def handle(action: str, user_input: str, context: dict) -> dict:
         _mc_active = bot_ok
 
         if bot_ok:
+            from minecraft_bridge import _run_mc_voice_input
+            voice_thread = threading.Thread(target=_run_mc_voice_input, daemon=True, name="mc-voice-input")
+            voice_thread.start()
+
             return result(
                 success=True,
                 response=(

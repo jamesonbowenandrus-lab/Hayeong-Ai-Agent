@@ -160,7 +160,7 @@ except ImportError:
     ROLLBACK_AVAILABLE = False
 
 try:
-    from filler_system import FillerGate
+    from filler_system import FillerTimer
     FILLER_AVAILABLE = True
 except ImportError:
     FILLER_AVAILABLE = False
@@ -412,6 +412,19 @@ CRITICAL RULES — read carefully:
 """
 
 DECISION_PROMPT = build_decision_prompt()
+
+
+def _quick_intent(text: str) -> str:
+    """Fast keyword intent for filler category — no LLM call."""
+    t = text.lower()
+    if any(w in t for w in ["search", "look up", "find", "what is", "news"]):
+        return "search"
+    if any(w in t for w in ["look at", "screen", "see", "image", "generate"]):
+        return "vision"
+    if any(w in t for w in ["task", "remind", "add", "show tasks"]):
+        return "task"
+    return "generic"
+
 
 def decide_action(user_input: str, memory: list, model: str = None,
                   snapshot: dict = None) -> dict:
@@ -1117,9 +1130,8 @@ def main(text_mode: bool = False):
             # Cancelled the moment the first token arrives.
             _filler_gate = None
             if FILLER_AVAILABLE:
-                _fg_intent = detect_intent(user_input)
-                _filler_gate = FillerGate(
-                    intent=_fg_intent,
+                _filler_gate = FillerTimer(
+                    intent=_quick_intent(user_input),
                     base_speed=get_voice_modulation("neutral")["speed"],
                     output_device=OUTPUT_DEVICE,
                 )

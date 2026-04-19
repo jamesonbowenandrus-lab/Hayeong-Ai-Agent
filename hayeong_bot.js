@@ -566,6 +566,9 @@ bot.on("health", () => {
 bot.on("death",        ()       => { console.log("💀 Hayeong died"); sendEvent("death"); });
 bot.on("playerJoined", (player) => { if (player.username !== bot.username) sendEvent("player_joined", { player: player.username }); });
 bot.on("playerLeft",   (player) => { sendEvent("player_left", { player: player.username }); });
+bot.on("diggingCompleted", (block) => {
+    sendEvent("james_mined", { block: block.name, position: { x: block.position.x, y: block.position.y, z: block.position.z } });
+});
 bot.on("kicked",       reason   => console.error("Kicked:", reason));
 bot.on("error",        err      => console.error("Bot error:", err.message));
 
