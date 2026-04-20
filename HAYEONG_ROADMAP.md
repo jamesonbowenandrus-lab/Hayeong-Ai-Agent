@@ -1595,9 +1595,16 @@ is a working proof of concept for the Phase 12 Vision Layer expansion.
 | 87 | MC optimization layer — she offers better paths, James decides | 4.5 | ✅ Done |
 | 88 | MC uncertainty handling — neither-knows reasoning and logging | 4.5 | ✅ Done |
 | 89 | LLM control audit — narrow fast-paths, remove redundant router, remove wrap-up overrides, audit state injection text | — | ✅ Done |
-| 90 | 3D model generation capability — SketchUp Ruby API + OBJ path, kitchen object standards baked in, output to hayeong_outputs/3d_models/ | — | ✅ Done |
-| 91 | Etsy 3D asset pack pipeline — themed sets (modern/rustic/industrial kitchen), bulk generation, ZIP packaging | 90 | 🔲 Pending |
-| 92 | Vision QC for 3D generation — render + vision layer check + iterate loop (requires Vision Layer maturity) | 90 | 🔲 Pending |
+| 90 | model_gen capability — OBJ direct, hybrid JSON spec + Python geometry builder, meters unit, correct face winding/normals | — | ✅ Done |
+| 91 | blender_gen capability — headless Blender subprocess, Python script gen, multi-format export, render preview output | 90 | ✅ Done |
+| 92 | Conversational 3D generation — multi-turn spec refinement loop before generating | 90 | 🔲 Pending |
+| 93 | Blueprint input — vision model reads floor plans, extracts dimensions and scale indicator | Vision Layer | 🔲 Pending |
+| 94 | Photo reference input — dimension estimation from known anchor objects in photos | Vision Layer | 🔲 Pending |
+| 95 | LiDAR mesh intake — Polycam .obj import, Blender Python cleanup (remesh, fill holes, recalculate normals, decimate) | 91 | 🔲 Pending |
+| 96 | Vision QC loop for 3D — headless Blender render + vision check + LLM revision + retry | Vision Layer + 91 | 🔲 Pending |
+| 97 | Hayeong 3D self-improvement — error log reading, web lookup, script revision, memory storage | 91 + memory | 🔲 Pending |
+| 98 | Etsy 3D asset pack pipeline — themed sets, bulk generation, ZIP packaging | 90 + 91 | 🔲 Pending |
+| 99 | Full room reconstruction — blueprint + LiDAR → complete Blender room scene populated with generated objects | All above stable | 🔲 Pending |
 
 ---
 
