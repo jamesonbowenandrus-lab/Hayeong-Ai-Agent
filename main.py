@@ -38,7 +38,7 @@ import sounddevice as sd
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
-from context_router import ContextRouter, check_gpu_status
+from context_router import check_gpu_status
 from model_router import ModelRouter
 
 from voice import (
@@ -398,8 +398,11 @@ Examples:
   {{"action": "app_start", "app_id": "comfyui"}}
 
 CRITICAL RULES — read carefully:
-  - If James just completed a task and is wrapping up ("thanks", "that's good", "sounds good",
-    "I'll check it out", "no that's all") → ALWAYS return none. Do not repeat the task.
+  - WRAP-UP DETECTION: If James says "thanks", "that's all", "sounds good", "got it",
+    "perfect", "nice work", "great", "I'll check it out", "no that's all", or any positive
+    acknowledgment after a task was just completed → ALWAYS return none. The task is done.
+    Check the last 2 turns — if a capability just ran and James is reacting positively → none.
+    Never re-run a just-completed action.
   - If James is talking ABOUT a capability (mentioning search, email, tasks in conversation)
     but not actually requesting it → return none. Example: "I want to test your search function"
     is NOT a search request — it is a conversational statement.
@@ -881,7 +884,6 @@ def main(text_mode: bool = False):
     check_first_time_setup()
 
     # ── STEP 4: Load everything ──
-    detector = ContextRouter()
     router   = ModelRouter()
     memory     = load_memory()
     mood_state = load_mood()
@@ -1271,41 +1273,6 @@ def main(text_mode: bool = False):
 
         current_emotion = arch.behavioral.state["interior_state"]["current"]["primary_emotion"]
 
-        # ── Wrap-up fast path — skip entire decision pipeline ──
-        # "Thank you very much!" should never trigger a tool.
-        # Checking this before snapshot/decide_action/verifier saves
-        # 3 GPU calls and eliminates a whole class of false triggers.
-        if is_wrap_up(user_input):
-            print(f"   [WrapUp] detected — skipping decision pipeline")
-            adjust_mood_by_context(user_input, mood_state)
-            arch.sync_mood_to_behavioral_state(mood_state)
-            if mixer:
-                blend = suggest_blend_for_context("casual", "home")
-                mixer.blend_states(blend)
-                mixer.step()
-            who           = session.get_privacy_context()
-            long_term_ctx = _mem_future.result(timeout=10)
-            system_prompt = build_system_prompt(
-                who=who, situation="casual", environment="home",
-                state_of_mind=detect_state_of_mind("casual", "home", mood_state)
-            )
-            if long_term_ctx:
-                system_prompt = long_term_ctx + "\n\n" + system_prompt
-            memory.append({"role": "user", "content": user_input})
-            show_thinking()
-            ai_response = stream_response_and_speak(
-                system_prompt, memory,
-                emotion=arch.behavioral.state["interior_state"]["current"]["primary_emotion"],
-                text_mode=text_mode,
-                model=selected_model if 'selected_model' in dir() else PRIMARY_MODEL,
-                cancel_filler_fn=_filler_gate.cancel if _filler_gate else None,
-            )
-            if ai_response:
-                memory.append({"role": "AI", "content": ai_response})
-                save_memory(memory)
-            print()
-            continue
-
         # ── Model selection ──
         # model_router.py still handles code/complex routing via keyword triggers.
         # For most messages the primary model handles everything.
@@ -1342,12 +1309,6 @@ def main(text_mode: bool = False):
         # Only runs when an action was actually chosen (skip overhead on "none").
         # Extracts constraints and confirms the action is genuinely requested.
         _constraints = []
-
-        # Also respect the snapshot's phase — if we're wrapping up, block all tools
-        if tracker and _snapshot and _snapshot.get("phase") == "wrapping_up":
-            if action != "none":
-                print(f"   [Situation] phase=wrapping_up — blocking {action}, falling back to conversation")
-                action = "none"
 
         if action != "none":
             verification = context_verifier(

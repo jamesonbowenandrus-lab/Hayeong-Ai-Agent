@@ -1594,6 +1594,7 @@ is a working proof of concept for the Phase 12 Vision Layer expansion.
 | 86 | MC outcome observation — before/after snapshot on every action | 4.5 | ✅ Done |
 | 87 | MC optimization layer — she offers better paths, James decides | 4.5 | ✅ Done |
 | 88 | MC uncertainty handling — neither-knows reasoning and logging | 4.5 | ✅ Done |
+| 89 | LLM control audit — narrow fast-paths, remove redundant router, remove wrap-up overrides, audit state injection text | — | ✅ Done |
 
 ---
 

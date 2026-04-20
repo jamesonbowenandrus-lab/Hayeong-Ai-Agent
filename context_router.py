@@ -603,26 +603,38 @@ class ContextRouter:
             _fill_sub_action(message, fast)
             return fast
 
-        # ── Fast path: very short simple messages ──
-        # Greetings, acknowledgements, and short reactions never need
-        # an LLM router call — they're always conversation.
+        # ── Fast path: pure single or two-word acknowledgments ──
+        # "yeah", "ok", "thanks", "got it" are unambiguously conversation.
+        # Short imperatives like "ok find it" or "hey search that" are NOT caught here —
+        # they must reach decide_action() so the LLM can reason about them.
         words = message.strip().split()
-        _SIMPLE_STARTERS = {
-            "hey", "hi", "hello", "sup", "yo", "heya", "hiya",
-            "ok", "okay", "sure", "yeah", "yep", "nope", "no", "yes",
+        _PURE_ACKS = {
+            "ok", "okay", "yeah", "yep", "nope", "no", "yes", "sure",
             "thanks", "thank", "cool", "nice", "good", "great", "awesome",
-            "alright", "got it", "sounds good", "makes sense", "understood",
-            "lol", "haha", "omg", "wait", "hmm", "hm",
+            "alright", "lol", "haha", "hmm", "hm",
+            "hey", "hi", "hello", "sup", "yo", "heya", "hiya",
+            "got it", "sounds good", "makes sense", "understood",
         }
-        if len(words) <= 3 and words[0].lower().rstrip("!?,. ") in _SIMPLE_STARTERS:
+        if len(words) == 1 and words[0].lower().rstrip("!?,. ") in _PURE_ACKS:
             return {
                 "intent":     "conversation",
                 "action":     "",
                 "target":     "",
                 "confidence": "high",
-                "reasoning":  "short greeting/acknowledgement — no routing needed",
+                "reasoning":  "pure acknowledgment — no routing needed",
                 "fallback":   False,
             }
+        if len(words) == 2:
+            phrase = " ".join(w.lower().rstrip("!?,. ") for w in words)
+            if phrase in _PURE_ACKS:
+                return {
+                    "intent":     "conversation",
+                    "action":     "",
+                    "target":     "",
+                    "confidence": "high",
+                    "reasoning":  "pure acknowledgment — no routing needed",
+                    "fallback":   False,
+                }
 
         # ── Fast path: rest/recharge commands ──
         # Handled by main.py's rest handler, not ProcessManager.
