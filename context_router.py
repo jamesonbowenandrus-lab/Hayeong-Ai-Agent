@@ -1,31 +1,24 @@
 """
 context_router.py
 ─────────────────
-Context-aware intent router. Uses Qwen 7b with recent conversation
-history to understand what James is actually asking for — not just
-what keywords appear in the message.
-
-WHY THIS EXISTS
-───────────────
-The old intent_detector.py used keyword matching with no conversation
-context. That meant "I was just asking about search information to test
-your web functionality" got routed as a web_search because it contains
-the word "search". A human reading the conversation would instantly know
-that's a reply to a suspicion question, not a search request.
-
-This router gives the LLM the last few messages so it understands
-what's actually happening before deciding what to do.
+Intent router. Fast paths handle unambiguous commands directly.
+Keyword classification handles everything else. decide_action() in
+main.py (Qwen 14b with full conversation context) handles anything
+that is genuinely ambiguous — it does a better job than a 7b router
+with partial context ever could.
 
 HOW IT WORKS
 ────────────
-1. Fast path — unambiguous imperative commands (open/close subprocesses)
-   are still caught by keyword match. No LLM needed for "open discord".
+1. Fast path — unambiguous imperative commands (open/close subprocesses,
+   pure acks, rest phrases) — no LLM call needed.
 
-2. LLM path — everything else goes to Qwen 7b with the last 3 messages
-   as context. Returns structured intent JSON. Fast, deterministic (temp=0).
+2. Keyword classification — handles web_search, vision, image gen,
+   email, tasks, income, self_mod, think_together, conversation.
+   Runs synchronously, zero latency.
 
-3. Keyword fallback — if Ollama is unreachable or times out, falls back
-   to keyword matching so Hayeong keeps working.
+3. decide_action() in main.py handles the rest — it has full memory
+   context and the full 14b model. Ambiguous intent is better resolved
+   there than here.
 
 INTENTS RETURNED
 ────────────────
@@ -42,19 +35,15 @@ Each result includes:
   action      → sub-action (e.g. "check_inbox", "start", "add")
   target      → what the action applies to (e.g. "discord")
   confidence  → "high" | "medium" | "low"
-  fallback    → True if keyword fallback was used
-  reasoning   → why the LLM made this choice (useful for debugging)
+  fallback    → True if keyword classification was used
+  reasoning   → why this classification was made
 """
 
-import json
-import re
 import requests
 from pathlib import Path
 
-BASE_DIR         = Path(__file__).parent
-OLLAMA_URL       = "http://localhost:11434/api/chat"
-ROUTER_MODEL     = "qwen2.5:7b"   # Fast, cheap, good enough for routing
-ROUTER_TIMEOUT   = 20             # Seconds — 7b needs time to load alongside 14b
+BASE_DIR   = Path(__file__).parent
+OLLAMA_URL = "http://localhost:11434/api/chat"
 
 
 # ─────────────────────────────────────────────
@@ -336,125 +325,14 @@ def _fast_capability_check(text: str) -> dict | None:
 # LLM ROUTER
 # ─────────────────────────────────────────────
 
-def _build_router_prompt(message: str, recent_history: list[dict]) -> str:
-    """
-    Builds the classification prompt including recent conversation context.
-    recent_history: last 2-3 turns as [{"role": "user"|"AI", "content": "..."}]
-    """
-    intent_list = "\n".join(
-        f'  "{k}": {v["description"]}'
-        for k, v in INTENT_DEFINITIONS.items()
-    )
-    examples = "\n".join(
-        f'  "{ex}" → {k}'
-        for k, v in INTENT_DEFINITIONS.items()
-        for ex in v["examples"][:2]
-    )
-
-    # Format recent history so the LLM has conversational context
-    history_lines = []
-    for turn in recent_history[-3:]:
-        role = "Hayeong" if turn["role"] == "AI" else "James"
-        content = turn["content"][:200]  # truncate long entries
-        history_lines.append(f"  {role}: {content}")
-    history_text = "\n".join(history_lines) if history_lines else "  (start of conversation)"
-
-    return f"""You are Hayeong's intent router. Your only job is to classify what James is asking for.
-
-Recent conversation:
-{history_text}
-
-James just said: "{message}"
-
-Classify into exactly one intent:
-{intent_list}
-
-Examples:
-{examples}
-
-CRITICAL RULES:
-- Read the FULL conversation context, not just the new message in isolation.
-- If James is replying to something Hayeong said (a question, a suspicion check, a result),
-  that reply is almost always "conversation" — not a tool request.
-- Only classify as web_search/vision/image_generation if James is CLEARLY requesting that tool.
-- RESEARCH + EMAIL: If James asks for research, a comparison, or a report on a topic AND
-  mentions email as the delivery method, classify as web_search (NOT email).
-  Email is just how she delivers it — the task is research. Example: "look up X and email
-  me the report" = web_search, not email.
-- EMAIL ONLY: Only classify as email if the primary task IS the email action itself
-  (check inbox, send a notification, get a summary of emails).
-- THINK TOGETHER: If James is thinking aloud, processing a decision, or the request is
-  ambiguous with multiple valid interpretations — classify as think_together, NOT a tool.
-  Hayeong should align with him conversationally before acting. Better to ask than to guess
-  and fire the wrong capability. Example: "I've been thinking about what we should do" or
-  "can you handle that thing" = think_together.
-- When in doubt, use "conversation".
-
-Respond with ONLY this JSON — no explanation, no markdown:
-{{"intent": "...", "action": "...", "target": "...", "confidence": "high|medium|low", "reasoning": "one sentence"}}
-
-Rules:
-- intent must be one of the listed keys
-- action: sub-action if relevant ("check_inbox", "start", "add", "show") else ""
-- target: what the action applies to ("discord", "minecraft") else ""
-- reasoning: one short sentence explaining why"""
-
-
-def _classify_with_llm(message: str, recent_history: list[dict]) -> dict | None:
-    """
-    Ask Qwen 7b to classify the intent with conversation context.
-    Returns a result dict or None on failure/timeout.
-    """
-    prompt = _build_router_prompt(message, recent_history)
-
-    try:
-        resp = requests.post(
-            OLLAMA_URL,
-            json={
-                "model":   ROUTER_MODEL,
-                "messages": [
-                    {"role": "system", "content": "You are a JSON-only intent classifier. Output only valid JSON."},
-                    {"role": "user",   "content": prompt},
-                ],
-                "stream":  False,
-                "options": {"temperature": 0.0},
-            },
-            timeout=ROUTER_TIMEOUT,
-        )
-        resp.raise_for_status()
-        content = resp.json()["message"]["content"].strip()
-
-        # Strip markdown fences if model adds them
-        content = re.sub(r"^```[a-z]*\n?", "", content)
-        content = re.sub(r"\n?```$",       "", content)
-        content = content.strip()
-
-        parsed = json.loads(content)
-
-        # Validate intent key
-        if parsed.get("intent") not in INTENT_DEFINITIONS:
-            parsed["intent"] = "conversation"
-
-        return {
-            "intent":     parsed.get("intent",    "conversation"),
-            "action":     parsed.get("action",    ""),
-            "target":     parsed.get("target",    ""),
-            "confidence": parsed.get("confidence","medium"),
-            "reasoning":  parsed.get("reasoning", ""),
-            "fallback":   False,
-        }
-
-    except Exception as e:
-        print(f"   [Router] LLM failed ({e}) — using keyword fallback")
-        return None
-
-
 # ─────────────────────────────────────────────
-# KEYWORD FALLBACK
+# KEYWORD CLASSIFICATION
+# Primary classifier after fast paths. Zero latency, no LLM call.
+# decide_action() in main.py (Qwen 14b, full context) handles ambiguous cases.
 # ─────────────────────────────────────────────
 
 def _classify_with_keywords(text: str) -> dict:
-    """Fast keyword fallback when LLM is unavailable."""
+    """Keyword classification — primary path after fast paths."""
     t = text.lower().strip()
 
     priority = [
@@ -585,15 +463,13 @@ class ContextRouter:
     """
 
     def __init__(self, use_llm: bool = True):
-        self.use_llm = use_llm
+        self.use_llm = use_llm   # retained for API compatibility — no LLM call is made
 
     def route(self, message: str, recent_history: list[dict] = None) -> dict:
         """
-        Classify the intent of a message with optional conversation context.
-
-        message:        The user's current message
-        recent_history: Last few memory entries [{"role": ..., "content": ...}]
-                        Pass memory[-4:] from main.py for best results.
+        Classify the intent of a message.
+        recent_history is accepted for API compatibility but no longer used here —
+        decide_action() in main.py has full context and handles ambiguous cases.
         """
         recent_history = recent_history or []
 
@@ -655,20 +531,7 @@ class ContextRouter:
                 "fallback":   False,
             }
 
-        # ── LLM path: context-aware classification ──
-        if self.use_llm:
-            result = _classify_with_llm(message, recent_history)
-            if result:
-                _fill_sub_action(message, result)
-                # Add delivery mode for web_search intents
-                if result["intent"] == "web_search":
-                    result["delivery_mode"] = _detect_delivery_mode(message)
-                if result.get("reasoning"):
-                    mode_note = f" [{result.get('delivery_mode', '')}]" if result["intent"] == "web_search" else ""
-                    print(f"   [Router] {result['intent']}{mode_note} — {result['reasoning']}")
-                return result
-
-        # ── Keyword fallback ──
+        # ── Keyword classification — decide_action() handles the ambiguous rest ──
         result = _classify_with_keywords(message)
         _fill_sub_action(message, result)
         if result["intent"] == "web_search":

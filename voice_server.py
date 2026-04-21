@@ -271,19 +271,30 @@ def _audio_to_pcm_chunks(audio: np.ndarray, chunk_size: int = 4096) -> list:
 # ─────────────────────────────────────────────
 
 def _get_ai_response(user_text: str, memory: list, mood_state: dict,
-                      identity: dict, dynamic_traits: dict) -> tuple[str, str]:
+                      identity: dict, dynamic_traits: dict,
+                      cancel_filler_fn=None) -> tuple[str, str]:
     """
     Returns (response_text, emotion_key).
     Runs in a thread executor so it doesn't block the event loop.
+
+    cancel_filler_fn: called just before the blocking Ollama request is sent.
+    This is the earliest possible cancel point with a non-streaming call —
+    the filler is cancelled the moment the LLM request is dispatched.
     """
     if not _core_loaded:
+        if cancel_filler_fn:
+            cancel_filler_fn()
         return "Core modules aren't loaded right now.", "neutral"
 
     try:
         _adjust_mood(user_text, mood_state)
-        prompt   = _build_prompt(identity, memory, user_text, dynamic_traits, mood_state)
+        prompt = _build_prompt(identity, memory, user_text, dynamic_traits, mood_state)
+        # Cancel filler here — LLM request is about to be sent.
+        # Earliest achievable cancel point with a blocking non-streaming call.
+        if cancel_filler_fn:
+            cancel_filler_fn()
         response = _chat_fn(prompt)
-        emotion  = "neutral"  # future: parse emotion from response metadata
+        emotion  = "neutral"
         return response, emotion
     except Exception as e:
         log.error(f"AI response error: {e}")
@@ -410,15 +421,16 @@ async def _process_utterance(ws: WebSocket, user_text: str,
             )
             _filler_gate.start()
 
-        loop     = asyncio.get_event_loop()
+        loop = asyncio.get_event_loop()
+        import functools
         response, emotion = await loop.run_in_executor(
-            None, _get_ai_response,
-            user_text, memory, mood_state, identity, dynamic_traits
+            None,
+            functools.partial(
+                _get_ai_response,
+                user_text, memory, mood_state, identity, dynamic_traits,
+                cancel_filler_fn=_filler_gate.cancel if _filler_gate else None,
+            ),
         )
-
-        # ── Cancel filler — LLM has responded ──
-        if _filler_gate:
-            _filler_gate.cancel()
 
         # 2. Send text response immediately so client can display it
         await _send_json(ws, {

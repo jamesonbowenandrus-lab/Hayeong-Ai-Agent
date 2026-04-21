@@ -32,11 +32,11 @@ ROUTER_LOG.parent.mkdir(parents=True, exist_ok=True)
 
 MODELS = {
     # ── Hayeong's main brain ──
-    # Smart enough for nuanced conversation, fits comfortably on 7900 XTX
-    # alongside Discord and voice running at the same time.
+    # Q4_K_M quantization: ~8GB VRAM, ~40% faster than Q8, negligible quality loss.
+    # Full 14b parameter count — just compressed weights.
     "main": {
-        "name": "qwen2.5:14b",
-        "ollama_name": "qwen2.5:14b",
+        "name": "qwen2.5:14b-instruct-q4_K_M",
+        "ollama_name": "qwen2.5:14b-instruct-q4_K_M",
         "description": "Main LLM — conversation, reasoning, identity, general tasks",
         "context_window": 32768,
     },
@@ -289,15 +289,13 @@ class ModelRouter:
         # 32b routing is currently DISABLED.
         #
         # VRAM budget on RX 7900 XTX (24GB):
-        #   qwen2.5:7b  ≈  8GB  (router + query extraction)
-        #   qwen2.5:14b ≈ 14GB  (main brain)
-        #   ─────────────────────────────
-        #   Total        ≈ 22GB  (~2GB headroom)
+        #   qwen2.5:14b Q4_K_M ≈ 8GB  (main brain — quantized)
+        #   ─────────────────────────────────────────────────────
+        #   Total               ≈ 8GB  (~16GB headroom for vision, creative compute)
         #
         # qwen2.5:32b needs ~20GB alone — loading it evicts the other models,
         # causes 60s+ load times, and risks timeouts like we saw in testing.
-        # 14b is the ceiling until Hayeong has her own dedicated workstation
-        # with more VRAM headroom to spare.
+        # 14b Q4_K_M is the ceiling until Hayeong moves to the 3090.
         #
         # To re-enable later: uncomment the block below and remove the pass.
         elif len(message) > 300:

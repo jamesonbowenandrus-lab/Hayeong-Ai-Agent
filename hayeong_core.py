@@ -35,7 +35,7 @@ IDENTITY_FILE  = BASE_DIR / "identity.json"
 MOOD_FILE      = BASE_DIR / "mood.json"
 
 OLLAMA_URL     = "http://localhost:11434/api/chat"
-PRIMARY_MODEL  = "qwen2.5:14b"    # Main brain — smart, fits easily on 7900 XTX
+PRIMARY_MODEL  = "qwen2.5:14b-instruct-q4_K_M"    # Main brain — Q4_K_M, ~8GB, ~40% faster than Q8
 FALLBACK_MODEL = "llama3.2:latest" # Fast lightweight fallback if primary fails
 
 # ─────────────────────────────────────────────
