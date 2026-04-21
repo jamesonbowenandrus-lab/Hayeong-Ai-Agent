@@ -2,27 +2,21 @@
 # Blender Python generation capability.
 #
 # Handles: blender_gen action from context_router
-# Generates Blender Python scripts via LLM and executes them headless.
-# Output: exported 3D files (.obj, .fbx, .gltf, .dae) + optional render preview.
+# Generates a Blender Python script via LLM, executes it headless,
+# and confirms the output file to James.
 #
-# Why Blender for higher-quality output:
-#   - Free, no license required
-#   - Full modifier support: bevels, subdivision, boolean ops
-#   - Headless execution: blender --background --python script.py
-#   - Multi-format export and built-in renderer
-#   - Path for Etsy/game art quality — not needed for basic kitchen objects
+# Path to Blender is stored in hayeong_config.py — update that file,
+# not this one, when Blender is installed or the version changes.
 #
-# Execution flow:
-#   LLM generates Blender Python script
-#   → script saved to temp file
-#   → blender called as subprocess (--background --python)
-#   → output file and optional render saved to hayeong_outputs/
-#   → file path returned to James
+# Script path injection:
+#   Generated scripts use OUTPUT_PATH_PLACEHOLDER and PREVIEW_PATH_PLACEHOLDER
+#   as literal strings. This capability replaces them with real paths before
+#   passing the script to Blender. No env vars needed.
 #
-# Script improvement loop:
-#   If blender returns a non-zero exit code, stderr is captured and returned
-#   as context so Hayeong can read the error, revise the script, and retry.
-#   This is not automatic in v1 — James triggers a retry explicitly.
+# Error handling:
+#   If Blender exits non-zero, stderr and stdout are captured and injected
+#   into the AI prompt so Hayeong can read the error and diagnose it.
+#   Common first-run errors and their fixes are documented in the prompt.
 
 import os
 import re
@@ -35,49 +29,27 @@ from capability_loader import result
 
 ACTIONS = ["blender_gen"]
 
-OLLAMA_URL   = "http://localhost:11434/api/chat"
-GEN_MODELS   = ["deepseek-coder-v2:16b", "deepseek-coder:33b", "qwen2.5:14b"]
-OUTPUT_DIR   = Path(__file__).parent.parent / "hayeong_outputs" / "3d_models"
-PREVIEW_DIR  = Path(__file__).parent.parent / "hayeong_outputs" / "3d_previews"
-GEN_TIMEOUT  = 120
+OLLAMA_URL  = "http://localhost:11434/api/chat"
+GEN_MODELS  = ["deepseek-coder-v2:16b", "deepseek-coder:33b", "qwen2.5:14b"]
+GEN_TIMEOUT = 120
 BLENDER_TIMEOUT = 120
 
-# Blender executable — try common Windows paths, fall back to PATH
-BLENDER_CANDIDATES = [
-    r"C:\Program Files\Blender Foundation\Blender 4.3\blender.exe",
-    r"C:\Program Files\Blender Foundation\Blender 4.2\blender.exe",
-    r"C:\Program Files\Blender Foundation\Blender 4.1\blender.exe",
-    r"C:\Program Files\Blender Foundation\Blender 4.0\blender.exe",
-    "blender",  # fallback: try PATH
-]
+BASE_DIR     = Path(__file__).parent.parent
+OUTPUT_DIR   = BASE_DIR / "hayeong_outputs" / "3d_models"
+PREVIEW_DIR  = BASE_DIR / "hayeong_outputs" / "3d_previews"
+SCRIPTS_DIR  = BASE_DIR / "hayeong_outputs" / "3d_scripts"
 
 
 # ─────────────────────────────────────────────
-# BLENDER DETECTION
+# CONFIG — Blender path
 # ─────────────────────────────────────────────
 
-def _find_blender() -> str | None:
-    for candidate in BLENDER_CANDIDATES:
-        try:
-            r = subprocess.run(
-                [candidate, "--version"],
-                capture_output=True, timeout=10,
-            )
-            if r.returncode == 0:
-                print(f"[BlenderGen] Found Blender at: {candidate}")
-                return candidate
-        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
-            continue
-    return None
-
-
-_blender_path: str | None = None
-
-def _get_blender() -> str | None:
-    global _blender_path
-    if _blender_path is None:
-        _blender_path = _find_blender()
-    return _blender_path
+def _get_blender_path() -> str:
+    try:
+        from hayeong_config import BLENDER_PATH
+        return BLENDER_PATH
+    except ImportError:
+        return r"C:\Program Files\Blender Foundation\Blender 4.3\blender.exe"
 
 
 # ─────────────────────────────────────────────
@@ -85,76 +57,56 @@ def _get_blender() -> str | None:
 # ─────────────────────────────────────────────
 
 SCRIPT_SYSTEM = """\
-You are a Blender Python script generator for 3D furniture and objects.
+You are a Blender Python script generator for 3D furniture and kitchen objects.
 Generate a complete, self-contained Blender Python script.
-The script runs in Blender headless mode (--background) — no UI, no popups.
-Output ONLY the Python script — no markdown fences, no explanation.
+The script runs in Blender headless mode (--background) with no UI.
+Output ONLY the Python script — no markdown fences, no explanation, no comments about what you're doing.
 
-REQUIRED STRUCTURE — follow this exactly:
+REQUIRED STRUCTURE — follow exactly:
   1. import bpy
-  2. Clear default scene
-  3. Set dimensions as variables (all in METERS — Live Home 3D reads OBJ as meters)
-  4. Build geometry using bpy.ops or bmesh
+  2. Clear the default scene
+  3. Define dimensions as variables (ALL IN METERS — see conversion below)
+  4. Build geometry
   5. Apply materials
-  6. Export to OUTPUT_FILE (the script receives this via an environment variable)
-  7. Optionally render to PREVIEW_FILE if RENDER_PREVIEW env var is "1"
+  6. Export using OUTPUT_PATH_PLACEHOLDER as a literal string (do not replace it)
+  7. Print HAYEONG_SUCCESS: <message> on completion
 
-INCH TO METER CONVERSION:
+INCH TO METER CONVERSION (use in your variable definitions):
   1 inch = 0.0254 meters
-  Example: 34.5 inches = 34.5 * 0.0254 = 0.8763 meters
+  Example: width_m = 36 * 0.0254  # 36 inches = 0.9144 meters
 
-REQUIRED BOILERPLATE:
-```python
-import bpy, os
+UNITS NOTE — CRITICAL:
+  Live Home 3D reads OBJ units as meters. Generate all coordinates in METERS.
+  A cabinet at 34.5 meters tall is a skyscraper. At 0.8763 meters it is correct.
 
-OUTPUT_FILE  = os.environ.get("HAYEONG_OUTPUT", "output.obj")
-PREVIEW_FILE = os.environ.get("HAYEONG_PREVIEW", "")
-DO_RENDER    = os.environ.get("RENDER_PREVIEW", "0") == "1"
+CLEAR SCENE BOILERPLATE (required at top):
+  bpy.ops.object.select_all(action='SELECT')
+  bpy.ops.object.delete()
+  for block in list(bpy.data.meshes): bpy.data.meshes.remove(block)
 
-# Clear default scene
-bpy.ops.object.select_all(action='SELECT')
-bpy.ops.object.delete()
-for block in bpy.data.meshes:
-    bpy.data.meshes.remove(block)
-```
+EXPORT (use exact placeholder string — it gets replaced before execution):
+  bpy.ops.wm.obj_export(
+      filepath="OUTPUT_PATH_PLACEHOLDER",
+      export_selected_objects=False
+  )
 
-EXPORT — always use the new-style exporter (Blender 4.x):
-```python
-ext = os.path.splitext(OUTPUT_FILE)[1].lower()
-if ext == ".obj":
-    bpy.ops.wm.obj_export(filepath=OUTPUT_FILE, export_selected_objects=False)
-elif ext == ".fbx":
-    bpy.ops.export_scene.fbx(filepath=OUTPUT_FILE)
-elif ext in (".gltf", ".glb"):
-    bpy.ops.export_scene.gltf(filepath=OUTPUT_FILE)
-```
+MATERIALS — Principled BSDF only:
+  mat = bpy.data.materials.new(name="CabinetMat")
+  mat.use_nodes = True
+  bsdf = mat.node_tree.nodes["Principled BSDF"]
+  bsdf.inputs["Base Color"].default_value = (0.94, 0.94, 0.93, 1.0)
+  bsdf.inputs["Roughness"].default_value = 0.6
+  obj.data.materials.append(mat)
 
-RENDER (only if DO_RENDER):
-```python
-if DO_RENDER and PREVIEW_FILE:
-    bpy.context.scene.render.filepath = PREVIEW_FILE
-    bpy.context.scene.render.resolution_x = 800
-    bpy.context.scene.render.resolution_y = 600
-    bpy.ops.render.render(write_still=True)
-```
+KITCHEN STANDARDS (convert all to meters in code):
+  Base Cabinet     : H 34.5in (0.876m), D 24in (0.610m)
+  Wall Cabinet     : H 30-42in, D 12in (0.305m)
+  Sink Base        : H 34.5in, D 24in, NO interior shelf
+  Toe kick         : H 3.5in (0.089m), setback 3.25in from front
+  Panel thickness  : 0.75in (0.019m)
 
-MATERIALS — use simple diffuse colors (Principled BSDF):
-```python
-mat = bpy.data.materials.new(name="Cabinet_White")
-mat.use_nodes = True
-bsdf = mat.node_tree.nodes["Principled BSDF"]
-bsdf.inputs["Base Color"].default_value = (0.94, 0.94, 0.93, 1.0)
-bsdf.inputs["Roughness"].default_value = 0.6
-obj.data.materials.append(mat)
-```
-
-KITCHEN STANDARDS (inches → convert to meters in code):
-  Base Cabinet     : H 34.5", D 24"
-  Wall Cabinet     : H 30-42", D 12"
-  Sink Base        : H 34.5", D 24", no interior shelf
-  Tall Cabinet     : H 84-96", D 24"
-  Toe kick         : H 3.5", setback 3.25" from front
-  Panel thickness  : 0.75"
+END WITH:
+  print("HAYEONG_SUCCESS: <object_name> exported.")
 """
 
 
@@ -162,21 +114,16 @@ KITCHEN STANDARDS (inches → convert to meters in code):
 # LLM CALL — SCRIPT GENERATION
 # ─────────────────────────────────────────────
 
-def _generate_script(
-    object_type: str,
-    description: str,
-    dimensions: dict,
-    export_format: str,
-) -> str | None:
+def _generate_script(object_type: str, description: str, dimensions: dict) -> str | None:
     dim_note = ""
     if dimensions:
-        parts = [f"{k}={v} inches" for k, v in dimensions.items()]
-        dim_note = f"\nRequired dimensions: {', '.join(parts)}. Convert to meters in the script."
+        parts = [f"{k}={v} inches (= {float(v)*0.0254:.4f}m)" for k, v in dimensions.items()]
+        dim_note = f"\nRequired dimensions: {', '.join(parts)}."
 
     user_msg = (
         f"Generate a Blender Python script for: {object_type.replace('_', ' ')}\n"
         f"Description: {description}{dim_note}\n"
-        f"Export format: {export_format}\n"
+        f"Export as OBJ. Use OUTPUT_PATH_PLACEHOLDER as the filepath string.\n"
         f"Output ONLY the Python script."
     )
 
@@ -206,12 +153,10 @@ def _generate_script(
         except Exception as e:
             print(f"[BlenderGen] {model} failed: {e}")
 
-    print("[BlenderGen] All models failed.")
     return None
 
 
 def _clean_script(raw: str) -> str:
-    """Strip markdown fences from LLM output."""
     raw = re.sub(r"^```(?:python)?\s*", "", raw.strip(), flags=re.MULTILINE)
     raw = re.sub(r"```\s*$", "", raw.strip(), flags=re.MULTILINE)
     return raw.strip()
@@ -221,50 +166,64 @@ def _clean_script(raw: str) -> str:
 # BLENDER EXECUTION
 # ─────────────────────────────────────────────
 
-def _run_blender(
-    script: str,
-    output_path: Path,
-    preview_path: Path | None,
-    render_preview: bool,
-) -> dict:
-    blender = _get_blender()
-    if not blender:
-        return {
-            "success": False,
-            "error":   "Blender not found. Install from blender.org and ensure it's on PATH.",
-        }
+def _run_blender(script: str, output_path: Path, preview_path: Path | None) -> dict:
+    blender_path = _get_blender_path()
 
-    # Write script to temp file
+    # Inject real paths into script
+    script = script.replace("OUTPUT_PATH_PLACEHOLDER", str(output_path).replace("\\", "/"))
+    if preview_path:
+        script = script.replace("PREVIEW_PATH_PLACEHOLDER", str(preview_path).replace("\\", "/"))
+
+    # Save script to 3d_scripts/ for debugging
+    SCRIPTS_DIR.mkdir(parents=True, exist_ok=True)
+    script_save_path = SCRIPTS_DIR / f"{output_path.stem}.py"
+    script_save_path.write_text(script, encoding="utf-8")
+
+    # Also write to temp file for execution
     with tempfile.NamedTemporaryFile(
         mode="w", suffix=".py", delete=False, encoding="utf-8"
     ) as f:
         f.write(script)
-        script_path = f.name
-
-    env = os.environ.copy()
-    env["HAYEONG_OUTPUT"]  = str(output_path)
-    env["HAYEONG_PREVIEW"] = str(preview_path) if preview_path else ""
-    env["RENDER_PREVIEW"]  = "1" if render_preview else "0"
+        temp_script = f.name
 
     try:
         proc = subprocess.run(
-            [blender, "--background", "--python", script_path],
-            capture_output=True, text=True,
-            timeout=BLENDER_TIMEOUT, env=env,
+            [blender_path, "--background", "--python", temp_script],
+            capture_output=True, text=True, timeout=BLENDER_TIMEOUT,
         )
+        success = proc.returncode == 0 and output_path.exists()
         return {
-            "success":     proc.returncode == 0,
-            "returncode":  proc.returncode,
-            "stdout":      proc.stdout[-2000:] if proc.stdout else "",
-            "stderr":      proc.stderr[-2000:] if proc.stderr else "",
+            "success":      success,
+            "returncode":   proc.returncode,
+            "file_exists":  output_path.exists(),
+            "blender_log":  proc.stdout,
+            "stderr":       proc.stderr,
+            "script_path":  str(script_save_path),
         }
     except subprocess.TimeoutExpired:
-        return {"success": False, "error": "Blender timed out after 120 seconds."}
+        return {
+            "success":    False,
+            "error":      "Blender timed out after 120 seconds.",
+            "blender_log": "",
+            "stderr":     "",
+        }
+    except FileNotFoundError:
+        return {
+            "success":    False,
+            "error":      f"Blender not found at: {blender_path}\nUpdate BLENDER_PATH in hayeong_config.py.",
+            "blender_log": "",
+            "stderr":     "",
+        }
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {
+            "success":    False,
+            "error":      str(e),
+            "blender_log": "",
+            "stderr":     "",
+        }
     finally:
         try:
-            os.unlink(script_path)
+            os.unlink(temp_script)
         except OSError:
             pass
 
@@ -281,7 +240,6 @@ def handle(action: str, user_input: str, context: dict) -> dict:
     object_type    = decision.get("object_type") or "object"
     description    = decision.get("description") or user_input
     dimensions     = decision.get("dimensions") or {}
-    export_format  = decision.get("export_format", "obj").lower()
     render_preview = bool(decision.get("render_preview", False))
 
     label = object_type.replace("_", " ")
@@ -290,7 +248,7 @@ def handle(action: str, user_input: str, context: dict) -> dict:
         speak_fn(f"Generating the {label} in Blender.", emotion="focused")
 
     # Step 1 — generate script
-    script = _generate_script(object_type, description, dimensions, export_format)
+    script = _generate_script(object_type, description, dimensions)
     if not script:
         return result(
             success=False,
@@ -301,57 +259,68 @@ def handle(action: str, user_input: str, context: dict) -> dict:
     # Step 2 — prepare output paths
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     PREVIEW_DIR.mkdir(parents=True, exist_ok=True)
-    timestamp   = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    safe        = object_type.replace(" ", "_").lower()
-    ext         = {"obj": "obj", "fbx": "fbx", "gltf": "gltf", "glb": "glb", "dae": "dae"}.get(export_format, "obj")
-    out_path    = OUTPUT_DIR  / f"{safe}_{timestamp}.{ext}"
-    prev_path   = PREVIEW_DIR / f"{safe}_{timestamp}.png" if render_preview else None
+    timestamp    = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    safe         = object_type.replace(" ", "_").lower()
+    out_path     = OUTPUT_DIR  / f"{safe}_{timestamp}.obj"
+    prev_path    = PREVIEW_DIR / f"{safe}_{timestamp}.png" if render_preview else None
 
     # Step 3 — run Blender
-    run_result = _run_blender(script, out_path, prev_path, render_preview)
-
-    if not run_result.get("success"):
-        error_detail = run_result.get("error") or run_result.get("stderr", "Unknown error")
-        return result(
-            success=False,
-            speak=f"Blender ran into an error generating the {label}.",
-            response=(
-                f"[BLENDER ERROR]\n"
-                f"Object: {object_type}\n"
-                f"Error: {error_detail[:800]}\n\n"
-                f"Tell James Blender returned an error and show him the first part of it. "
-                f"Ask if he wants you to try to fix the script and retry."
-            ),
-            data={
-                "error":  error_detail,
-                "script": script[:500],
-                "stderr": run_result.get("stderr", ""),
-            },
-        )
+    run = _run_blender(script, out_path, prev_path)
 
     # Log
     if logger:
         try:
             logger.log_capability_used(
-                "blender_gen", action="generate", outcome="success",
+                "blender_gen", action="generate",
+                outcome="success" if run["success"] else "failure",
                 details={"object_type": object_type, "file": str(out_path)},
             )
         except Exception:
             pass
 
-    # Build response context
-    preview_note = ""
-    if render_preview and prev_path and prev_path.exists():
-        preview_note = f"\nPreview render: {prev_path}"
+    if not run.get("success"):
+        error_msg = run.get("error") or run.get("stderr", "")
+        stderr    = run.get("stderr", "")
+        log_snip  = (run.get("blender_log") or "")[-1000:]
+
+        # Diagnostic hint
+        hint = ""
+        if "not found" in error_msg.lower() or "FileNotFoundError" in error_msg:
+            hint = "BLENDER_PATH in hayeong_config.py points to the wrong location. Update it to the correct blender.exe path."
+        elif "obj_export" in stderr.lower():
+            hint = "bpy.ops.wm.obj_export may not exist on this Blender version. Try bpy.ops.export_scene.obj instead (legacy exporter)."
+        elif not run.get("file_exists", True):
+            hint = "Blender exited cleanly but the output file wasn't created. Check the filepath in the script uses forward slashes."
+
+        response_ctx = (
+            f"[BLENDER FAILED]\n"
+            f"Object: {object_type}\n"
+            f"Error: {error_msg[:600]}\n"
+            f"{f'Hint: {hint}' if hint else ''}\n"
+            f"Blender log (last 1000 chars):\n{log_snip}\n\n"
+            f"Read the error carefully and tell James what went wrong. "
+            f"If the hint above applies, mention it specifically. "
+            f"Ask James if he wants you to try fixing the script and retrying."
+        )
+        return result(
+            success=False,
+            response=response_ctx,
+            speak=f"Blender hit an error on the {label}.",
+            data={"error": error_msg, "stderr": stderr, "log": log_snip},
+        )
+
+    # Success
+    log_snip     = (run.get("blender_log") or "")[-500:]
+    preview_note = f"\nPreview: {prev_path}" if (prev_path and prev_path.exists()) else ""
+    script_note  = f"\nScript saved: {run.get('script_path', '')}"
 
     response_ctx = (
-        f"[BLENDER MODEL GENERATED]\n"
+        f"[BLENDER SUCCESS]\n"
         f"Object: {object_type}\n"
-        f"File: {out_path}{preview_note}\n\n"
-        f"How James uses it:\n"
-        f"  Option A — import directly: Live Home 3D → File → Import → {out_path.name}\n"
-        f"  Option B — open in Blender for tweaking, then export\n\n"
-        f"Tell James the file is ready. If there's a preview image, mention it. "
+        f"File: {out_path}{preview_note}{script_note}\n"
+        f"Blender log:\n{log_snip}\n\n"
+        f"Tell James the file is ready and give him the filename. "
+        f"How to import: Live Home 3D → File → Import → {out_path.name}\n"
         f"Ask if the proportions look right or if he wants any changes."
     )
 
@@ -363,7 +332,9 @@ def handle(action: str, user_input: str, context: dict) -> dict:
         data={
             "out_path":    str(out_path),
             "preview":     str(prev_path) if prev_path else None,
+            "script_path": run.get("script_path"),
             "object_type": object_type,
+            "blender_log": run.get("blender_log", ""),
         },
     )
 
@@ -375,11 +346,14 @@ def handle(action: str, user_input: str, context: dict) -> dict:
 def on_load():
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     PREVIEW_DIR.mkdir(parents=True, exist_ok=True)
-    blender = _get_blender()
-    if blender:
-        print(f"[BlenderGen] ✅ Loaded — Blender at: {blender}")
+    SCRIPTS_DIR.mkdir(parents=True, exist_ok=True)
+
+    blender_path = _get_blender_path()
+    if os.path.exists(blender_path):
+        print(f"[BlenderGen] ✅ Blender found: {blender_path}")
     else:
-        print("[BlenderGen] ⚠️  Loaded — Blender not found. Install from blender.org.")
+        print(f"[BlenderGen] ⚠️  Blender NOT found at: {blender_path}")
+        print(f"[BlenderGen]    Download Blender at blender.org, then update BLENDER_PATH in hayeong_config.py")
 
 
 def on_unload():

@@ -2,13 +2,16 @@
 # Hayeong's local voice system.
 # Handles: wake word detection, speech-to-text, text-to-speech.
 #
-# Dependencies:
-#   pip install sounddevice scipy pygame numpy soundfile f5-tts openai-whisper
+# TTS Engine: Kokoro-82M (primary) — fast synthesis on RTX 3090 via CUDA.
+#             F5-TTS retained as fallback until Kokoro is confirmed stable.
 #
-# GPU Notes (AMD RX 7900 XTX — ROCm):
-#   - F5-TTS runs on GPU via PyTorch ROCm (device="cuda" maps to ROCm)
-#   - openai-whisper runs on GPU via PyTorch ROCm
-#   - faster-whisper is NOT used — CTranslate2 has no ROCm support
+# Dependencies:
+#   pip install sounddevice scipy numpy soundfile openai-whisper
+#   pip install kokoro>=0.9.2
+#   pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+#   Also required: espeak-ng installed on Windows (system-level, not pip)
+#
+# GPU: NVIDIA RTX 3090 — full CUDA, no DirectML workarounds needed.
 #
 # Devices:
 #   INPUT_DEVICE  3  → HyperX QuadCast S (MME)
@@ -25,8 +28,24 @@ import numpy as np
 import soundfile as sf
 import torch
 import whisper
-from f5_tts.api import F5TTS
 from pathlib import Path
+
+# ── Primary TTS: Kokoro-82M ──
+try:
+    from kokoro import KPipeline
+    KOKORO_AVAILABLE = True
+except ImportError:
+    KOKORO_AVAILABLE = False
+    KPipeline = None
+    print("⚠️  kokoro not installed — run: pip install kokoro>=0.9.2")
+
+# ── Fallback TTS: F5-TTS (kept until Kokoro confirmed stable) ──
+try:
+    from f5_tts.api import F5TTS
+    F5TTS_AVAILABLE = True
+except ImportError:
+    F5TTS_AVAILABLE = False
+    F5TTS = None
 
 # ─────────────────────────────────────────────
 # DEVICE CONFIGURATION
@@ -42,11 +61,15 @@ sd.default.channels   = (1, 2)
 
 # ─────────────────────────────────────────────
 # GPU DEVICE
-# ROCm maps to "cuda" namespace in PyTorch
+# RTX 3090 — CUDA native. No DirectML workarounds.
 # ─────────────────────────────────────────────
 
-TORCH_DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-print(f"🖥️  Torch device: {TORCH_DEVICE} ({torch.cuda.get_device_name(0) if TORCH_DEVICE == 'cuda' else 'CPU'})")
+if torch.cuda.is_available():
+    TORCH_DEVICE = "cuda"
+    print(f"🖥️  Torch device: cuda ({torch.cuda.get_device_name(0)})")
+else:
+    TORCH_DEVICE = "cpu"
+    print("🖥️  Torch device: cpu — no CUDA GPU found, expect slow TTS")
 
 # ─────────────────────────────────────────────
 # WAKE WORDS
@@ -61,21 +84,40 @@ WAKE_WORDS = [
 WAKEWORD_COOLDOWN = 2
 
 # ─────────────────────────────────────────────
-# WHISPER MODEL (openai-whisper — supports ROCm)
-# faster-whisper is NOT used here: CTranslate2
-# has no ROCm support so it can't use your GPU.
-# openai-whisper runs through PyTorch and works
-# fine on your RX 7900 XTX via ROCm.
+# WHISPER MODEL
+# Runs on CUDA (3090). Full GPU — no CPU fallback.
+# Kokoro and Whisper share the 3090 fine at ~1GB each.
 # ─────────────────────────────────────────────
 
+WHISPER_DEVICE = TORCH_DEVICE   # "cuda" on RTX 3090
 print("Loading Whisper model...")
-_whisper_model = whisper.load_model("base", device=TORCH_DEVICE)
-print(f"✅ Whisper loaded on {TORCH_DEVICE}")
+_whisper_model = whisper.load_model("base", device=WHISPER_DEVICE)
+print(f"✅ Whisper loaded on {WHISPER_DEVICE}")
 
 # ─────────────────────────────────────────────
-# F5-TTS CONFIGURATION
-# Voice cloning from your reference audio.
-# Runs on GPU via PyTorch ROCm.
+# KOKORO TTS (primary)
+# KPipeline loaded once, cached globally.
+# Runs on CUDA — fast synthesis on RTX 3090.
+# ─────────────────────────────────────────────
+
+HAYEONG_VOICE = 'af_heart'   # Update after voice selection session with James
+
+_pipeline = None
+
+def get_pipeline():
+    global _pipeline
+    if _pipeline is None:
+        if not KOKORO_AVAILABLE:
+            return None
+        print("Loading Kokoro TTS on cuda...")
+        _pipeline = KPipeline(lang_code='a')   # 'a' = American English
+        print("✅ Kokoro TTS ready.")
+    return _pipeline
+
+
+# ─────────────────────────────────────────────
+# F5-TTS (fallback — kept until Kokoro stable)
+# Remove after 2-4 weeks of confirmed stable use.
 # ─────────────────────────────────────────────
 
 REF_AUDIO = "voice_prep/samples/source_5secs.wav"
@@ -86,7 +128,9 @@ _tts = None
 def get_tts():
     global _tts
     if _tts is None:
-        print("Loading F5-TTS model on GPU...")
+        if not F5TTS_AVAILABLE:
+            return None
+        print(f"Loading F5-TTS model on {TORCH_DEVICE}...")
         _tts = F5TTS(device=TORCH_DEVICE)
         print(f"✅ F5-TTS loaded on {TORCH_DEVICE}")
     return _tts
@@ -127,26 +171,15 @@ def split_sentences(text: str) -> list:
 
 # ─────────────────────────────────────────────
 # SPEAK
-# Generates audio via F5-TTS on GPU, then plays
-# through OUTPUT_DEVICE (SteelSeries) via
-# sounddevice — routing directly to the right device.
+# Generates audio via Kokoro (primary) or F5-TTS (fallback),
+# then plays through OUTPUT_DEVICE via sounddevice.
 #
-# FIX NOTES:
-#   1. Normalization: always normalize to [-1.0, 1.0] safely.
-#      The old check (if max > 1.0 → divide by 32768) was fragile —
-#      F5-TTS float output can legitimately exceed 1.0 slightly,
-#      which would incorrectly trigger the int16 rescale and make
-#      audio near-silent. Now we always normalize by the actual peak.
-#
-#   2. Cutoff fix: sd.wait() returns when the buffer empties, but
-#      the hardware DAC still has a few ms of audio to push through.
-#      The 0.3s sleep lets the tail fully clear the output device
-#      before Python moves on. Raise to 0.5 if still clipping.
+# Kokoro returns float32 audio at 24000 Hz per chunk.
+# Audio assembly (breath gaps, normalization, stereo expand,
+# trailing silence) is identical regardless of which engine ran.
 # ─────────────────────────────────────────────
 
-# How long to wait after sd.wait() for the hardware tail to clear.
-# 0.3s works for most setups. Raise to 0.5 if voice still cuts off.
-PLAYBACK_TAIL_BUFFER = 0.1
+PLAYBACK_TAIL_BUFFER = 0.1   # seconds after sd.wait() to let DAC tail clear
 
 def speak(text: str, emotion: str = "neutral"):
     if not text or not text.strip():
@@ -154,40 +187,58 @@ def speak(text: str, emotion: str = "neutral"):
 
     modulation   = get_voice_modulation(emotion)
     speed        = modulation["speed"]
-    tts          = get_tts()
     sentences    = split_sentences(text)
     audio_chunks = []
     sample_rate  = 24000
 
-    for sentence in sentences:
-        try:
-            wav, sr, _ = tts.infer(
-                ref_file = REF_AUDIO,
-                ref_text = REF_TEXT,
-                gen_text = sentence,
-                nfe_step = 64,
-                speed    = speed,
-            )
-            audio_chunks.append(wav)
-            sample_rate = sr
-        except Exception as e:
-            print(f"⚠️ F5-TTS error on sentence: {e}")
-            continue
+    # ── Primary: Kokoro TTS ──
+    if KOKORO_AVAILABLE:
+        pipeline = get_pipeline()
+        if pipeline is not None:
+            for sentence in sentences:
+                try:
+                    generator = pipeline(sentence, voice=HAYEONG_VOICE, speed=speed)
+                    for _, _, audio in generator:
+                        audio_chunks.append(audio)
+                except Exception as e:
+                    print(f"⚠️ Kokoro error on sentence: {e}")
+                    continue
+
+    # ── Fallback: F5-TTS (if Kokoro unavailable or produced nothing) ──
+    if not audio_chunks and F5TTS_AVAILABLE:
+        tts = get_tts()
+        if tts is not None:
+            print("   [TTS] Kokoro unavailable — using F5-TTS fallback")
+            for sentence in sentences:
+                try:
+                    wav, sr, _ = tts.infer(
+                        ref_file = REF_AUDIO,
+                        ref_text = REF_TEXT,
+                        gen_text = sentence,
+                        nfe_step = 64,
+                        speed    = speed,
+                    )
+                    audio_chunks.append(wav)
+                    sample_rate = sr
+                except Exception as e:
+                    print(f"⚠️ F5-TTS error on sentence: {e}")
+                    continue
 
     if not audio_chunks:
+        print("⚠️ No TTS engine produced audio — cannot speak")
         return
 
     # Insert a short breath-gap between sentences
-    BREATH_GAP_SECONDS = 0.18   # tune this — 0.12 is subtle, 0.25 is noticeable
+    BREATH_GAP_SECONDS = 0.18
     breath = np.zeros(int(BREATH_GAP_SECONDS * sample_rate), dtype=np.float32)
     with_breaths = []
     for i, chunk in enumerate(audio_chunks):
         with_breaths.append(chunk)
-        if i < len(audio_chunks) - 1:   # no gap after the last chunk
+        if i < len(audio_chunks) - 1:
             with_breaths.append(breath)
     combined = np.concatenate(with_breaths)
 
-    # Always convert to float32
+    # Always float32
     if combined.dtype != np.float32:
         combined = combined.astype(np.float32)
 
@@ -200,10 +251,7 @@ def speak(text: str, emotion: str = "neutral"):
     if combined.ndim == 1:
         combined = np.stack([combined, combined], axis=1)
 
-    # Pad silence at the end — F5-TTS clips the last phoneme
-    # because it generates no trailing silence. This adds 0.6s
-    # of silence as actual audio data so sd.wait() holds for it.
-    # More reliable than a sleep timer.
+    # Trailing silence — prevents last phoneme clipping on playback
     silence_samples = int(0.6 * sample_rate)
     silence = np.zeros((silence_samples, combined.shape[1]), dtype=np.float32)
     combined = np.vstack([combined, silence])
@@ -211,8 +259,7 @@ def speak(text: str, emotion: str = "neutral"):
     try:
         sd.play(combined, samplerate=sample_rate, device=OUTPUT_DEVICE)
         sd.wait()
-        # Small hardware buffer clear — keep this too
-        time.sleep(0.1)
+        time.sleep(PLAYBACK_TAIL_BUFFER)
     except Exception as e:
         print(f"⚠️ Playback error: {e}")
 
@@ -254,7 +301,7 @@ def transcribe(audio_file: str) -> str:
         result = _whisper_model.transcribe(
             audio_file,
             language="en",
-            fp16=(TORCH_DEVICE == "cuda")  # fp16 only on GPU
+            fp16=(WHISPER_DEVICE == "cuda"),
         )
         text = result["text"].strip()
     except Exception as e:

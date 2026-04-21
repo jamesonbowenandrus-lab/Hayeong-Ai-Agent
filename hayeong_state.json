@@ -1,0 +1,10 @@
+{
+  "input_queue": [],
+  "output_queue": [],
+  "interface_status": {
+    "voice": "running",
+    "text": "running",
+    "discord": "unknown"
+  },
+  "brain_status": "running"
+}

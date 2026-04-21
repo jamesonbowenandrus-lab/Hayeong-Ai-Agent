@@ -34,23 +34,58 @@ import time
 import threading
 import queue
 import numpy as np
-import sounddevice as sd
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
 from context_router import check_gpu_status
 from model_router import ModelRouter
 
-from voice import (
-    transcribe, speak, listen_for_wake_word,
-    record_seconds, get_volume, show_thinking,
-    SAMPLE_RATE, INPUT_DEVICE, VOLUME_THRESHOLD,
-    split_sentences, get_pipeline, get_tts,
-    KOKORO_AVAILABLE, F5TTS_AVAILABLE,
-    HAYEONG_VOICE, get_voice_modulation,
-    REF_AUDIO, REF_TEXT,
-    OUTPUT_DEVICE
-)
+# sounddevice — only needed for voice mode; import safely so a device failure
+# doesn't crash the whole process in text/brain mode
+try:
+    import sounddevice as sd
+    SOUNDDEVICE_AVAILABLE = True
+except Exception as _sd_err:
+    sd = None
+    SOUNDDEVICE_AVAILABLE = False
+    print(f"⚠️  sounddevice unavailable ({_sd_err}) — voice input disabled")
+
+# voice — wrapped so a Kokoro/Whisper/espeak failure never crashes main.py
+# All symbols get safe stubs when unavailable so the rest of the file compiles.
+try:
+    from voice import (
+        transcribe, speak, listen_for_wake_word,
+        record_seconds, get_volume, show_thinking,
+        SAMPLE_RATE, INPUT_DEVICE, VOLUME_THRESHOLD,
+        split_sentences, get_pipeline, get_tts,
+        KOKORO_AVAILABLE, F5TTS_AVAILABLE,
+        HAYEONG_VOICE, get_voice_modulation,
+        REF_AUDIO, REF_TEXT,
+        OUTPUT_DEVICE,
+    )
+    VOICE_AVAILABLE = True
+except Exception as _voice_err:
+    VOICE_AVAILABLE     = False
+    KOKORO_AVAILABLE    = False
+    F5TTS_AVAILABLE     = False
+    SAMPLE_RATE         = 16000
+    INPUT_DEVICE        = None
+    OUTPUT_DEVICE       = None
+    VOLUME_THRESHOLD    = 0.01
+    HAYEONG_VOICE       = "af_heart"
+    REF_AUDIO           = None
+    REF_TEXT            = None
+    def transcribe(f):            return ""
+    def speak(text, emotion="neutral"): pass
+    def listen_for_wake_word():   pass
+    def record_seconds(n):        return None
+    def get_volume(chunk):        return 0.0
+    def show_thinking():          pass
+    def split_sentences(text):    return [text]
+    def get_pipeline():           return None
+    def get_tts():                return None
+    def get_voice_modulation(e):  return {"speed": 1.0, "pitch": 1.0}
+    print(f"⚠️  Voice unavailable ({_voice_err}) — text/brain mode only")
 from long_term_memory import recall_for_prompt, remember, categorize, import_from_memory_json
 from system_prompt_builder import build_system_prompt, detect_state_of_mind, get_minecraft_context
 from hayeong_architecture import HayeongArchitecture
@@ -845,10 +880,137 @@ def check_first_time_setup():
 
 
 # ─────────────────────────────────────────────
+# ERROR LOGGING
+# ─────────────────────────────────────────────
+
+import traceback as _traceback
+from pathlib import Path as _Path
+from datetime import datetime as _datetime
+
+_ERROR_LOG    = _Path("hayeong_outputs/logs/brain_errors.log")
+_RECOVERY_FILE = _Path("hayeong_outputs/recovery/last_recovery_note.json")
+_STARTUP_MSG   = _Path("hayeong_outputs/recovery/startup_message.txt")
+
+_INTERFACE_SCRIPTS = {
+    "voice": str(_Path(__file__).parent / "voice_io.py"),
+    "text":  str(_Path(__file__).parent / "text_io.py"),
+}
+
+_PROTECTED_FILES = {
+    "main.py", "watchdog.py", "text_io.py", "voice_io.py",
+    "hayeong_config.py", "hayeong_state.py", "hayeong_state.json",
+}
+
+
+def _log_brain_error(exc: Exception):
+    _ERROR_LOG.parent.mkdir(parents=True, exist_ok=True)
+    timestamp = _datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with open(_ERROR_LOG, "a", encoding="utf-8") as f:
+        f.write(f"[{timestamp}] {type(exc).__name__}: {exc}\n")
+        f.write(_traceback.format_exc())
+        f.write("---\n")
+
+
+def write_recovery_note(reason: str, suggested_action: str = "notify_only",
+                        notify_james: bool = True, message_to_james: str = None,
+                        script_to_run: str = None):
+    """Write a structured note before an intentional shutdown. Watchdog acts on it."""
+    import json as _json
+    _RECOVERY_FILE.parent.mkdir(parents=True, exist_ok=True)
+    note = {
+        "timestamp":        _datetime.now().isoformat(),
+        "reason":           reason,
+        "suggested_action": suggested_action,
+        "notify_james":     notify_james,
+        "message_to_james": message_to_james,
+        "script_to_run":    script_to_run,
+        "resolved":         False,
+    }
+    _RECOVERY_FILE.write_text(_json.dumps(note, indent=2), encoding="utf-8")
+    print(f"[brain] Recovery note written: {reason}")
+
+
+def check_startup_message():
+    """Deliver any message the watchdog queued for James."""
+    if not _STARTUP_MSG.exists():
+        return
+    try:
+        message = _STARTUP_MSG.read_text(encoding="utf-8").strip()
+        _STARTUP_MSG.unlink()
+        if message:
+            try:
+                from hayeong_state import push_output as _push_output
+                _push_output(None, message)
+                print(f"[brain] Startup message queued for James.")
+            except Exception:
+                print(f"[brain] Startup message (state unavailable): {message}")
+    except Exception as e:
+        print(f"[brain] Could not read startup message: {e}")
+
+
+def attempt_interface_restart(interface_name: str) -> bool:
+    """Restart a failed interface process. Brain can do this without asking James."""
+    import subprocess as _sp
+    script = _INTERFACE_SCRIPTS.get(interface_name)
+    if not script or not _Path(script).exists():
+        print(f"[brain] Cannot restart {interface_name} — script not found: {script}")
+        return False
+    print(f"[brain] Restarting {interface_name} interface...")
+    _sp.Popen(
+        [_sys.executable, script],
+        creationflags=_sp.CREATE_NEW_CONSOLE,
+    )
+    return True
+
+
+def request_file_modification(file_path: str, proposed_change: str, reason: str) -> bool:
+    """
+    Propose a file modification. Protected files queue an approval request to James.
+    Self-modifiable files (capabilities/, scripts/, prompts/) are applied and logged.
+    Returns True if the change was applied immediately.
+    """
+    _base = _Path(file_path).name
+    is_protected = _base in _PROTECTED_FILES
+
+    try:
+        from hayeong_state import push_output as _push_output
+    except Exception:
+        return False
+
+    if is_protected:
+        _push_output(None,
+            f"I want to modify `{file_path}` to fix an issue.\n\n"
+            f"Reason: {reason}\n\n"
+            f"Proposed change:\n```\n{proposed_change}\n```\n\n"
+            f"This is a protected file — I need your approval. Should I make this change?"
+        )
+        return False
+
+    # Self-modifiable — apply and log
+    _mod_log = _Path("hayeong_outputs/logs/self_modifications.log")
+    _mod_log.parent.mkdir(parents=True, exist_ok=True)
+    timestamp = _datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with open(_mod_log, "a", encoding="utf-8") as f:
+        f.write(f"[{timestamp}] {file_path}\nReason: {reason}\nChange:\n{proposed_change}\n---\n")
+
+    _push_output(None,
+        f"I updated `{file_path}`: {reason}. "
+        f"Change logged to hayeong_outputs/logs/self_modifications.log."
+    )
+    return True
+
+
+# ─────────────────────────────────────────────
 # MAIN LOOP
 # ─────────────────────────────────────────────
 
-def main(text_mode: bool = False):
+def main(text_mode: bool = False, brain_mode: bool = False):
+    # brain_mode: no input(), no TTS — reads input queue, writes output queue.
+    # Used by the three-window startup: brain window runs --brain, text window
+    # runs text_io.py (which talks to the brain via hayeong_state.json).
+    # text_mode is preserved for direct single-window use.
+    if brain_mode:
+        text_mode = True   # suppress TTS in brain process
     # ── STEP 1: Health check ──
     health = startup_sequence()
     if not health["healthy"]:
@@ -916,6 +1078,10 @@ def main(text_mode: bool = False):
     if len(memory) < _before:
         save_memory(memory)
         print(f"   Cleaned {_before - len(memory)} suspicion message(s) from previous session.")
+
+    # ── Deliver any watchdog message from a previous crash/restart ──
+    if brain_mode:
+        check_startup_message()
 
     energy = EnergyManager()  if ENERGY_AVAILABLE   else None
     mixer  = MindStateMixer() if MIND_MIXER_AVAILABLE else None
@@ -1052,8 +1218,22 @@ def main(text_mode: bool = False):
         except Exception as _fw_e:
             print(f"(skipped — {_fw_e})")
 
+    # Shared state — imported here so voice failures during module load
+    # don't block this import.
+    try:
+        from hayeong_state import pop_input, push_output, set_brain_status
+        _state_available = True
+        set_brain_status("running")
+    except Exception:
+        _state_available = False
+        def pop_input():       return None
+        def push_output(r, t): pass
+        def set_brain_status(s): pass
+
     print("\n✅ Hayeong is ready.")
-    if text_mode:
+    if brain_mode:
+        print("   Mode: BRAIN — reading from input queue (hayeong_state.json).")
+    elif text_mode:
         print("   Mode: TEXT CHAT — type your message and press Enter. Type 'exit' to quit.")
     else:
         print("   Say her name to wake her up.")
@@ -1087,9 +1267,19 @@ def main(text_mode: bool = False):
                 save_memory(memory)
                 print()
 
-        # ── Get input — text or voice ──
+        # ── Get input — brain queue, text, or voice ──
         _filler_gate = None   # reset each turn; voice path overwrites below
-        if text_mode:
+        if brain_mode:
+            msg = pop_input()
+            if msg:
+                user_input = msg.get("content", "").strip()
+                _msg_id    = msg.get("id", "")
+                if user_input:
+                    print(f"[brain] Queue: {user_input[:80]}")
+            else:
+                time.sleep(0.1)
+                continue
+        elif text_mode:
             try:
                 user_input = input("You: ").strip()
             except (EOFError, KeyboardInterrupt):
@@ -1374,6 +1564,30 @@ def main(text_mode: bool = False):
         if mc_context:
             system_prompt = mc_context + "\n\n" + system_prompt
 
+        # ── System health — inject any pending alerts so Hayeong can tell James ──
+        if brain_mode:
+            try:
+                from hayeong_state import pop_system_alert, get_status as _get_status
+                _alert = pop_system_alert()
+                if _alert:
+                    _iface   = _alert.get("interface", "unknown")
+                    _reason  = _alert.get("reason", "")
+                    system_prompt += (
+                        f"\n\n━━━ SYSTEM HEALTH ALERT ━━━\n"
+                        f"The {_iface} interface has gone down: {_reason}\n"
+                        f"Mention this to James naturally — he should know so he can decide "
+                        f"whether to restart it or continue without it."
+                    )
+                _sys_status = _get_status()
+                _down = [k for k, v in _sys_status.get("interfaces", {}).items() if v in ("down", "error", "failed")]
+                if _down and not _alert:
+                    system_prompt += (
+                        f"\n\n[System note: {', '.join(_down)} interface(s) are currently down. "
+                        f"If James asks about it or it's relevant, let him know.]"
+                    )
+            except Exception:
+                pass
+
         if _think_together:
             system_prompt += (
                 "\n\n━━━ THINK TOGETHER MODE ━━━\n"
@@ -1430,6 +1644,8 @@ def main(text_mode: bool = False):
 
         memory.append({"role": "AI", "content": ai_response})
         save_memory(memory)
+        if brain_mode:
+            push_output(_msg_id, ai_response)
 
         if is_worth_remembering(user_input):
             remember(user_input, category=categorize(user_input), speaker="james")
@@ -1446,6 +1662,19 @@ def main(text_mode: bool = False):
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument("--text", action="store_true", help="Run in text chat mode (no voice)")
+    parser.add_argument("--text",  action="store_true", help="Text chat mode (no voice)")
+    parser.add_argument("--brain", action="store_true", help="Brain-only mode: reads input queue, writes output queue (no terminal I/O)")
     args = parser.parse_args()
-    main(text_mode=args.text)
+
+    while True:
+        try:
+            main(text_mode=args.text, brain_mode=args.brain)
+            break
+        except KeyboardInterrupt:
+            print("\n[brain] Stopped.")
+            break
+        except Exception as _e:
+            _log_brain_error(_e)
+            print(f"[brain] Unexpected crash: {type(_e).__name__}: {_e}")
+            print(f"[brain] Logged to {_ERROR_LOG}. Restarting in 3 seconds...")
+            time.sleep(3)

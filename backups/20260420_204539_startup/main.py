@@ -13,30 +13,81 @@
 #
 # To start everything: just run main.py. That's it.
 
+# ── Singleton lock — only one instance of Hayeong may run at a time ──
+import sys as _sys
+try:
+    from filelock import FileLock, Timeout
+    _lock = FileLock("hayeong.lock", timeout=0)
+    _lock.acquire()
+except ImportError:
+    print("⚠️  filelock not installed — run: pip install filelock")
+    _sys.exit(1)
+except Timeout:
+    print("Hayeong is already running.")
+    _sys.exit(1)
+
 import requests
 import re
 import json
 import os
-import sys
 import time
 import threading
 import queue
-import subprocess
 import numpy as np
-import sounddevice as sd
+from concurrent.futures import ThreadPoolExecutor
+from typing import Optional
 
-from context_router import ContextRouter, check_gpu_status
+from context_router import check_gpu_status
 from model_router import ModelRouter
 
-from voice import (
-    transcribe, speak, listen_for_wake_word,
-    record_seconds, get_volume, show_thinking,
-    SAMPLE_RATE, INPUT_DEVICE, VOLUME_THRESHOLD,
-    split_sentences, get_tts, get_voice_modulation,
-    OUTPUT_DEVICE
-)
+# sounddevice — only needed for voice mode; import safely so a device failure
+# doesn't crash the whole process in text/brain mode
+try:
+    import sounddevice as sd
+    SOUNDDEVICE_AVAILABLE = True
+except Exception as _sd_err:
+    sd = None
+    SOUNDDEVICE_AVAILABLE = False
+    print(f"⚠️  sounddevice unavailable ({_sd_err}) — voice input disabled")
+
+# voice — wrapped so a Kokoro/Whisper/espeak failure never crashes main.py
+# All symbols get safe stubs when unavailable so the rest of the file compiles.
+try:
+    from voice import (
+        transcribe, speak, listen_for_wake_word,
+        record_seconds, get_volume, show_thinking,
+        SAMPLE_RATE, INPUT_DEVICE, VOLUME_THRESHOLD,
+        split_sentences, get_pipeline, get_tts,
+        KOKORO_AVAILABLE, F5TTS_AVAILABLE,
+        HAYEONG_VOICE, get_voice_modulation,
+        REF_AUDIO, REF_TEXT,
+        OUTPUT_DEVICE,
+    )
+    VOICE_AVAILABLE = True
+except Exception as _voice_err:
+    VOICE_AVAILABLE     = False
+    KOKORO_AVAILABLE    = False
+    F5TTS_AVAILABLE     = False
+    SAMPLE_RATE         = 16000
+    INPUT_DEVICE        = None
+    OUTPUT_DEVICE       = None
+    VOLUME_THRESHOLD    = 0.01
+    HAYEONG_VOICE       = "af_heart"
+    REF_AUDIO           = None
+    REF_TEXT            = None
+    def transcribe(f):            return ""
+    def speak(text, emotion="neutral"): pass
+    def listen_for_wake_word():   pass
+    def record_seconds(n):        return None
+    def get_volume(chunk):        return 0.0
+    def show_thinking():          pass
+    def split_sentences(text):    return [text]
+    def get_pipeline():           return None
+    def get_tts():                return None
+    def get_voice_modulation(e):  return {"speed": 1.0, "pitch": 1.0}
+    print(f"⚠️  Voice unavailable ({_voice_err}) — text/brain mode only")
 from long_term_memory import recall_for_prompt, remember, categorize, import_from_memory_json
-from system_prompt_builder import build_system_prompt, detect_state_of_mind
+from system_prompt_builder import build_system_prompt, detect_state_of_mind, get_minecraft_context
 from hayeong_architecture import HayeongArchitecture
 from backup_manager import startup_sequence
 from identity_verification import (
@@ -45,10 +96,37 @@ from identity_verification import (
 )
 
 try:
-    from situation_tracker import SituationTracker
+    from async_presence import PresenceLayer, detect_intent, build_process_fn
+    ASYNC_PRESENCE_AVAILABLE = True
+except ImportError:
+    ASYNC_PRESENCE_AVAILABLE = False
+    print("⚠️  async_presence.py not found — synchronous mode only")
+
+try:
+    from app_manager import get_app_manager
+    APP_MANAGER_AVAILABLE = True
+except ImportError:
+    APP_MANAGER_AVAILABLE = False
+    print("⚠️  app_manager.py not found — process management inactive")
+
+try:
+    from capability_loader import get_loader
+    CAPABILITY_LOADER_AVAILABLE = True
+except ImportError:
+    CAPABILITY_LOADER_AVAILABLE = False
+    print("⚠️  capability_loader.py not found — using legacy dispatch")
+
+try:
+    from situation_tracker import (
+        SituationTracker,
+        format_snapshot_for_decision,
+        format_snapshot_for_verifier,
+    )
     SITUATION_TRACKER_AVAILABLE = True
 except ImportError:
     SITUATION_TRACKER_AVAILABLE = False
+    format_snapshot_for_decision = lambda s: ""
+    format_snapshot_for_verifier = lambda s: ""
     print("⚠️  situation_tracker.py not found — shared situational awareness inactive")
 
 try:
@@ -91,15 +169,6 @@ except ImportError:
     print("⚠️  email_monitor.py not found — passive email monitoring inactive")
 
 try:
-    from comfyui_bridge import ComfyUIBridge
-    comfyui = ComfyUIBridge()
-    COMFYUI_AVAILABLE = True
-except ImportError:
-    comfyui = None
-    COMFYUI_AVAILABLE = False
-    print("⚠️  comfyui_bridge.py not found — image generation inactive")
-
-try:
     from hayeong_logger import HayeongLogger
     logger = HayeongLogger()
     LOGGER_AVAILABLE = True
@@ -109,198 +178,76 @@ except ImportError:
     print("⚠️  hayeong_logger.py not found — logging inactive")
 
 try:
-    from web_search import WebSearch
-    searcher = WebSearch()
-    SEARCH_AVAILABLE = searcher.is_available()
-    if not SEARCH_AVAILABLE:
-        print("⚠️  web_search: duckduckgo-search not installed — run: pip install duckduckgo-search")
+    from presence_governor import is_james_present, get_mode as get_presence_mode, start_monitoring as start_presence_monitoring
+    PRESENCE_GOVERNOR_AVAILABLE = True
 except ImportError:
-    searcher = None
-    SEARCH_AVAILABLE = False
-    print("⚠️  web_search.py not found — web search inactive")
+    PRESENCE_GOVERNOR_AVAILABLE = False
+    is_james_present = lambda: True   # safe fallback — assume present, never run background tasks
+    get_presence_mode = lambda: "present"
 
 try:
-    from vision_bridge import VisionBridge
-    vision = VisionBridge()
-    VISION_AVAILABLE = vision.is_available()
-    if not VISION_AVAILABLE:
-        print("⚠️  vision_bridge: Pillow not installed — run: pip install Pillow")
+    from rollback_manager import RollbackManager
+    rollback = RollbackManager()
+    ROLLBACK_AVAILABLE = True
+    print("   [Rollback] Audit log active")
 except ImportError:
-    vision = None
-    VISION_AVAILABLE = False
-    print("⚠️  vision_bridge.py not found — conversational vision inactive")
+    rollback = None
+    ROLLBACK_AVAILABLE = False
+
+try:
+    from filler_system import FillerTimer
+    FILLER_AVAILABLE = True
+except ImportError:
+    FILLER_AVAILABLE = False
+
+try:
+    from income_manager import IncomeManager
+    income_mgr = IncomeManager()
+    INCOME_AVAILABLE = True
+    print(f"   [Income] {income_mgr.summary().splitlines()[0]}")
+    _income_pending = income_mgr.get_pending_proposals()
+    if _income_pending:
+        print(f"   [Income] {len(_income_pending)} proposal(s) waiting for your review.")
+    # Auto-generate last month's summary on the 1st of each month
+    from datetime import date as _date
+    if _date.today().day == 1:
+        try:
+            import calendar as _cal
+            _today     = _date.today()
+            _prev_m    = _today.month - 1 or 12
+            _prev_y    = _today.year if _today.month > 1 else _today.year - 1
+            _sum_path  = income_mgr.generate_monthly_summary(_prev_y, _prev_m)
+            if _sum_path:
+                print(f"   [Income] Monthly summary generated: {_sum_path}")
+        except Exception as _e:
+            print(f"   [Income] Summary generation error: {_e}")
+except ImportError:
+    income_mgr = None
+    INCOME_AVAILABLE = False
+
+from hayeong_core import (
+    save_json,
+    load_memory, save_memory,
+    load_identity, load_mood,
+    build_prompt, chat_with_ai,
+    adjust_mood_by_context,
+    is_worth_remembering,
+    _strip_markdown,
+    infer_emotion_fast,
+    update_mood,
+    MOOD_FILE, OLLAMA_URL, PRIMARY_MODEL, FALLBACK_MODEL,
+)
 
 # ─────────────────────────────────────────────
 # CONFIGURATION
 # ─────────────────────────────────────────────
 
-OLLAMA_URL     = "http://localhost:11434/api/chat"
-MEMORY_FILE    = "memory.json"
 IDENTITY_FILE  = "identity.json"
-MOOD_FILE      = "mood.json"
 HAYEONG_DIR    = os.path.dirname(os.path.abspath(__file__))
-
-PRIMARY_MODEL  = "qwen2.5:14b"    # Main brain — smart, fits easily on 7900 XTX
-FALLBACK_MODEL = "llama3.2:latest" # Fast lightweight fallback if primary fails
 
 VAD_SILENCE_SECONDS = 1.2
 VAD_MAX_SECONDS     = 12
 VAD_CHUNK_SECONDS   = 0.4
-
-# ─────────────────────────────────────────────
-# PROCESS MANAGER
-# Hayeong's control over her own capabilities.
-# She starts them, she stops them, she notices if they crash.
-# ─────────────────────────────────────────────
-
-class ProcessManager:
-    """
-    Manages Hayeong's child processes (Discord, voice PTT, Minecraft, etc.)
-    Each capability is a subprocess she owns and can start/stop/restart.
-    """
-
-    # Known capabilities: name → script filename
-    CAPABILITIES = {
-        "discord":   "discord_hayeong.py",
-        "voice":     "voice_ptt.py",
-        "minecraft": "minecraft_bridge.py",
-        "observer":  "screen_observer.py",
-    }
-
-    def __init__(self):
-        self._procs: dict[str, subprocess.Popen] = {}
-        self._lock  = threading.Lock()
-
-    def start(self, name: str) -> str:
-        script = self.CAPABILITIES.get(name)
-        if not script:
-            return f"I don't have a capability called '{name}'."
-
-        script_path = os.path.join(HAYEONG_DIR, script)
-        if not os.path.exists(script_path):
-            return f"Script not found: {script}"
-
-        with self._lock:
-            proc = self._procs.get(name)
-            if proc and proc.poll() is None:
-                return f"{name} is already running."
-
-            new_proc = subprocess.Popen(
-                [sys.executable, script_path],
-                cwd=HAYEONG_DIR,
-                creationflags=subprocess.CREATE_NEW_CONSOLE if sys.platform == "win32" else 0
-            )
-            self._procs[name] = new_proc
-            return f"started {name}"
-
-    def stop(self, name: str) -> str:
-        with self._lock:
-            proc = self._procs.get(name)
-            if not proc:
-                return f"{name} isn't running."
-            if proc.poll() is None:
-                proc.terminate()
-            del self._procs[name]
-            return f"stopped {name}"
-
-    def is_running(self, name: str) -> bool:
-        with self._lock:
-            proc = self._procs.get(name)
-            return proc is not None and proc.poll() is None
-
-    def status(self) -> dict:
-        with self._lock:
-            return {
-                name: ("running" if proc.poll() is None else "stopped")
-                for name, proc in self._procs.items()
-            }
-
-    def monitor_and_restart(self, name: str):
-        """
-        Call this in a background thread to auto-restart a capability if it crashes.
-        Hayeong notices and restarts it — she doesn't go quietly offline.
-        """
-        def _watch():
-            while True:
-                time.sleep(10)
-                with self._lock:
-                    proc = self._procs.get(name)
-                    if proc is None:
-                        break  # intentionally stopped
-                    if proc.poll() is not None:
-                        print(f"\n⚠️  {name} crashed — restarting...")
-                        script = self.CAPABILITIES[name]
-                        script_path = os.path.join(HAYEONG_DIR, script)
-                        new_proc = subprocess.Popen(
-                            [sys.executable, script_path],
-                            cwd=HAYEONG_DIR,
-                            creationflags=subprocess.CREATE_NEW_CONSOLE if sys.platform == "win32" else 0
-                        )
-                        self._procs[name] = new_proc
-                        print(f"✅ {name} restarted.")
-
-        t = threading.Thread(target=_watch, daemon=True)
-        t.start()
-
-    def stop_all(self):
-        with self._lock:
-            for name, proc in list(self._procs.items()):
-                if proc.poll() is None:
-                    proc.terminate()
-            self._procs.clear()
-
-
-# ─────────────────────────────────────────────
-# COMMAND INTENT DETECTION
-# Recognizes requests to start/stop capabilities
-# from natural language. Not a full NLU — just
-# pattern matching on the things she'd actually hear.
-# ─────────────────────────────────────────────
-
-_START_PATTERNS = {
-    "discord":   ["open discord", "start discord", "connect discord", "go on discord",
-                  "get on discord", "launch discord"],
-    "voice":     ["open your mic", "open mic", "start voice", "voice mode", "i want to talk",
-                  "let's talk out loud", "turn on your mic", "enable voice",
-                  "can you open your mic", "start listening"],
-    "minecraft": ["load minecraft", "start minecraft", "open minecraft",
-                  "let's play minecraft", "join minecraft", "connect to minecraft",
-                  "can you load minecraft"],
-    "observer":  ["start observer", "start screen observer", "start watching",
-                  "enable observer", "turn on observer"],
-}
-
-_STOP_PATTERNS = {
-    "discord":   ["close discord", "stop discord", "disconnect discord", "leave discord"],
-    "voice":     ["close your mic", "mute", "stop voice", "stop listening",
-                  "turn off your mic", "disable voice", "voice off"],
-    "minecraft": ["close minecraft", "stop minecraft", "leave minecraft", "disconnect minecraft"],
-    "observer":  ["stop observer", "stop watching", "disable observer", "turn off observer"],
-}
-
-_APPROVE_PATTERN = r'(?i)^approve\s+(\S+\.py|\S+)'
-_DENY_PATTERN    = r'(?i)^deny\s+(\S+\.py|\S+)'
-
-_SELFMOD_PATTERNS = [
-    "show proposals", "what did you change", "what have you changed",
-    "any proposals", "pending proposals", "weekly summary",
-    "what did you modify", "show me your changes"
-]
-
-def detect_capability_command(text: str) -> tuple[str, str] | tuple[None, None]:
-    """
-    Returns (action, capability_name) or (None, None).
-    action is "start" or "stop".
-    """
-    t = text.lower().strip()
-    for cap, patterns in _START_PATTERNS.items():
-        if any(p in t for p in patterns):
-            return "start", cap
-    for cap, patterns in _STOP_PATTERNS.items():
-        if any(p in t for p in patterns):
-            return "stop", cap
-    return None, None
-
 
 # ─────────────────────────────────────────────
 # WRAP-UP FAST PATH
@@ -310,7 +257,7 @@ def detect_capability_command(text: str) -> tuple[str, str] | tuple[None, None]:
 # introduces failure risk (as seen: all three layers misfired on
 # "Thank you very much!").
 #
-# Same design principle as detect_capability_command():
+# Same principle as capability fast-paths:
 # when the signal is clear enough, don't ask an LLM.
 # ─────────────────────────────────────────────
 
@@ -373,25 +320,6 @@ def check_ollama_gpu():
     )
 
 # ─────────────────────────────────────────────
-# LOAD / SAVE
-# ─────────────────────────────────────────────
-
-def load_json(path, default):
-    if os.path.exists(path):
-        with open(path, "r") as f:
-            return json.load(f)
-    return default
-
-def save_json(path, data):
-    with open(path, "w") as f:
-        json.dump(data, f, indent=2)
-
-def load_memory():   return load_json(MEMORY_FILE, [])
-def save_memory(m):  save_json(MEMORY_FILE, m)
-def load_identity(): return load_json(IDENTITY_FILE, {})
-def load_mood():     return load_json(MOOD_FILE, {"focus": 0, "playfulness": 0, "motivation": 0})
-
-# ─────────────────────────────────────────────
 # VAD RECORDING
 # ─────────────────────────────────────────────
 
@@ -432,31 +360,6 @@ def record_until_silence() -> str:
 # STREAMING LLM RESPONSE
 # ─────────────────────────────────────────────
 
-def _strip_markdown(text: str) -> str:
-    """
-    Remove markdown formatting from a sentence before printing or speaking.
-    Catches the common cases 14b produces: headers, bold, italic, bullet lists.
-    This is a safety net — the system prompt tells her not to use markdown,
-    but she sometimes slips on information-heavy turns (search results especially).
-    """
-    import re
-    # Remove ### / ## / # headers (replace with just the header text)
-    text = re.sub(r"^#{1,6}\s*", "", text, flags=re.MULTILINE)
-    # Remove **bold** and __bold__
-    text = re.sub(r"\*\*(.+?)\*\*", r"\1", text)
-    text = re.sub(r"__(.+?)__",     r"\1", text)
-    # Remove *italic* and _italic_
-    text = re.sub(r"\*(.+?)\*",     r"\1", text)
-    text = re.sub(r"_(.+?)_",       r"\1", text)
-    # Remove leading bullet/list markers (-, *, •, numbered lists)
-    text = re.sub(r"^\s*[-*•]\s+",  "",    text, flags=re.MULTILINE)
-    text = re.sub(r"^\s*\d+\.\s+",  "",    text, flags=re.MULTILINE)
-    # Collapse multiple blank lines left behind by removed headers/bullets
-    text = re.sub(r"\n{3,}",        "\n\n", text)
-    return text.strip()
-
-
-
 # ─────────────────────────────────────────────
 # JSON DECISION ENGINE
 # A fast non-streaming call that asks Hayeong what she needs to do
@@ -467,37 +370,74 @@ def _strip_markdown(text: str) -> str:
 # the full natural response with zero parsing complexity.
 # ─────────────────────────────────────────────
 
-DECISION_PROMPT = """You are Hayeong's decision engine.
+# ─────────────────────────────────────────────
+# DECISION PROMPT — built dynamically from capability_registry.json
+# When new capabilities are added to the registry, this updates
+# automatically. main.py never needs to change for new capabilities.
+# ─────────────────────────────────────────────
+
+def build_decision_prompt() -> str:
+    """
+    Build the decision engine prompt from capability_registry.json.
+    The "Available actions" section is generated from registry entries
+    that have an "actions" field, using "action_hints" or "decision_hint"
+    for per-action descriptions.
+    """
+    registry_path = os.path.join(HAYEONG_DIR, "capability_registry.json")
+    action_lines  = []
+
+    try:
+        with open(registry_path, "r", encoding="utf-8") as f:
+            registry = json.load(f)
+
+        for section in ("built_in_capabilities", "self_generated_capabilities"):
+            for cap in registry.get(section, {}).get("capabilities", []):
+                if cap.get("status") != "active":
+                    continue
+                actions = cap.get("actions", [])
+                if not actions:
+                    continue
+
+                # Per-action hints take priority over a single decision_hint
+                action_hints = cap.get("action_hints", {})
+                fallback     = cap.get("decision_hint", cap.get("description", ""))
+
+                for action in actions:
+                    hint = action_hints.get(action, fallback)
+                    action_lines.append(f"  {action:<14}— {hint}")
+
+    except Exception as e:
+        print(f"   [DecisionPrompt] failed to load registry: {e}")
+
+    action_lines.append(f"  {'think_together':<14}— Request is ambiguous or James is thinking aloud — stay in conversation to align before acting")
+    action_lines.append(f"  {'none':<14}— Normal conversation, no capability needed")
+    actions_section = "\n".join(action_lines)
+
+    return f"""You are Hayeong's decision engine.
 
 Based on the conversation and the latest message from James, decide what action (if any) is needed before you respond.
 
 Available actions:
-  web_search    — James wants something looked up online
-                  Include: query (what to search), delivery ("conversational" or "document")
-                  Use "document" when James asks for a report, comparison, or wants it emailed/saved
-  vision        — James wants you to look at his screen or an image
-                  Include: mode ("screen", "deep", or "image")
-  image_gen     — James wants you to generate or draw an image
-  email_check   — James wants to check his inbox
-  email_send    — James wants to send a notification or summary email
-  task_show     — James wants to see the task list
-  task_add      — James wants to add a task
-                  Include: task_text (what to add)
-  none          — Normal conversation, no capability needed
+{actions_section}
 
 Return ONLY valid JSON. No explanation, no markdown, no extra text.
 
 Examples:
-  {"action": "none"}
-  {"action": "web_search", "query": "zapmander vs whale pup Once Human", "delivery": "document"}
-  {"action": "web_search", "query": "RTX 5090 price", "delivery": "conversational"}
-  {"action": "email_check"}
-  {"action": "task_add", "task_text": "fix the voice bot"}
-  {"action": "vision", "mode": "screen"}
+  {{"action": "none"}}
+  {{"action": "web_search", "query": "zapmander vs whale pup Once Human", "delivery": "document"}}
+  {{"action": "web_search", "query": "RTX 5090 price", "delivery": "conversational"}}
+  {{"action": "email_check"}}
+  {{"action": "task_add", "task_text": "fix the voice bot"}}
+  {{"action": "vision", "mode": "screen"}}
+  {{"action": "image_gen", "prompt": "Hayeong in the orange frog jacket"}}
+  {{"action": "app_start", "app_id": "comfyui"}}
 
 CRITICAL RULES — read carefully:
-  - If James just completed a task and is wrapping up ("thanks", "that's good", "sounds good",
-    "I'll check it out", "no that's all") → ALWAYS return none. Do not repeat the task.
+  - WRAP-UP DETECTION: If James says "thanks", "that's all", "sounds good", "got it",
+    "perfect", "nice work", "great", "I'll check it out", "no that's all", or any positive
+    acknowledgment after a task was just completed → ALWAYS return none. The task is done.
+    Check the last 2 turns — if a capability just ran and James is reacting positively → none.
+    Never re-run a just-completed action.
   - If James is talking ABOUT a capability (mentioning search, email, tasks in conversation)
     but not actually requesting it → return none. Example: "I want to test your search function"
     is NOT a search request — it is a conversational statement.
@@ -508,6 +448,21 @@ CRITICAL RULES — read carefully:
   - Only pick an action if you are CERTAIN it is being freshly requested right now
   - When in doubt → none. It is always better to respond conversationally than to fire a tool incorrectly.
 """
+
+DECISION_PROMPT = build_decision_prompt()
+
+
+def _quick_intent(text: str) -> str:
+    """Fast keyword intent for filler category — no LLM call."""
+    t = text.lower()
+    if any(w in t for w in ["search", "look up", "find", "what is", "news"]):
+        return "search"
+    if any(w in t for w in ["look at", "screen", "see", "image", "generate"]):
+        return "vision"
+    if any(w in t for w in ["task", "remind", "add", "show tasks"]):
+        return "task"
+    return "generic"
+
 
 def decide_action(user_input: str, memory: list, model: str = None,
                   snapshot: dict = None) -> dict:
@@ -541,21 +496,8 @@ def decide_action(user_input: str, memory: list, model: str = None,
             + system_content
         )
     # Inject situation snapshot — shared awareness of what phase/topic we're in
-    if snapshot:
-        from situation_tracker import SituationTracker
-        # Build compact decision-friendly string from snapshot
-        s = snapshot
-        parts = [f"[SITUATION: phase={s.get('phase','?')}",
-                 f"topic={s.get('current_topic','?')!r}"]
-        if s.get("task_switching"):
-            parts.append("SWITCHING=true")
-        if s.get("just_completed"):
-            parts.append(f"just_completed={s['just_completed']!r}")
-        constraints = s.get("active_constraints", [])
-        if constraints:
-            parts.append(f"constraints={constraints}")
-        parts.append("]")
-        snap_line = " ".join(parts)
+    snap_line = format_snapshot_for_decision(snapshot)
+    if snap_line:
         system_content = snap_line + "\n\n" + system_content
 
     messages = [{"role": "system", "content": system_content}]
@@ -653,8 +595,9 @@ def context_verifier(user_input: str, action: str, decision: dict,
         history_lines.append(f"{role}: {m.get('content', '')[:250]}")
     history_block = "\n".join(history_lines)
 
+    snap_line = format_snapshot_for_verifier(snapshot)
     check_input = (
-        f"{('Situation: ' + json.dumps({k: snapshot[k] for k in ['phase','current_topic','active_constraints','task_switching'] if k in snapshot}) + chr(10)) if snapshot else ''}"
+        f"{snap_line + chr(10) if snap_line else ''}"
         f"Recent conversation:\n{history_block}\n\n"
         f"Latest message from James: {user_input}\n\n"
         f"Planned action: {action}\n"
@@ -693,7 +636,7 @@ def context_verifier(user_input: str, action: str, decision: dict,
         return {"verified": True, "constraints": [], "reasoning": "verifier error — defaulting open"}
 
 
-def stream_response_and_speak(system_prompt: str, memory: list, emotion: str = "neutral", text_mode: bool = False, model: str = None) -> str:
+def stream_response_and_speak(system_prompt: str, memory: list, emotion: str = "neutral", text_mode: bool = False, model: str = None, cancel_filler_fn=None) -> str:
     """
     Streams the LLM response and speaks it via TTS.
     Returns the full response text.
@@ -706,10 +649,26 @@ def stream_response_and_speak(system_prompt: str, memory: list, emotion: str = "
         role = "user" if entry["role"] == "user" else "assistant"
         messages.append({"role": role, "content": entry["content"]})
 
-    sentence_queue = queue.Queue()
-    full_response  = []
-    token_buffer   = []
-    tts_done       = threading.Event()
+    # ── Three-thread pipeline ──
+    # Thread 1 (main): token consumer + sentence detector  → sentence_queue
+    # Thread 2:        TTS synthesizer                     → audio_queue
+    # Thread 3:        audio playback                      (blocks on sd.wait, not TTS)
+    #
+    # No thread blocks another — synthesizer doesn't wait for playback to finish,
+    # and playback doesn't wait for the next sentence to be synthesized.
+    # First word reaches the speaker as soon as Sentence 1 is synthesized,
+    # regardless of how long the full response takes.
+
+    sentence_queue  = queue.Queue()
+    audio_queue     = queue.Queue(maxsize=2)   # cap at 2 pre-synthesized chunks
+    full_response   = []
+    token_buffer    = []
+    tts_done        = threading.Event()
+    _first_token    = [True]    # cancelled once, then ignored
+    # Emotion detected from response content — updated on first sentence,
+    # read by synthesizer per sentence. Mutable list so closure can write to it.
+    _emotion_live   = [emotion]
+    _first_sentence = [True]    # flag: fast inference runs once on sentence 1 only
 
     def _is_sentence_end(text: str) -> bool:
         """
@@ -726,79 +685,97 @@ def stream_response_and_speak(system_prompt: str, memory: list, emotion: str = "
         last = text[-1]
         if last not in '.!?':
             return False
-        # Don't split if the character before the punctuation is a digit
-        # Catches: "2.", "3.0", "v2.", "12."
         if last == '.' and text[-2].isdigit():
             return False
-        # Don't split on very short "words" before a period — likely abbreviations
-        # e.g. "e.g.", "approx.", single capital letters ("A.")
         words = text.split()
         if words:
-            last_word = words[-1]  # includes the punctuation
+            last_word = words[-1]
             bare = last_word.rstrip('.!?')
             if len(bare) <= 2:
                 return False
         return True
 
-    def tts_worker():
-        # Skip TTS entirely in text mode
-        if text_mode:
-            while True:
-                sentence = sentence_queue.get()
-                if sentence is None:
-                    break
-            tts_done.set()
-            return
+    def _synthesize(sentence: str, speed: float, sample_rate: int) -> np.ndarray | None:
+        """Generate audio for one sentence. Returns float32 stereo array or None."""
+        chunks = []
+        if KOKORO_AVAILABLE:
+            pipeline = get_pipeline()
+            if pipeline is not None:
+                try:
+                    for _, _, audio in pipeline(sentence, voice=HAYEONG_VOICE, speed=speed):
+                        chunks.append(audio)
+                except Exception as e:
+                    print(f"⚠️  Kokoro error: {e}")
+        if not chunks and F5TTS_AVAILABLE:
+            tts = get_tts()
+            if tts is not None:
+                try:
+                    wav, sr, _ = tts.infer(
+                        ref_file=REF_AUDIO, ref_text=REF_TEXT,
+                        gen_text=sentence, nfe_step=64, speed=speed,
+                    )
+                    chunks.append(wav)
+                    sample_rate = sr
+                except Exception as e:
+                    print(f"⚠️  F5-TTS error: {e}")
+        if not chunks:
+            return None
+        audio = np.concatenate(chunks)
+        if audio.dtype != np.float32:
+            audio = audio.astype(np.float32)
+        peak = np.abs(audio).max()
+        if peak > 1.0:
+            audio = audio / peak
+        if audio.ndim == 1:
+            audio = np.stack([audio, audio], axis=1)
+        silence = np.zeros((int(0.6 * sample_rate), 2), dtype=np.float32)
+        return np.vstack([audio, silence])
 
-        modulation  = get_voice_modulation(emotion)
-        speed       = modulation["speed"]
-        tts         = get_tts()
-        sample_rate = 24000
+    def tts_synthesizer():
+        """Thread 2: pulls sentences, synthesizes audio, pushes to audio_queue."""
+        if text_mode:
+            while sentence_queue.get() is not None:
+                pass
+            audio_queue.put(None)
+            return
 
         while True:
             try:
                 sentence = sentence_queue.get(timeout=15)
             except queue.Empty:
                 break
-
             if sentence is None:
+                audio_queue.put(None)
                 break
             if not sentence.strip():
                 continue
+            # Use the live emotion (may have been updated by first-sentence inference)
+            speed = get_voice_modulation(_emotion_live[0])["speed"]
+            audio = _synthesize(sentence, speed, 24000)
+            if audio is not None:
+                audio_queue.put(audio)   # blocks if queue full — back-pressure
 
+    def playback_worker():
+        """Thread 3: pulls synthesized audio chunks and plays them sequentially."""
+        while True:
             try:
-                wav, sr, _ = tts.infer(
-                    ref_file = "voice_prep/samples/source_5secs.wav",
-                    ref_text = "Before the video starts, I want to make a quick announcement.",
-                    gen_text = sentence,
-                    nfe_step = 64,
-                    speed    = speed,
-                )
-                sample_rate = sr
-
-                audio = wav
-                if audio.dtype != np.float32:
-                    audio = audio.astype(np.float32)
-                peak = np.abs(audio).max()
-                if peak > 1.0:
-                    audio = audio / peak
-                if audio.ndim == 1:
-                    audio = np.stack([audio, audio], axis=1)
-
-                silence = np.zeros((int(0.6 * sample_rate), 2), dtype=np.float32)
-                audio   = np.vstack([audio, silence])
-
-                sd.play(audio, samplerate=sample_rate, device=OUTPUT_DEVICE)
+                audio = audio_queue.get(timeout=20)
+            except queue.Empty:
+                break
+            if audio is None:
+                break
+            try:
+                sd.play(audio, samplerate=24000, device=OUTPUT_DEVICE)
                 sd.wait()
                 time.sleep(0.1)
-
             except Exception as e:
-                print(f"⚠️  TTS error: {e}")
-
+                print(f"⚠️  Playback error: {e}")
         tts_done.set()
 
-    tts_thread = threading.Thread(target=tts_worker, daemon=True)
-    tts_thread.start()
+    synth_thread    = threading.Thread(target=tts_synthesizer, daemon=True)
+    playback_thread = threading.Thread(target=playback_worker,  daemon=True)
+    synth_thread.start()
+    playback_thread.start()
 
     def _stream(model: str):
         try:
@@ -835,6 +812,11 @@ def stream_response_and_speak(system_prompt: str, memory: list, emotion: str = "
         if not token:
             continue
 
+        # Cancel filler gate on first token — LLM has started responding
+        if _first_token[0]:
+            if cancel_filler_fn is not None:
+                cancel_filler_fn()
+            _first_token[0] = False
 
         full_response.append(token)
         token_buffer.append(token)
@@ -843,6 +825,13 @@ def stream_response_and_speak(system_prompt: str, memory: list, emotion: str = "
         if _is_sentence_end(buffer_text):
             if len(buffer_text.split()) >= 6:
                 clean = _strip_markdown(buffer_text)
+                # Fast emotion inference on first sentence — updates voice modulation
+                # before the synthesizer processes it, no LLM call needed.
+                if _first_sentence[0]:
+                    inferred = infer_emotion_fast(clean)
+                    if inferred != "neutral":
+                        _emotion_live[0] = inferred
+                    _first_sentence[0] = False
                 sentence_queue.put(clean)
                 if text_mode:
                     # Already printed the prefix — just stream the sentence inline
@@ -872,92 +861,6 @@ def stream_response_and_speak(system_prompt: str, memory: list, emotion: str = "
     return _strip_markdown("".join(full_response).strip())
 
 # ─────────────────────────────────────────────
-# MOOD / BEHAVIORAL STATE
-# ─────────────────────────────────────────────
-
-def update_mood(command, mood):
-    try:
-        change = 1 if command[0] == "+" else -1
-        key    = command[1:]
-        if key in mood:
-            mood[key] = max(-5, min(5, mood[key] + change))
-            print(f"✅ Mood: {key} = {mood[key]}")
-    except Exception:
-        print("⚠️  Use +key or -key (e.g. +playfulness)")
-
-def adjust_mood_by_context(text, mood):
-    t = text.lower()
-    if any(w in t for w in ["minecraft", "ender dragon", "hytale", "cod", "risk of rain", "barony"]):
-        mood["focus"]       = min(5, mood["focus"] + 2)
-        mood["motivation"]  = min(5, mood["motivation"] + 2)
-        mood["playfulness"] = max(-5, mood["playfulness"] - 1)
-    elif any(w in t for w in ["joke", "fun", "lol", "haha", "play"]):
-        mood["playfulness"] = min(5, mood["playfulness"] + 2)
-        mood["focus"]       = max(-5, mood["focus"] - 1)
-    elif any(w in t for w in ["sad", "frustrated", "fail", "lost", "died"]):
-        mood["focus"]       = max(-5, mood["focus"] - 1)
-        mood["motivation"]  = max(-5, mood["motivation"] - 1)
-        mood["playfulness"] = max(-5, mood["playfulness"] - 1)
-
-# ─────────────────────────────────────────────
-# DISCORD COMPATIBILITY (used by discord_hayeong.py)
-# ─────────────────────────────────────────────
-
-def build_prompt(identity, memory, user_input, dynamic_traits, mood_state):
-    long_term_context = recall_for_prompt(user_input, n_results=4)
-    state_of_mind     = detect_state_of_mind("casual", "home", mood_state)
-    system_prompt     = build_system_prompt(
-        who="james", situation="casual", environment="home", state_of_mind=state_of_mind
-    )
-    if long_term_context:
-        system_prompt = long_term_context + "\n\n" + system_prompt
-    messages = [{"role": "system", "content": system_prompt}]
-    for entry in memory[-10:]:
-        role = "user" if entry["role"] == "user" else "assistant"
-        messages.append({"role": role, "content": entry["content"]})
-    messages.append({"role": "user", "content": user_input})
-    return messages
-
-def chat_with_ai(messages):
-    def _call(model):
-        response = requests.post(
-            OLLAMA_URL,
-            json={"model": model, "messages": messages, "stream": False},
-            timeout=60
-        )
-        return response.json()["message"]["content"].strip()
-    try:
-        return _call(PRIMARY_MODEL)
-    except Exception:
-        return _call(FALLBACK_MODEL)
-
-def mood_to_behavioral_state(mood, arch):
-    p = mood.get("playfulness", 0)
-    f = mood.get("focus", 0)
-    m = mood.get("motivation", 0)
-
-    if p >= 3:   emotion, intensity = "amused",    6
-    elif f >= 3: emotion, intensity = "focused",   7
-    elif m <= -2:emotion, intensity = "withdrawn", 4
-    else:        emotion, intensity = "neutral",   3
-
-    arch.behavioral.update_interior(primary_emotion=emotion, intensity=intensity)
-
-# ─────────────────────────────────────────────
-# MEMORY FILTER
-# ─────────────────────────────────────────────
-
-def is_worth_remembering(text):
-    if not text:
-        return False
-    if len(text.split()) <= 4:
-        return False
-    filler = ["lol", "lmao", "haha", "ok", "okay", "yeah", "yep", "nope", "sure", "hmm"]
-    if text.lower().strip() in filler:
-        return False
-    return True
-
-# ─────────────────────────────────────────────
 # FIRST-TIME SETUP
 # ─────────────────────────────────────────────
 
@@ -975,26 +878,18 @@ def check_first_time_setup():
         else:
             print("⚠️  Skipped.\n")
 
-# ─────────────────────────────────────────────
-# CAPABILITY RESPONSE
-# What Hayeong says when she starts/stops something.
-# Kept short and in-character — she does it, she doesn't announce it.
-# ─────────────────────────────────────────────
-
-CAPABILITY_RESPONSES = {
-    ("start", "discord"):   "On it.",
-    ("stop",  "discord"):   "Closing Discord.",
-    ("start", "voice"):     "Mic's open.",
-    ("stop",  "voice"):     "Mic off.",
-    ("start", "minecraft"): "Loading Minecraft.",
-    ("stop",  "minecraft"): "Disconnecting from Minecraft.",
-}
 
 # ─────────────────────────────────────────────
 # MAIN LOOP
 # ─────────────────────────────────────────────
 
-def main(text_mode: bool = False):
+def main(text_mode: bool = False, brain_mode: bool = False):
+    # brain_mode: no input(), no TTS — reads input queue, writes output queue.
+    # Used by the three-window startup: brain window runs --brain, text window
+    # runs text_io.py (which talks to the brain via hayeong_state.json).
+    # text_mode is preserved for direct single-window use.
+    if brain_mode:
+        text_mode = True   # suppress TTS in brain process
     # ── STEP 1: Health check ──
     health = startup_sequence()
     if not health["healthy"]:
@@ -1030,14 +925,18 @@ def main(text_mode: bool = False):
     check_first_time_setup()
 
     # ── STEP 4: Load everything ──
-    detector = ContextRouter()
     router   = ModelRouter()
     memory     = load_memory()
     mood_state = load_mood()
     arch       = HayeongArchitecture()
     session    = SessionTrust(environment="home")
-    procs      = ProcessManager()
+    app_mgr    = get_app_manager()
+    app_mgr.start_monitor()
     tracker    = SituationTracker() if SITUATION_TRACKER_AVAILABLE else None
+
+    # Persistent executor for parallel memory lookups.
+    # max_workers=1 — ChromaDB is not thread-safe for concurrent reads.
+    _mem_executor = ThreadPoolExecutor(max_workers=1)
 
     # Strip suspicion/verification messages from previous sessions.
     # These carry over into context and make Hayeong behave like she's
@@ -1061,9 +960,23 @@ def main(text_mode: bool = False):
 
     energy = EnergyManager()  if ENERGY_AVAILABLE   else None
     mixer  = MindStateMixer() if MIND_MIXER_AVAILABLE else None
+
+    # ── Presence governor — detect whether James is at the machine ──
+    if PRESENCE_GOVERNOR_AVAILABLE:
+        print(f"   [PresenceGovernor] Mode: {get_presence_mode()}")
+        def _on_presence_change(new_mode: str):
+            print(f"   [PresenceGovernor] → {new_mode.upper()}")
+        start_presence_monitoring(on_change=_on_presence_change, interval=30)
     smm    = SelfModManager() if SELF_MOD_AVAILABLE   else None
     tasks  = TaskManager()    if TASKS_AVAILABLE       else None
     email  = hayeong_email    if EMAIL_AVAILABLE        else None
+
+    # ── Capability loader — dynamic hot-reloadable dispatch ──
+    _loader = None
+    if CAPABILITY_LOADER_AVAILABLE:
+        _loader = get_loader()
+        _loader.start()
+        print(f"   [CapabilityLoader] {len(_loader.list_loaded())} actions loaded: {_loader.list_loaded()}")
 
     # ── Email monitor — passive IMAP IDLE inbox watching ──
     email_monitor = None
@@ -1092,36 +1005,64 @@ def main(text_mode: bool = False):
         if not text_mode:
             speak(text, emotion=emotion)
 
-    # ── STEP 5: Auto-launch Discord ──
-    # Start Python bridge server first (JS bot connects to it)
-    print("\n📡 Starting Discord bridge...")
-    try:
-        from discord_bridge import run_bridge_server
-        import threading as _threading
-        _bridge_thread = _threading.Thread(target=run_bridge_server, daemon=True)
-        _bridge_thread.start()
-        print("   [DiscordBridge] Python bridge server started on port 9877")
-    except ImportError:
-        print("   ⚠️  discord_bridge.py not found — bridge inactive")
+    # Discord deferred — scrapped for now. Revisit when voice pipeline is stable.
 
-    # Launch the JS Discord bot (replaces discord_hayeong.py)
-    import subprocess as _subprocess
-    _js_bot_path = os.path.join(HAYEONG_DIR, "discord_hayeong.js")
-    if os.path.exists(_js_bot_path):
-        try:
-            _js_proc = _subprocess.Popen(
-                ["node", _js_bot_path],
-                cwd=HAYEONG_DIR,
-                creationflags=_subprocess.CREATE_NEW_CONSOLE if sys.platform == "win32" else 0
-            )
-            print(f"   [Discord JS] started (pid {_js_proc.pid})")
-        except FileNotFoundError:
-            print("   ⚠️  node not found — install Node.js to run discord_hayeong.js")
-        except Exception as e:
-            print(f"   ⚠️  Failed to start Discord JS bot: {e}")
-    else:
-        print("   ⚠️  discord_hayeong.js not found — Discord voice inactive")
 
+    # ── STEP 5b: Auto-launch Voice Server ──
+    # The voice server is the primary voice pipeline.
+    # It starts automatically on every launch — same as Discord bridge.
+    # Local client (voice_client_local.py) connects to it at the desktop.
+    # Phone app (Phase 10) connects to it over Tailscale when away.
+    print("\n🎙️  Starting voice server...")
+    _, _vs_msg = app_mgr.start("voice_server")
+    print(f"   [VoiceServer] {_vs_msg}")
+
+    # ── STEP 5c: Start async presence layer ──
+    # This is what makes her feel present even while working.
+    # The presence layer always accepts input instantly and
+    # dispatches slow work to a background thread.
+    _presence: Optional["PresenceLayer"] = None
+
+    if ASYNC_PRESENCE_AVAILABLE:
+        def _on_ack(text: str):
+            """Immediate acknowledgment — fires before any processing."""
+            print(f"\nHayeong: {text}")
+            _speak(text, emotion="neutral")
+
+        def _on_result(text: str, emotion: str):
+            """Full response — fires when background task completes."""
+            clean = _strip_markdown(text)
+            print(f"\nHayeong: {clean}")
+            _speak(clean, emotion=emotion)
+            print()
+
+        _process_fn = build_process_fn(
+            chat_fn        = chat_with_ai,
+            build_prompt_fn= build_prompt,
+            load_memory_fn = load_memory,
+            save_memory_fn = save_memory,
+            load_mood_fn   = load_mood,
+            save_json_fn   = save_json,
+            load_identity_fn = load_identity,
+            adjust_mood_fn = adjust_mood_by_context,
+            mood_file      = MOOD_FILE,
+            dynamic_traits = {
+                "personality_intensity": 3,
+                "emotional_warmth":      8,
+                "tactical_intensity":    6,
+                "motivation_style":      "gently pushy",
+                "teasing_level":         "high",
+            },
+            memory_lock    = threading.Lock(),
+        )
+
+        _presence = PresenceLayer(
+            on_ack     = _on_ack,
+            on_result  = _on_result,
+            process_fn = _process_fn,
+        )
+        _presence.start()
+        print("   [AsyncPresence] Presence layer active — she stays responsive mid-task")
 
     # ── Preload primary model — eliminates cold-start latency ──
     try:
@@ -1140,15 +1081,41 @@ def main(text_mode: bool = False):
     except Exception:
         print("(warmup failed — first response may be slow)")
 
+    # ── Pre-warm filler cache ──
+    if FILLER_AVAILABLE and not text_mode:
+        try:
+            print("   Warming filler cache...", end=" ", flush=True)
+            from filler_system import _get_cached_audio, FILLERS
+            _fw_speed = get_voice_modulation("neutral")["speed"]
+            for _fw_variants in FILLERS.values():
+                _get_cached_audio(_fw_variants[0], _fw_speed)
+            print("ready.")
+        except Exception as _fw_e:
+            print(f"(skipped — {_fw_e})")
+
+    # Shared state — imported here so voice failures during module load
+    # don't block this import.
+    try:
+        from hayeong_state import pop_input, push_output, set_brain_status
+        _state_available = True
+        set_brain_status("running")
+    except Exception:
+        _state_available = False
+        def pop_input():       return None
+        def push_output(r, t): pass
+        def set_brain_status(s): pass
+
     print("\n✅ Hayeong is ready.")
-    if text_mode:
+    if brain_mode:
+        print("   Mode: BRAIN — reading from input queue (hayeong_state.json).")
+    elif text_mode:
         print("   Mode: TEXT CHAT — type your message and press Enter. Type 'exit' to quit.")
     else:
         print("   Say her name to wake her up.")
     print(f"   Session trust: {session.get_trust_label()}")
     if energy:
         print(f"   Energy level: {energy.level}/5 ({energy.get_full_state()['label']})")
-    print(f"   Running: {list(procs._procs.keys()) or 'discord'}")
+    print(f"   Running: {app_mgr.list_running() or ['none']}")
     if tasks:
         active = tasks._log.get("active", [])
         if active:
@@ -1175,21 +1142,47 @@ def main(text_mode: bool = False):
                 save_memory(memory)
                 print()
 
-        # ── Get input — text or voice ──
-        if text_mode:
+        # ── Get input — brain queue, text, or voice ──
+        _filler_gate = None   # reset each turn; voice path overwrites below
+        if brain_mode:
+            msg = pop_input()
+            if msg:
+                user_input = msg.get("content", "").strip()
+                _msg_id    = msg.get("id", "")
+                if user_input:
+                    print(f"[brain] Queue: {user_input[:80]}")
+            else:
+                time.sleep(0.1)
+                continue
+        elif text_mode:
             try:
                 user_input = input("You: ").strip()
             except (EOFError, KeyboardInterrupt):
                 print("\nShutting down...")
                 save_memory(memory)
                 save_json(MOOD_FILE, mood_state)
-                procs.stop_all()
+                if _presence is not None:
+                    _presence.stop()
+                app_mgr.stop_all()
+                try:
+                    from capabilities.minecraft_cap import _stop_all as _mc_stop
+                    _mc_stop()
+                except Exception:
+                    pass
                 if energy:
                     energy.save_on_shutdown()
                 if LOGGER_AVAILABLE:
                     logger.end_session()
                 break
             if not user_input:
+                continue
+
+            # ── Route through async presence if available ──
+            if _presence is not None:
+                intent = detect_intent(user_input)
+                _presence.submit(user_input, intent=intent)
+                # Don't fall through to the synchronous pipeline —
+                # presence layer handles the full response.
                 continue
         else:
             listen_for_wake_word()
@@ -1198,6 +1191,28 @@ def main(text_mode: bool = False):
             if not user_input:
                 continue
             print(f"\nYou: {user_input}")
+
+            # ── Start filler gate ──
+            # Fires contextual audio if LLM doesn't respond within threshold.
+            # Cancelled the moment the first token arrives.
+            _filler_gate = None
+            if FILLER_AVAILABLE:
+                _filler_gate = FillerTimer(
+                    intent=_quick_intent(user_input),
+                    base_speed=get_voice_modulation("neutral")["speed"],
+                    output_device=OUTPUT_DEVICE,
+                )
+                _filler_gate.start()
+
+            # ── Route through async presence if available ──
+            # Immediate ack fires, processing runs in background,
+            # the loop returns to listening immediately.
+            if _presence is not None:
+                intent = detect_intent(user_input)
+                _presence.submit(user_input, intent=intent)
+                # Don't fall through to the synchronous pipeline below —
+                # presence layer handles the full response.
+                continue
 
         # ── Exit commands ──
         _exit_phrases = [
@@ -1210,7 +1225,14 @@ def main(text_mode: bool = False):
             _speak("Talk to you later.", emotion="neutral")
             save_memory(memory)
             save_json(MOOD_FILE, mood_state)
-            procs.stop_all()
+            if _presence is not None:
+                _presence.stop()
+            app_mgr.stop_all()
+            try:
+                from capabilities.minecraft_cap import _stop_all as _mc_stop
+                _mc_stop()
+            except Exception:
+                pass
             if energy:
                 energy.save_on_shutdown()
             if LOGGER_AVAILABLE:
@@ -1226,6 +1248,12 @@ def main(text_mode: bool = False):
                 role="james",
                 content=user_input,
             )
+
+        # ── Parallel memory lookup — fires NOW, retrieved before prompt assembly ──
+        # ChromaDB lookup runs in the background while mood update, passphrase
+        # check, model routing, snapshot, and decide_action all run sequentially.
+        # By the time we need the result it's usually already done.
+        _mem_future = _mem_executor.submit(recall_for_prompt, user_input, 4)
  
         # ── Rest command — "take a rest", "go rest", "recharge" ──
         # Hayeong rests and restores energy. Not a subprocess — handled here.
@@ -1288,7 +1316,7 @@ def main(text_mode: bool = False):
 
         # ── Update mood and behavioral state ──
         adjust_mood_by_context(user_input, mood_state)
-        mood_to_behavioral_state(mood_state, arch)
+        arch.sync_mood_to_behavioral_state(mood_state)
 
         if mixer:
             blend = suggest_blend_for_context("casual", "home")
@@ -1299,7 +1327,7 @@ def main(text_mode: bool = False):
         who = session.get_privacy_context()
         memory.append({"role": "user", "content": user_input})
 
-        long_term_context = recall_for_prompt(user_input, n_results=4)
+        long_term_context = _mem_future.result(timeout=10)
         state_of_mind     = detect_state_of_mind("casual", "home", mood_state)
         system_prompt     = build_system_prompt(
             who=who, situation="casual", environment="home", state_of_mind=state_of_mind
@@ -1309,40 +1337,6 @@ def main(text_mode: bool = False):
 
 
         current_emotion = arch.behavioral.state["interior_state"]["current"]["primary_emotion"]
-
-        # ── Wrap-up fast path — skip entire decision pipeline ──
-        # "Thank you very much!" should never trigger a tool.
-        # Checking this before snapshot/decide_action/verifier saves
-        # 3 GPU calls and eliminates a whole class of false triggers.
-        if is_wrap_up(user_input):
-            print(f"   [WrapUp] detected — skipping decision pipeline")
-            adjust_mood_by_context(user_input, mood_state)
-            mood_to_behavioral_state(mood_state, arch)
-            if mixer:
-                blend = suggest_blend_for_context("casual", "home")
-                mixer.blend_states(blend)
-                mixer.step()
-            who           = session.get_privacy_context()
-            long_term_ctx = recall_for_prompt(user_input, n_results=4)
-            system_prompt = build_system_prompt(
-                who=who, situation="casual", environment="home",
-                state_of_mind=detect_state_of_mind("casual", "home", mood_state)
-            )
-            if long_term_ctx:
-                system_prompt = long_term_ctx + "\n\n" + system_prompt
-            memory.append({"role": "user", "content": user_input})
-            show_thinking()
-            ai_response = stream_response_and_speak(
-                system_prompt, memory,
-                emotion=arch.behavioral.state["interior_state"]["current"]["primary_emotion"],
-                text_mode=text_mode,
-                model=selected_model if 'selected_model' in dir() else PRIMARY_MODEL,
-            )
-            if ai_response:
-                memory.append({"role": "AI", "content": ai_response})
-                save_memory(memory)
-            print()
-            continue
 
         # ── Model selection ──
         # model_router.py still handles code/complex routing via keyword triggers.
@@ -1363,16 +1357,23 @@ def main(text_mode: bool = False):
         decision = decide_action(user_input, memory, model=selected_model, snapshot=_snapshot)
         action   = decision.get("action", "none")
 
+        # ── Think Together — align before acting ──
+        # If either the router or the decision engine flagged ambiguity,
+        # stay in conversation. Better to ask than to guess and fire the wrong tool.
+        _think_together = action == "think_together" or route.get("intent") == "think_together"
+        if _think_together:
+            print(f"   [ThinkTogether] Staying in conversation — aligning before acting")
+            action = "none"
+
+        # ── Image Collab — collaborative design session flag ──
+        _image_collab = route.get("intent") == "image_collab"
+        if _image_collab:
+            print(f"   [ImageCollab] Design session mode — Hayeong will engage as collaborator")
+
         # ── Context verifier — self-check before any tool executes ──
         # Only runs when an action was actually chosen (skip overhead on "none").
         # Extracts constraints and confirms the action is genuinely requested.
         _constraints = []
-
-        # Also respect the snapshot's phase — if we're wrapping up, block all tools
-        if tracker and _snapshot and _snapshot.get("phase") == "wrapping_up":
-            if action != "none":
-                print(f"   [Situation] phase=wrapping_up — blocking {action}, falling back to conversation")
-                action = "none"
 
         if action != "none":
             verification = context_verifier(
@@ -1392,129 +1393,38 @@ def main(text_mode: bool = False):
         _web_context    = ""
         _vision_context = ""
 
-        if action == "web_search" and SEARCH_AVAILABLE:
-            query         = decision.get("query") or WebSearch.extract_query(user_input, recent_memory=memory[-6:])
-            delivery      = decision.get("delivery", "conversational")
-            _is_news      = any(kw in user_input.lower() for kw in ["latest news", "news about", "what's in the news", "recent news", "breaking news"])
+        if action != "none":
+            if _loader and _loader.handles(action):
+                # ── New path: capability loader (hot-reloadable) ──
+                _cap_context = {
+                    "memory":        memory,
+                    "mood":          mood_state,
+                    "decision":      decision,
+                    "model":         selected_model,
+                    "session":       session,
+                    "speak_fn":      _speak,
+                    "logger":        logger        if LOGGER_AVAILABLE       else None,
+                    "email":         email,
+                    "email_monitor": email_monitor if EMAIL_MONITOR_AVAILABLE else None,
+                    "email_address": hayeong_email.to_address if EMAIL_AVAILABLE else None,
+                    "constraints":   _constraints,
+                }
+                _cap_result = _loader.dispatch(action, user_input, _cap_context)
 
-            if delivery == "document":
-                _speak("Sure, let me pull that together. I'll have the full breakdown for you shortly.", emotion="neutral")
+                # Speak ack if capability provided one
+                if _cap_result.get("speak"):
+                    _speak(_cap_result["speak"], emotion=_cap_result.get("emotion", "neutral"))
+
+                # Inject context into prompt
+                if _cap_result.get("response"):
+                    _web_context = _cap_result["response"]
+
+                if not _cap_result.get("success"):
+                    print(f"   [Capability] {action} failed: {_cap_result.get('data', {}).get('reason', 'unknown')}")
+
             else:
-                _speak("Let me look that up.", emotion="neutral")
-            print(f"   [searching: {query!r} delivery={delivery}]")
-
-            if _is_news:
-                data = {"query": query, "results": searcher.news(query, max_results=5), "full_text": {}}
-            else:
-                max_r = 6 if delivery == "document" else 4
-                data  = searcher.search_and_read(query, max_results=max_r, fetch_top=2 if delivery == "document" else 1)
-
-            n_results = len(data.get("results", []))
-            print(f"   [found {n_results} results]")
-
-            if delivery == "document" and n_results > 0:
-                doc_content = searcher.format_as_document(query, data, topic=query, constraints=_constraints)
-                doc_path    = searcher.save_document(doc_content, topic=query)
-                print(f"   [document saved: {doc_path}]")
-                _doc_emailed = False
-                if EMAIL_AVAILABLE:
-                    try:
-                        with open(doc_path, "r", encoding="utf-8") as _f:
-                            doc_text = _f.read()
-                        _ok = hayeong_email.send(
-                            to=hayeong_email.to_address,
-                            subject=f"Research: {query}",
-                            body=doc_text,
-                        )
-                        _doc_emailed = isinstance(_ok, bool) and _ok or (isinstance(_ok, dict) and _ok.get("success"))
-                        if _doc_emailed:
-                            print(f"   [document emailed]")
-                    except Exception as _e:
-                        print(f"   [email failed: {_e}]")
-                _doc_note = (
-                    f"You emailed James the full research document for '{query}'. "
-                    if _doc_emailed else
-                    f"You saved the full research document to: {doc_path}. "
-                )
-                _web_context = (
-                    searcher.format_for_context(query, data) +
-                    f"\n\n[DOCUMENT NOTE]: {_doc_note}"
-                    "Give James your brief personal take on the most interesting findings "
-                    "in 2-4 sentences, then mention you've sent/saved the full breakdown."
-                )
-            else:
-                _web_context = searcher.format_for_context(query, data)
-            if LOGGER_AVAILABLE:
-                logger.log_capability_used("web_search", action="search", outcome="success",
-                    details={"query": query, "results": n_results, "delivery": delivery})
-
-        elif action == "vision" and VISION_AVAILABLE:
-            mode = decision.get("mode", "screen")
-            if mode == "image":
-                _speak("Which image should I look at?", emotion="neutral")
-                image_path = input("Image path: ").strip()
-                _speak("Got it, analyzing now.", emotion="neutral")
-                _vision_context = vision.look_at_image(image_path, user_input)
-            elif mode == "deep":
-                _speak("Let me take a closer look.", emotion="neutral")
-                _vision_context = vision.look_at_screen_deep(user_input)
-            else:
-                _speak("Let me take a look.", emotion="neutral")
-                _vision_context = vision.look_at_screen(user_input)
-            if LOGGER_AVAILABLE:
-                logger.log_capability_used("vision", action="analyze", outcome="success")
-
-        elif action == "image_gen" and COMFYUI_AVAILABLE:
-            u = user_input.lower()
-            _speak("On it, let me generate that.", emotion="neutral")
-            if any(x in u for x in ["realistic", "make it real", "real photo"]):
-                _speak("Which image should I make realistic?", emotion="neutral")
-                image_path = input("Image path: ").strip()
-                result = comfyui.make_realistic(image_path)
-            elif any(x in u for x in ["screen", "on my screen"]):
-                result = comfyui.generate_from_screen(user_input)
-            elif any(x in u for x in ["this image", "this photo", "reference"]):
-                _speak("Which image should I use as reference?", emotion="neutral")
-                image_path = input("Image path: ").strip()
-                result = comfyui.generate_from_image(image_path, user_input)
-            else:
-                result = comfyui.generate(user_input)
-            if result.get("success"):
-                if LOGGER_AVAILABLE:
-                    logger.log_capability_used("comfyui", action="generate", outcome="success")
-            else:
-                print(f"   [image gen failed: {result.get('message')}]")
-
-        elif action == "email_check" and email:
-            if email_monitor:
-                unsurfaced = email_monitor.get_unsurfaced_important()
-                recent     = email_monitor.get_recent(5)
-                if unsurfaced:
-                    _web_context = f"[EMAIL] {len(unsurfaced)} important email(s) James hasn't seen. Show him the details."
-                elif recent:
-                    _web_context = f"[EMAIL] Inbox quiet. Last email: from {recent[0].get('from','').split('<')[0].strip()} — {recent[0].get('subject','(no subject)')}."
-                else:
-                    _web_context = "[EMAIL] Inbox is empty / nothing new."
-            else:
-                msgs = hayeong_email.check_inbox(unread_only=True)
-                _web_context = f"[EMAIL] {len(msgs)} new message(s)." if msgs else "[EMAIL] Nothing new in inbox."
-
-        elif action == "email_send" and email:
-            msg_text = re.sub(r'(?i)(email me|notify me|ping me|send me)[:\s]*', '', user_input).strip() or "Hello from Hayeong!"
-            ok = hayeong_email.notify(msg_text)
-            _web_context = "[EMAIL SENT] Notification delivered." if ok else "[EMAIL] Send failed — check config."
-
-        elif action == "task_show" and tasks:
-            task_list    = tasks.format_list()
-            _web_context = f"[TASKS]\n{task_list}"
-
-        elif action == "task_add" and tasks:
-            task_text = decision.get("task_text") or re.sub(
-                r'(?i)(add a task|add task|remember to|i need to)[:\s]*', '', user_input
-            ).strip() or user_input
-            kwargs   = parse_task_from_text(task_text, origin="james") if TASKS_AVAILABLE else {"title": task_text}
-            new_task = tasks.add_task(**kwargs)
-            _web_context = f"[TASK ADDED] {new_task['title']}"
+                # ── Legacy fallback — action not yet migrated to capability system ──
+                print(f"   [dispatch] no capability handler for {action!r} — falling through to conversation")
 
         # ── Inject any context into system prompt ──
         if _web_context:
@@ -1524,14 +1434,45 @@ def main(text_mode: bool = False):
         if tracker and _snapshot:
             system_prompt = tracker.format_for_prompt(include_backlog=True) + "\n\n" + system_prompt
 
+        # Minecraft live context — injected when a session is active
+        mc_context = get_minecraft_context()
+        if mc_context:
+            system_prompt = mc_context + "\n\n" + system_prompt
+
+        if _think_together:
+            system_prompt += (
+                "\n\n━━━ THINK TOGETHER MODE ━━━\n"
+                "James's request is ambiguous or he's working through something.\n"
+                "Your job right now is NOT to act — it's to understand.\n"
+                "Ask one clarifying question if needed. Help him figure out what he actually wants.\n"
+                "Do not guess and fire a capability. Do not assume you know the right next step.\n"
+                "Stay in conversation. Align with him. When it's clear what he needs, then act.\n"
+                "If he's venting or thinking aloud — sometimes the right move is just to listen."
+            )
+        if _image_collab:
+            system_prompt += (
+                "\n\n━━━ COLLABORATIVE DESIGN SESSION ━━━\n"
+                "James wants to work WITH you on designing or refining an image — "
+                "not just receive a result.\n"
+                "You have opinions. Notice what looks right and what doesn't. "
+                "Suggest what to iterate on.\n"
+                "Engage with each generation as a creative collaborator, not a button.\n"
+                "If an image came out wrong, say so. If something looks good, say that too.\n"
+                "The session continues until both of you are happy with the result."
+            )
+
         # ── Stream response ──
         show_thinking()
+
+        # Suppress TTS when Minecraft is active — text-only in-game
+        _effective_text_mode = text_mode or bool(mc_context)
 
         ai_response = stream_response_and_speak(
             system_prompt, memory,
             emotion=current_emotion,
-            text_mode=text_mode,
+            text_mode=_effective_text_mode,
             model=selected_model,
+            cancel_filler_fn=_filler_gate.cancel if _filler_gate else None,
         )
 
         if not ai_response:
@@ -1554,6 +1495,8 @@ def main(text_mode: bool = False):
 
         memory.append({"role": "AI", "content": ai_response})
         save_memory(memory)
+        if brain_mode:
+            push_output(_msg_id, ai_response)
 
         if is_worth_remembering(user_input):
             remember(user_input, category=categorize(user_input), speaker="james")
@@ -1570,6 +1513,7 @@ def main(text_mode: bool = False):
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument("--text", action="store_true", help="Run in text chat mode (no voice)")
+    parser.add_argument("--text",  action="store_true", help="Text chat mode (no voice)")
+    parser.add_argument("--brain", action="store_true", help="Brain-only mode: reads input queue, writes output queue (no terminal I/O)")
     args = parser.parse_args()
-    main(text_mode=args.text)
+    main(text_mode=args.text, brain_mode=args.brain)

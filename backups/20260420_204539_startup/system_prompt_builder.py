@@ -50,7 +50,8 @@ def build_system_prompt(
     who: str = "james",
     situation: str = "casual",
     environment: str = "home",
-    state_of_mind: str = "present"
+    state_of_mind: str = "present",
+    think_together: bool = False,
 ) -> str:
     """
     Builds the full system prompt to send to the LLM.
@@ -369,10 +370,18 @@ def build_system_prompt(
     lines.append("explaining that it doesn't need hardware.")
     lines.append("")
 
-    # ── LAYER 18.75: (removed — capability routing now handled via JSON decision call) ──
-    # Hayeong no longer needs to embed routing signals in her response.
-    # main.py makes a separate fast JSON decision call before streaming.
-    # She just responds naturally — no tags, no special formatting required.
+    # ── LAYER 18.75: Think Together behavior ──
+    # Injected only when the system is in think_together mode (ambiguous or complex request).
+    # When this applies, Hayeong's job is to align with James before acting — not to guess.
+    if think_together:
+        lines.append("━━━ THINK TOGETHER MODE ━━━")
+        lines.append("James's request is ambiguous or he's working through something.")
+        lines.append("Your job right now is NOT to act — it's to understand.")
+        lines.append("Ask one clarifying question if needed. Help him figure out what he actually wants.")
+        lines.append("Do not guess and fire a capability. Do not assume you know the right next step.")
+        lines.append("Stay in conversation. Align with him. When it's clear what he needs, then act.")
+        lines.append("If he's venting or thinking aloud — sometimes the right move is just to listen.")
+        lines.append("")
 
     # ── LAYER 19: Core rules — always last ──
     lines.append("━━━ CORE RULES ━━━")
@@ -427,6 +436,47 @@ def detect_state_of_mind(situation: str, environment: str, mood: dict) -> str:
         return "quiet"
 
     return "present"
+
+
+def get_minecraft_context() -> str:
+    """Read live game state from minecraft_state.json.
+    Returns a formatted context string if a session is active and fresh,
+    or an empty string if inactive or stale (>120s since last update)."""
+    from datetime import datetime
+    mc_state_path = BASE_DIR / "minecraft_state.json"
+    if not mc_state_path.exists():
+        return ""
+    try:
+        with open(mc_state_path, "r", encoding="utf-8") as f:
+            state = json.load(f)
+        if not state.get("active"):
+            return ""
+        last = datetime.fromisoformat(state["last_updated"])
+        if (datetime.now() - last).total_seconds() > 120:
+            return ""
+        parts = ["[MINECRAFT SESSION ACTIVE]"]
+        if state.get("position"):
+            pos = state["position"]
+            parts.append(f"Position: x={pos.get('x','?')} y={pos.get('y','?')} z={pos.get('z','?')}")
+        if state.get("health") is not None:
+            parts.append(f"Health: {state['health']}/20  Hunger: {state.get('food', '?')}/20")
+        nearby = state.get("nearby_players") or []
+        if nearby:
+            parts.append(f"Players nearby: {', '.join(nearby)}")
+        mobs = state.get("nearby_mobs") or []
+        if mobs:
+            mob_str = ", ".join(f"{m.get('name','?')}({m.get('dist','?')}m)" for m in mobs[:5])
+            parts.append(f"Nearby mobs: {mob_str}")
+        inv = state.get("inventory") or []
+        if inv:
+            parts.append(f"Inventory: {', '.join(inv[:8])}")
+        parts.append(
+            "You are in-game with James. Respond in text only — no voice. "
+            "Keep responses short and Minecraft-relevant. Use in-game chat naturally."
+        )
+        return "\n".join(parts)
+    except Exception:
+        return ""
 
 
 if __name__ == "__main__":

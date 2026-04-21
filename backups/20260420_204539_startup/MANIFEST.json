@@ -1,8 +1,8 @@
 {
   "label": "startup",
   "reason": "Clean startup snapshot",
-  "timestamp": "20260329_184220",
-  "created_at": "2026-03-29T18:42:20.725449",
+  "timestamp": "20260420_204539",
+  "created_at": "2026-04-20T20:45:39.115445",
   "backed_up": [
     "identity.json",
     "permissions_config.json",
@@ -14,7 +14,6 @@
     "hayeong_architecture.py",
     "system_prompt_builder.py",
     "main.py",
-    "discord_hayeong.py",
     "minecraft_bridge.py",
     "voice.py",
     "long_term_memory.py",

@@ -1,20 +1,30 @@
 @echo off
+setlocal
+
+set HAYEONG_DIR=H:\hayeong
+set PYTHON=%HAYEONG_DIR%\.venv\Scripts\python.exe
+set OLLAMA=C:\Users\James\AppData\Local\Programs\Ollama\ollama.exe
+
 echo Starting Ollama...
-start "" "C:\Users\James\AppData\Local\Programs\Ollama\ollama.exe" serve
+start "" "%OLLAMA%" serve
 timeout /t 3 /nobreak >nul
-echo Starting Hayeong...
-wsl -d Ubuntu-24.04 tmux has-session -t hayeong 2>nul
-if %errorlevel% == 0 (
-    echo Hayeong already running - attaching...
-    wsl -d Ubuntu-24.04 tmux attach -t hayeong
-) else (
-    echo Creating new session...
-    wsl -d Ubuntu-24.04 tmux new-session -d -s hayeong
-    wsl -d Ubuntu-24.04 tmux send-keys -t hayeong "powershell.exe" Enter
-    timeout /t 2 /nobreak >nul
-    wsl -d Ubuntu-24.04 tmux send-keys -t hayeong "cd H:\\hayeong" Enter
-    wsl -d Ubuntu-24.04 tmux send-keys -t hayeong "H:\\hayeong\\.venv\\Scripts\\Activate.ps1" Enter
-    wsl -d Ubuntu-24.04 tmux send-keys -t hayeong "python main.py --text" Enter
-    echo Hayeong started - attaching...
-    wsl -d Ubuntu-24.04 tmux attach -t hayeong
-)
+
+echo Starting Hayeong watchdog (manages brain lifetime)...
+start "Hayeong — Watchdog" cmd /k "cd /d %HAYEONG_DIR% && %PYTHON% watchdog.py"
+
+timeout /t 5 /nobreak >nul
+
+echo Starting text interface...
+start "Hayeong — Text" cmd /k "cd /d %HAYEONG_DIR% && %PYTHON% text_io.py"
+
+echo Starting voice interface (fails safely if Kokoro unavailable)...
+start "Hayeong — Voice" cmd /k "cd /d %HAYEONG_DIR% && %PYTHON% voice_io.py"
+
+echo.
+echo All processes launched.
+echo   Watchdog window : supervises brain, restarts on crash, acts on recovery notes
+echo   Text window     : type here to talk to Hayeong
+echo   Voice window    : Kokoro TTS + Whisper STT (safe to close if not needed)
+echo.
+echo If voice window crashes, watchdog and text are unaffected.
+echo If brain crashes, watchdog restarts it and notifies James automatically.
