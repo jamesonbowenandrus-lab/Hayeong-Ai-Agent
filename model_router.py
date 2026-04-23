@@ -30,66 +30,68 @@ ROUTER_LOG.parent.mkdir(parents=True, exist_ok=True)
 # Run: ollama list   to see what's installed.
 # ─────────────────────────────────────────────
 
+# VRAM budget on RTX 3090 (24GB CUDA):
+#   qwen2.5:7b  Q4_K_M  ≈  4GB  (communication LLM — port 11434)
+#   qwen2.5:14b Q4_K_M  ≈  8GB  (reasoning LLM    — port 11435)
+#   Kokoro TTS           ≈  2GB
+#   Whisper              ≈  2GB
+#   ─────────────────────────────
+#   Total                ≈ 16GB  (~8GB headroom)
+#
+# Architecture rule:
+#   communication — everything James hears (voice, text responses)
+#   reasoning     — all decisions, planning, capability dispatch, Minecraft
+
 MODELS = {
-    # ── Hayeong's main brain ──
-    # Q4_K_M quantization: ~8GB VRAM, ~40% faster than Q8, negligible quality loss.
-    # Full 14b parameter count — just compressed weights.
-    "main": {
-        "name": "qwen2.5:14b-instruct-q4_K_M",
-        "ollama_name": "qwen2.5:14b-instruct-q4_K_M",
-        "description": "Main LLM — conversation, reasoning, identity, general tasks",
+    # ── Communication LLM — all James-facing output ──
+    "communication": {
+        "name":           "qwen2.5:7b-instruct-q4_K_M",
+        "ollama_name":    "qwen2.5:7b-instruct-q4_K_M",
+        "ollama_url":     "http://localhost:11434/api/chat",
+        "description":    "Communication LLM — all James-facing responses, voice, text",
         "context_window": 32768,
     },
 
-    # ── Heavy reasoning — used for complex planning, long analysis ──
-    # 19GB — fits on 7900 XTX (24GB) but leaves less headroom.
-    # Router uses this when a task clearly needs deeper thinking.
+    # ── Reasoning LLM — all decisions and task execution ──
     "reasoning": {
-        "name": "qwen2.5:32b",
-        "ollama_name": "qwen2.5:32b",
-        "description": "Heavy reasoning — complex planning, long analysis, hard questions",
+        "name":           "qwen2.5:14b-instruct-q4_K_M",
+        "ollama_name":    "qwen2.5:14b-instruct-q4_K_M",
+        "ollama_url":     "http://localhost:11435/api/chat",
+        "description":    "Reasoning LLM — planning, decisions, capability dispatch, Minecraft",
         "context_window": 32768,
     },
 
     # ── Coding specialist ──
-    # 18GB — very strong for code generation, debugging, script writing.
-    # Router sends here for any coding intent detected.
     "coder": {
-        "name": "deepseek-coder:33b",
-        "ollama_name": "deepseek-coder:33b",
-        "description": "Code generation, debugging, script writing, technical tasks",
+        "name":           "deepseek-coder:33b",
+        "ollama_name":    "deepseek-coder:33b",
+        "ollama_url":     "http://localhost:11434/api/chat",
+        "description":    "Code generation, debugging, script writing",
         "context_window": 16384,
     },
 
-    # ── Fast lightweight fallback ──
-    # 2GB — used when primary is unavailable or for very simple quick tasks.
-    "fast": {
-        "name": "llama3.2:latest",
-        "ollama_name": "llama3.2:latest",
-        "description": "Fast lightweight fallback for simple tasks",
-        "context_window": 8192,
-    },
-
     # ── Vision models ──
-    # For screen observer, image analysis, screenshot understanding.
     "vision": {
-        "name": "llava:13b",
-        "ollama_name": "llava:13b",
-        "description": "Vision — screen observation, image understanding, screenshot analysis",
+        "name":           "llava:13b",
+        "ollama_name":    "llava:13b",
+        "ollama_url":     "http://localhost:11434/api/chat",
+        "description":    "Vision — screen observation, image understanding, screenshot analysis",
         "context_window": 4096,
     },
     "vision_fast": {
-        "name": "moondream:latest",
-        "ollama_name": "moondream:latest",
-        "description": "Fast vision — quick image descriptions, lightweight visual tasks",
+        "name":           "moondream:latest",
+        "ollama_name":    "moondream:latest",
+        "ollama_url":     "http://localhost:11434/api/chat",
+        "description":    "Fast vision — quick image descriptions, lightweight visual tasks",
         "context_window": 2048,
     },
 
     # ── Embeddings — long-term memory vector search ──
     "embeddings": {
-        "name": "nomic-embed-text",
-        "ollama_name": "nomic-embed-text",
-        "description": "Embedding model for ChromaDB long-term memory vector search",
+        "name":           "nomic-embed-text",
+        "ollama_name":    "nomic-embed-text",
+        "ollama_url":     "http://localhost:11434/api/embeddings",
+        "description":    "Embedding model for ChromaDB long-term memory vector search",
         "context_window": 8192,
         "embedding_only": True,
     },
@@ -181,8 +183,8 @@ class ModelRouter:
                 base_name = model_name.split(":")[0]
                 self.available[key] = base_name in output
         except Exception:
-            # If ollama isn't reachable, assume main is available
-            self.available = {k: (k == "main") for k in MODELS}
+            # If ollama isn't reachable, assume communication model is available
+            self.available = {k: (k == "communication") for k in MODELS}
 
     def is_available(self, model_key: str) -> bool:
         return self.available.get(model_key, False)
@@ -249,21 +251,19 @@ class ModelRouter:
         intent = classification["intent"]
 
         decision = {
-            "model": "main",
-            "model_name": MODELS["main"]["ollama_name"],
-            "intent": intent,
+            "model":              "communication",
+            "model_name":         MODELS["communication"]["ollama_name"],
+            "intent":             intent,
             "needs_memory_lookup": False,
-            "needs_vision": has_image,
-            "fallback_used": False,
-            "reasoning": "",
-            "timestamp": datetime.datetime.now().isoformat(),
+            "needs_vision":       has_image,
+            "fallback_used":      False,
+            "reasoning":          "",
+            "timestamp":          datetime.datetime.now().isoformat(),
         }
 
-        # ── TOOL-ASSISTED INTENTS — always cap at 14b ──
-        # The tool (search/vision/comfyui) does the hard work.
-        # 14b is plenty to synthesize results and respond naturally.
+        # ── TOOL-ASSISTED INTENTS — communication LLM synthesizes results ──
         if intent in TOOL_INTENTS:
-            decision["reasoning"] = f"Tool intent ({intent}) — capped at Qwen 14b, tool does the heavy lifting."
+            decision["reasoning"] = f"Tool intent ({intent}) — communication LLM synthesizes result."
 
         # ── CODE TASKS ──
         elif intent == "code" and classification["scores"]["code"] >= 2:
@@ -273,49 +273,21 @@ class ModelRouter:
                 decision["reasoning"]  = "Code intent — routing to DeepSeek Coder 33b."
             else:
                 decision["fallback_used"] = True
-                decision["reasoning"]     = "Code intent — DeepSeek not available, falling back to main."
+                decision["reasoning"]     = "Code intent — DeepSeek not available, falling back to communication LLM."
 
         # ── MEMORY TASKS ──
         elif intent == "memory":
             decision["needs_memory_lookup"] = True
             decision["reasoning"] = "Memory recall intent — pulling ChromaDB embeddings before LLM call."
 
-        # ── VISION TASKS (via model router, not vision_bridge) ──
+        # ── VISION TASKS ──
         elif intent == "vision" or has_image:
             decision["needs_vision"] = True
-            decision["reasoning"]  = "Vision intent — capped at 14b, vision_bridge handles the analysis."
+            decision["reasoning"]    = "Vision intent — vision_bridge handles analysis, communication LLM responds."
 
-        # ── HEAVY REASONING ──
-        # 32b routing is currently DISABLED.
-        #
-        # VRAM budget on RX 7900 XTX (24GB):
-        #   qwen2.5:14b Q4_K_M ≈ 8GB  (main brain — quantized)
-        #   ─────────────────────────────────────────────────────
-        #   Total               ≈ 8GB  (~16GB headroom for vision, creative compute)
-        #
-        # qwen2.5:32b needs ~20GB alone — loading it evicts the other models,
-        # causes 60s+ load times, and risks timeouts like we saw in testing.
-        # 14b Q4_K_M is the ceiling until Hayeong moves to the 3090.
-        #
-        # To re-enable later: uncomment the block below and remove the pass.
-        elif len(message) > 300:
-            # has_complexity = any(
-            #     re.search(p, message, re.IGNORECASE)
-            #     for p in COMPLEXITY_PATTERNS
-            # )
-            # if has_complexity and self.is_available("reasoning"):
-            #     decision["model"]      = "reasoning"
-            #     decision["model_name"] = MODELS["reasoning"]["ollama_name"]
-            #     decision["reasoning"]  = "Long message with complexity signals — routing to Qwen 32b."
-            # else:
-            #     decision["reasoning"] = "Long message but no complexity signals — staying on Qwen 14b."
-            decision["reasoning"] = "Long message — 32b disabled (VRAM budget), staying on Qwen 14b."
-
-        # ── IDENTITY / GENERAL CONVERSATION ──
-        # "how are you", personality questions, casual chat — all stay on 14b.
-        # These need a good system prompt, not more parameters.
+        # ── GENERAL CONVERSATION ──
         else:
-            decision["reasoning"] = f"Intent: {intent} — routing to main LLM (Qwen 14b)."
+            decision["reasoning"] = f"Intent: {intent} — communication LLM (Qwen 7b)."
 
         self._log(message[:100], decision)
         return decision
@@ -332,21 +304,21 @@ class ModelRouter:
         temperature: float = 0.7,
     ) -> str:
         """
-        Makes a direct Ollama API call.
+        Makes a direct Ollama API call to the correct instance for model_key.
         Returns the response text or an error string.
-
-        For production use, prefer calling via your existing main.py
-        which manages the full conversation loop.
-        This is a direct utility for routing-specific calls.
         """
         import urllib.request
 
-        model_name = MODELS.get(model_key, MODELS["main"])["ollama_name"]
+        model_info = MODELS.get(model_key, MODELS["communication"])
+        model_name = model_info["ollama_name"]
+        # Use the model's own URL; fall back to /api/generate path
+        base_url = model_info.get("ollama_url", "http://localhost:11434/api/chat")
+        gen_url  = base_url.replace("/api/chat", "/api/generate")
 
         payload = {
-            "model": model_name,
-            "prompt": prompt,
-            "stream": False,
+            "model":   model_name,
+            "prompt":  prompt,
+            "stream":  False,
             "options": {"temperature": temperature},
         }
         if system:
@@ -355,7 +327,7 @@ class ModelRouter:
         try:
             data = json.dumps(payload).encode("utf-8")
             req = urllib.request.Request(
-                "http://localhost:11434/api/generate",
+                gen_url,
                 data=data,
                 headers={"Content-Type": "application/json"},
             )
@@ -373,15 +345,13 @@ class ModelRouter:
         """
         import urllib.request
 
-        payload = {
-            "model": MODELS["embeddings"]["ollama_name"],
-            "prompt": text,
-        }
+        emb_info = MODELS["embeddings"]
+        payload  = {"model": emb_info["ollama_name"], "prompt": text}
 
         try:
             data = json.dumps(payload).encode("utf-8")
             req = urllib.request.Request(
-                "http://localhost:11434/api/embeddings",
+                emb_info["ollama_url"],
                 data=data,
                 headers={"Content-Type": "application/json"},
             )

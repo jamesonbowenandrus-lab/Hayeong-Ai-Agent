@@ -235,7 +235,9 @@ from hayeong_core import (
     _strip_markdown,
     infer_emotion_fast,
     update_mood,
-    MOOD_FILE, OLLAMA_URL, PRIMARY_MODEL, FALLBACK_MODEL,
+    MOOD_FILE, FALLBACK_MODEL,
+    COMMUNICATION_URL, COMMUNICATION_MODEL,
+    REASONING_URL, REASONING_MODEL,
 )
 
 # ─────────────────────────────────────────────
@@ -469,13 +471,14 @@ def decide_action(user_input: str, memory: list, model: str = None,
     """
     Fast JSON decision call — determines what capability (if any) Hayeong
     needs to invoke before responding. Non-streaming, focused, fast.
+    Routes to the Reasoning LLM (14b, port 11435).
 
     Returns a dict like:
       {"action": "none"}
       {"action": "web_search", "query": "...", "delivery": "conversational"}
       {"action": "email_check"}
     """
-    _model = model or PRIMARY_MODEL
+    _model = model or REASONING_MODEL
 
     # ── Inject relevant long-term memory into decision context ──
     # This lets Hayeong know James's patterns and preferences when deciding
@@ -508,7 +511,7 @@ def decide_action(user_input: str, memory: list, model: str = None,
 
     try:
         resp = requests.post(
-            OLLAMA_URL,
+            REASONING_URL,
             json={
                 "model":   _model,
                 "messages": messages,
@@ -586,7 +589,7 @@ def context_verifier(user_input: str, action: str, decision: dict,
     On failure: defaults to verified=True, empty constraints (fail open —
     better to act than to silently block everything if verifier errors).
     """
-    _model = model or PRIMARY_MODEL
+    _model = model or REASONING_MODEL
 
     # Build compact history block for context
     history_lines = []
@@ -607,7 +610,7 @@ def context_verifier(user_input: str, action: str, decision: dict,
 
     try:
         resp = requests.post(
-            OLLAMA_URL,
+            REASONING_URL,
             json={
                 "model":   _model,
                 "messages": [
@@ -780,7 +783,7 @@ def stream_response_and_speak(system_prompt: str, memory: list, emotion: str = "
     def _stream(model: str):
         try:
             return requests.post(
-                OLLAMA_URL,
+                COMMUNICATION_URL,
                 json={"model": model, "messages": messages, "stream": True},
                 stream=True,
                 timeout=60,
@@ -789,7 +792,7 @@ def stream_response_and_speak(system_prompt: str, memory: list, emotion: str = "
             print(f"⚠️  Ollama stream error: {e}")
             return None
 
-    response = _stream(model or PRIMARY_MODEL) or _stream(FALLBACK_MODEL)
+    response = _stream(model or COMMUNICATION_MODEL) or _stream(FALLBACK_MODEL)
     if response is None:
         sentence_queue.put(None)
         tts_done.wait()
@@ -1083,6 +1086,14 @@ def main(text_mode: bool = False, brain_mode: bool = False):
     if brain_mode:
         check_startup_message()
 
+    # ── Start reasoning loop — runs on its own thread, never speaks to James ──
+    try:
+        from reasoning_loop import start_reasoning_loop
+        start_reasoning_loop()
+        print("   [ReasoningLoop] Heartbeat started.")
+    except Exception as _rl_err:
+        print(f"   [ReasoningLoop] Failed to start: {_rl_err}")
+
     energy = EnergyManager()  if ENERGY_AVAILABLE   else None
     mixer  = MindStateMixer() if MIND_MIXER_AVAILABLE else None
 
@@ -1189,22 +1200,26 @@ def main(text_mode: bool = False, brain_mode: bool = False):
         _presence.start()
         print("   [AsyncPresence] Presence layer active — she stays responsive mid-task")
 
-    # ── Preload primary model — eliminates cold-start latency ──
-    try:
-        print("   Warming up model...", end=" ", flush=True)
-        requests.post(
-            OLLAMA_URL,
-            json={
-                "model":   PRIMARY_MODEL,
-                "messages": [{"role": "user", "content": "hi"}],
-                "stream":  False,
-                "options": {"num_predict": 1, "num_ctx": 512},
-            },
-            timeout=30,
-        )
-        print("ready.")
-    except Exception:
-        print("(warmup failed — first response may be slow)")
+    # ── Preload both models — eliminates cold-start latency ──
+    for _url, _model, _label in [
+        (COMMUNICATION_URL, COMMUNICATION_MODEL, "communication (7b)"),
+        (REASONING_URL,     REASONING_MODEL,     "reasoning (14b)"),
+    ]:
+        try:
+            print(f"   Warming {_label}...", end=" ", flush=True)
+            requests.post(
+                _url,
+                json={
+                    "model":   _model,
+                    "messages": [{"role": "user", "content": "hi"}],
+                    "stream":  False,
+                    "options": {"num_predict": 1, "num_ctx": 512},
+                },
+                timeout=30,
+            )
+            print("ready.")
+        except Exception:
+            print(f"(warmup failed — first {_label} response may be slow)")
 
     # ── Pre-warm filler cache ──
     if FILLER_AVAILABLE and not text_mode:
@@ -1460,6 +1475,22 @@ def main(text_mode: bool = False, brain_mode: bool = False):
         if long_term_context:
             system_prompt = long_term_context + "\n\n" + system_prompt
 
+        # ── Inject reasoning context — what the 14b wants the 7b to know ──
+        try:
+            from state_manager import get_communication_context
+            _rctx = get_communication_context()
+            if _rctx.get("context_for_communication"):
+                system_prompt += (
+                    f"\n\n[Reasoning context: {_rctx['context_for_communication']}]"
+                )
+            if _rctx.get("active_task"):
+                system_prompt += (
+                    f"\n[Currently working on: {_rctx['active_task']} "
+                    f"— {_rctx.get('active_task_status', '')}]"
+                )
+        except Exception:
+            pass
+
 
         current_emotion = arch.behavioral.state["interior_state"]["current"]["primary_emotion"]
 
@@ -1646,6 +1677,16 @@ def main(text_mode: bool = False, brain_mode: bool = False):
         save_memory(memory)
         if brain_mode:
             push_output(_msg_id, ai_response)
+
+        # ── Write this turn to shared state for the reasoning LLM to read ──
+        try:
+            from state_manager import write_conversation
+            write_conversation({
+                "last_james_message":    user_input,
+                "last_hayeong_response": ai_response[:500],
+            })
+        except Exception:
+            pass
 
         if is_worth_remembering(user_input):
             remember(user_input, category=categorize(user_input), speaker="james")

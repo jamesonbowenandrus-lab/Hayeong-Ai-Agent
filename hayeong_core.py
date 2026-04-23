@@ -34,9 +34,18 @@ MEMORY_FILE    = BASE_DIR / "memory.json"
 IDENTITY_FILE  = BASE_DIR / "identity.json"
 MOOD_FILE      = BASE_DIR / "mood.json"
 
-OLLAMA_URL     = "http://localhost:11434/api/chat"
-PRIMARY_MODEL  = "qwen2.5:14b-instruct-q4_K_M"    # Main brain — Q4_K_M, ~8GB, ~40% faster than Q8
-FALLBACK_MODEL = "llama3.2:latest" # Fast lightweight fallback if primary fails
+# ── Two-model architecture ──
+# Communication LLM (7b) — everything James hears, port 11434
+# Reasoning LLM (14b)    — all decisions and planning, port 11435
+COMMUNICATION_URL   = "http://localhost:11434/api/chat"
+REASONING_URL       = "http://localhost:11435/api/chat"
+COMMUNICATION_MODEL = "qwen2.5:7b-instruct-q4_K_M"
+REASONING_MODEL     = "qwen2.5:14b-instruct-q4_K_M"
+FALLBACK_MODEL      = "llama3.2:latest"
+
+# Backwards-compat aliases — imported by other modules
+OLLAMA_URL    = COMMUNICATION_URL
+PRIMARY_MODEL = COMMUNICATION_MODEL
 
 # ─────────────────────────────────────────────
 # JSON HELPERS

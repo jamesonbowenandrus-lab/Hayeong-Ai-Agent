@@ -1,0 +1,24 @@
+{
+  "conversation": {
+    "last_james_message": "",
+    "last_hayeong_response": "",
+    "current_topic": "",
+    "session_start": "",
+    "flags": []
+  },
+  "reasoning": {
+    "current_goal": "",
+    "task_queue": [],
+    "active_task": "",
+    "active_task_status": "",
+    "last_conclusion": "",
+    "context_for_communication": "",
+    "minecraft_state": {}
+  },
+  "system": {
+    "active_scripts": [],
+    "pending_results": [],
+    "priority_flags": [],
+    "models_loaded": []
+  }
+}
