@@ -106,6 +106,9 @@ def _quick_intent(text: str) -> str:
         return "vision"
     if any(w in t for w in ["task", "remind", "add", "show tasks"]):
         return "task"
+    if any(w in t for w in ["minecraft", "mine", "craft", "build", "dig",
+                              "farm", "chest", "inventory", "base"]):
+        return "task"   # acknowledgment — heard, on it
     return "generic"
 
 
@@ -199,6 +202,56 @@ def _load_core_modules():
 _generation_lock = asyncio.Lock()
 _server_start    = time.time()
 
+
+class _WebSocketFillerGate:
+    """
+    Wraps FillerTimer to send a text notification to the WebSocket client
+    when a filler plays. Audio still plays to the local output device.
+    The client receives {"type": "filler", "text": "..."} so it can display
+    what was said while audio plays on the desktop speakers.
+    """
+
+    def __init__(self, ws: WebSocket, loop, intent: str = "none",
+                 base_speed: float = 0.88, output_device=None):
+        self._ws    = ws
+        self._loop  = loop
+        self._inner = None
+
+        if not (FILLER_AVAILABLE and _FillerGate):
+            return
+
+        self._inner = _FillerGate(
+            intent        = intent,
+            base_speed    = base_speed,
+            output_device = output_device,
+        )
+
+        # Patch _on_timer BEFORE start() captures it in threading.Timer
+        _orig = self._inner._on_timer
+
+        def _patched(start_time):
+            try:
+                from filler_system import _category_for_intent, _pick_filler
+                category    = _category_for_intent(self._inner._intent)
+                filler_text = _pick_filler(category)
+                asyncio.run_coroutine_threadsafe(
+                    _send_json(self._ws, {"type": "filler", "text": filler_text}),
+                    self._loop,
+                )
+            except Exception:
+                pass
+            _orig(start_time)
+
+        self._inner._on_timer = _patched
+
+    def start(self):
+        if self._inner:
+            self._inner.start()
+
+    def cancel(self):
+        if self._inner:
+            self._inner.cancel()
+
 # ─────────────────────────────────────────────
 # APP
 # ─────────────────────────────────────────────
@@ -212,23 +265,33 @@ app = FastAPI(title="Hayeong Voice Server", version="1.0")
 
 @app.get("/health")
 async def health():
-    import torch
-    gpu_available = torch.cuda.is_available()
-    gpu_name      = torch.cuda.get_device_name(0) if gpu_available else "none"
+    """
+    Health check for startup sequence and system_monitor.
+    Returns model load status so the startup script can confirm everything is ready.
+    """
+    whisper_ok = _transcribe_fn is not None
+    tts_ok     = _speak_fn is not None
+    kokoro_ok  = False
+    f5_ok      = False
 
-    from voice import KOKORO_AVAILABLE, F5TTS_AVAILABLE
-    tts_engine = "kokoro" if KOKORO_AVAILABLE else ("f5_tts_fallback" if F5TTS_AVAILABLE else "none")
+    try:
+        from voice import KOKORO_AVAILABLE, F5TTS_AVAILABLE, get_pipeline, get_tts
+        kokoro_ok = KOKORO_AVAILABLE and get_pipeline() is not None
+        f5_ok     = F5TTS_AVAILABLE  and get_tts()      is not None
+    except Exception:
+        pass
+
+    overall = whisper_ok and tts_ok
 
     return JSONResponse({
-        "status":        "online",
-        "voice_loaded":  _voice_loaded,
-        "core_loaded":   _core_loaded,
-        "uptime_s":      round(time.time() - _server_start),
-        "gpu":           gpu_name,
-        "gpu_available": gpu_available,
-        "tts_device":    "cuda" if gpu_available else "cpu",
-        "tts_engine":    tts_engine,
-        "whisper_device": "cpu",
+        "status":       "healthy" if overall else "degraded",
+        "whisper":      "loaded" if whisper_ok else "not loaded",
+        "tts_kokoro":   "loaded" if kokoro_ok  else "not loaded",
+        "tts_f5":       "loaded" if f5_ok      else "not loaded",
+        "tts_active":   "kokoro" if kokoro_ok  else ("f5" if f5_ok else "none"),
+        "uptime_s":     round(time.time() - _server_start),
+        "voice_loaded": _voice_loaded,
+        "core_loaded":  _core_loaded,
     })
 
 
@@ -301,6 +364,25 @@ def _get_ai_response(user_text: str, memory: list, mood_state: dict,
         return "Something went wrong on my end.", "neutral"
 
 
+def _select_tts_mode() -> str:
+    """
+    Select TTS mode based on current task context.
+    conversation: Kokoro first (fast, natural for chat)
+    content:      F5-TTS first (higher quality for narration/video)
+    Runs per-call so she can switch mid-session without restart.
+    """
+    try:
+        from state_manager import read_state
+        state       = read_state()
+        active_task = state["reasoning"].get("active_task", "")
+        if any(w in active_task.lower() for w in
+               ["youtube", "narration", "video", "content", "script"]):
+            return "content"
+    except Exception:
+        pass
+    return "conversation"
+
+
 def _generate_tts_audio(text: str, emotion: str = "neutral") -> np.ndarray | None:
     """
     Generate TTS audio via Kokoro (primary) or F5-TTS (fallback).
@@ -321,14 +403,29 @@ def _generate_tts_audio(text: str, emotion: str = "neutral") -> np.ndarray | Non
         sentences   = split_sentences(text)
         chunks      = []
         sample_rate = 24000
+        tts_mode    = _select_tts_mode()
 
-        # ── Primary: Kokoro ──
-        if KOKORO_AVAILABLE:
+        # ── Content mode: F5-TTS first (higher quality for narration) ──
+        if tts_mode == "content" and F5TTS_AVAILABLE:
+            tts = get_tts()
+            if tts is not None:
+                for sentence in sentences:
+                    wav, sr, _ = tts.infer(
+                        ref_file = REF_AUDIO,
+                        ref_text = REF_TEXT,
+                        gen_text = sentence,
+                        nfe_step = 64,
+                        speed    = speed,
+                    )
+                    chunks.append(wav)
+                    sample_rate = sr
+
+        # ── Conversation mode (default): Kokoro first ──
+        if not chunks and KOKORO_AVAILABLE:
             pipeline = get_pipeline()
             if pipeline is not None:
                 for sentence in sentences:
-                    generator = pipeline(sentence, voice=HAYEONG_VOICE, speed=speed)
-                    for _, _, audio in generator:
+                    for _, _, audio in pipeline(sentence, voice=HAYEONG_VOICE, speed=speed):
                         chunks.append(audio)
 
         # ── Fallback: F5-TTS ──
@@ -411,26 +508,41 @@ async def _process_utterance(ws: WebSocket, user_text: str,
         # 1. AI response (in thread — blocks GPU)
         await _send_json(ws, {"type": "thinking"})
 
-        # ── Start filler gate (own thread, non-blocking) ──
+        # ── Start filler gate ──
+        # Fires if LLM is slow to respond. Plays to local output device and
+        # notifies the WebSocket client with {"type": "filler", "text": "…"}.
+        loop         = asyncio.get_event_loop()
         _filler_gate = None
-        if FILLER_AVAILABLE:
-            _filler_gate = _FillerGate(
-                intent=_quick_intent(user_text),
-                base_speed=0.88,
-                output_device=None,
-            )
-            _filler_gate.start()
+        if FILLER_AVAILABLE and user_text.strip():
+            try:
+                from voice import get_voice_modulation, OUTPUT_DEVICE
+                _speed       = get_voice_modulation("neutral")["speed"]
+                _filler_gate = _WebSocketFillerGate(
+                    ws            = ws,
+                    loop          = loop,
+                    intent        = _quick_intent(user_text),
+                    base_speed    = _speed,
+                    output_device = OUTPUT_DEVICE,
+                )
+                _filler_gate.start()
+            except Exception as _fe:
+                log.warning(f"Filler gate failed to start: {_fe}")
+                _filler_gate = None
 
-        loop = asyncio.get_event_loop()
         import functools
-        response, emotion = await loop.run_in_executor(
-            None,
-            functools.partial(
-                _get_ai_response,
-                user_text, memory, mood_state, identity, dynamic_traits,
-                cancel_filler_fn=_filler_gate.cancel if _filler_gate else None,
-            ),
-        )
+        try:
+            response, emotion = await loop.run_in_executor(
+                None,
+                functools.partial(
+                    _get_ai_response,
+                    user_text, memory, mood_state, identity, dynamic_traits,
+                    cancel_filler_fn=_filler_gate.cancel if _filler_gate else None,
+                ),
+            )
+        finally:
+            # Safety net — cancels filler even if _get_ai_response errored
+            if _filler_gate is not None:
+                _filler_gate.cancel()
 
         # 2. Send text response immediately so client can display it
         await _send_json(ws, {
@@ -591,6 +703,22 @@ if __name__ == "__main__":
     log.info("Pre-loading models...")
     _load_voice_modules()
     _load_core_modules()
-    log.info("✅ All models loaded — server starting")
+    log.info("✅ All models loaded")
+
+    # Pre-warm filler audio cache — generates TTS for common fillers once so
+    # the first filler of the session plays instantly with no generation delay
+    if FILLER_AVAILABLE:
+        try:
+            log.info("Warming filler audio cache...")
+            from filler_system import _get_cached_audio, FILLERS
+            from voice import get_voice_modulation
+            _fw_speed = get_voice_modulation("neutral")["speed"]
+            for _variants in FILLERS.values():
+                _get_cached_audio(_variants[0], _fw_speed)
+            log.info("Filler cache ready.")
+        except Exception as _fe:
+            log.warning(f"Filler cache warmup failed (non-fatal): {_fe}")
+
+    log.info("✅ Server starting")
 
     uvicorn.run(app, host="0.0.0.0", port=8765, log_level="warning")

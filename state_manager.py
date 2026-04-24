@@ -43,12 +43,25 @@ _EMPTY_STATE = {
         "last_conclusion":            "",
         "context_for_communication":  "",
         "minecraft_state":            {},
+        "minecraft_session_active":    False,
+        "minecraft_last_event":        "",
+        "minecraft_last_event_detail": {},
+        "minecraft_pending_action":    {},
+        "minecraft_last_result":       "",
+        "minecraft_voice_input":       "",
+        "minecraft_urgency":           "normal",
     },
     "system": {
         "active_scripts":  [],
         "pending_results": [],
         "priority_flags":  [],
         "models_loaded":   [],
+        "health": {
+            "communication_llm": "unknown",
+            "reasoning_llm":     "unknown",
+            "voice_server":      "unknown",
+            "whisper":           "unknown",
+        },
     },
 }
 
@@ -208,3 +221,93 @@ def pop_pending_results() -> list:
         state["system"]["pending_results"] = []
         _write(state)
     return results
+
+
+def pop_minecraft_pending_action() -> dict:
+    """Remove and return the pending Minecraft action. Called by the bridge after each event."""
+    with _lock():
+        state = _read()
+        action = state["reasoning"].get("minecraft_pending_action", {})
+        if not action:
+            return {}
+        state["reasoning"]["minecraft_pending_action"] = {}
+        _write(state)
+    return action
+
+
+def consume_communication_context() -> str:
+    """
+    Read context_for_communication and immediately clear it.
+    Called by the communication LLM (7b) before generating each response.
+    Atomic — read and clear happen in the same lock acquisition.
+    Returns the context string, or empty string if nothing pending.
+    """
+    with _lock():
+        state = _read()
+        ctx = state["reasoning"].get("context_for_communication", "")
+        if ctx:
+            state["reasoning"]["context_for_communication"] = ""
+            _write(state)
+    return ctx
+
+
+def get_and_clear_pending_action() -> dict:
+    """
+    Read minecraft_pending_action and clear it atomically.
+    Called by minecraft_bridge when it's ready to send the next action.
+    Returns the action dict, or {} if nothing pending.
+    """
+    return pop_minecraft_pending_action()
+
+
+def has_pending_minecraft_action() -> bool:
+    """
+    Returns True if there is an unexecuted action waiting for the bridge.
+    The reasoning loop checks this before writing a new action so it never
+    overwrites an action the bridge hasn't sent yet.
+    """
+    with _lock():
+        state = _read()
+    return bool(state["reasoning"].get("minecraft_pending_action"))
+
+
+def update_health(component: str, status: str):
+    """
+    Update health status for a system component.
+    component: 'communication_llm' | 'reasoning_llm' | 'voice_server' | 'whisper'
+    status: 'healthy' | 'degraded' | 'offline' | 'unknown'
+    """
+    with _lock():
+        state = _read()
+        if "health" not in state["system"]:
+            state["system"]["health"] = {}
+        state["system"]["health"][component] = status
+        _write(state)
+
+
+def get_health() -> dict:
+    """Return current health status of all components."""
+    with _lock():
+        state = _read()
+    return state["system"].get("health", {})
+
+
+def validate_and_migrate():
+    """
+    Called once at startup. Ensures state file has all current schema keys.
+    Merges in any missing keys from _EMPTY_STATE without touching existing values.
+    Safe to call multiple times.
+    """
+    def _deep_merge(base: dict, update: dict) -> dict:
+        for k, v in update.items():
+            if k not in base:
+                base[k] = v
+            elif isinstance(v, dict) and isinstance(base.get(k), dict):
+                _deep_merge(base[k], v)
+        return base
+
+    with _lock():
+        state = _read()
+        merged = _deep_merge(state, json.loads(json.dumps(_EMPTY_STATE)))
+        _write(merged)
+    print("[state_manager] State validated and migrated.")

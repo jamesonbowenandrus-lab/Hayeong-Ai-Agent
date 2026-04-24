@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"import reasoning_loop; print\\('reasoning_loop OK'\\)\")",
+      "Bash(python -c \"import minecraft_bridge; print\\('minecraft_bridge OK'\\)\")",
+      "Bash(python -c \"import reasoning_loop; import minecraft_bridge; print\\('OK'\\)\")",
+      "Bash(python -c ' *)"
+    ]
+  }
+}

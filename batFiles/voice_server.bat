@@ -1,16 +1,11 @@
 @echo off
 title Hayeong — Voice Server
 
-:: ─────────────────────────────────────────────
-:: ROCm GPU environment — MUST be set before Python starts.
-:: HSA initializes at the OS level — setting these inside Python is too late.
-:: RX 7900 XTX is gfx1100 — the override tells ROCm to treat it as supported.
-:: ─────────────────────────────────────────────
-set HSA_OVERRIDE_GFX_VERSION=11.0.0
-set ROCR_VISIBLE_DEVICES=0
-set HIP_VISIBLE_DEVICES=0
+:: CUDA — RTX 3090
+:: ROCm variables removed — voice server now runs on 3090 CUDA
+set CUDA_VISIBLE_DEVICES=0
 
-:: Ollama GPU routing (already set system-wide but set here as safety net)
+:: Ollama GPU routing (safety net)
 set OLLAMA_NUM_GPU=99
 
 :: Kill any existing voice server on port 8765 before starting
@@ -24,7 +19,7 @@ timeout /t 1 /nobreak >nul
 echo.
 echo ─────────────────────────────────────────
 echo   Hayeong Voice Server
-echo   GPU: ROCm (RX 7900 XTX)
+echo   GPU: CUDA (RTX 3090)
 echo   Port: 8765
 echo ─────────────────────────────────────────
 echo.

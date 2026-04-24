@@ -78,6 +78,7 @@ INTENT_TO_CATEGORY = {
     "email_send":    "searching",
     "task_show":     "searching",
     "task_add":      "acknowledgment",
+    "task":          "acknowledgment",
     "vision":        "thinking",
     "image_gen":     "thinking",
     "none":          "acknowledgment",

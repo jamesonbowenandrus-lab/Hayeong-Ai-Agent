@@ -87,7 +87,7 @@ except Exception as _voice_err:
     def get_voice_modulation(e):  return {"speed": 1.0, "pitch": 1.0}
     print(f"⚠️  Voice unavailable ({_voice_err}) — text/brain mode only")
 from long_term_memory import recall_for_prompt, remember, categorize, import_from_memory_json
-from system_prompt_builder import build_system_prompt, detect_state_of_mind, get_minecraft_context
+from system_prompt_builder import build_system_prompt, detect_state_of_mind
 from hayeong_architecture import HayeongArchitecture
 from backup_manager import startup_sequence
 from identity_verification import (
@@ -463,6 +463,9 @@ def _quick_intent(text: str) -> str:
         return "vision"
     if any(w in t for w in ["task", "remind", "add", "show tasks"]):
         return "task"
+    if any(w in t for w in ["minecraft", "mine", "craft", "build", "dig",
+                              "farm", "chest", "inventory", "base"]):
+        return "task"   # acknowledgment — heard, on it
     return "generic"
 
 
@@ -1038,14 +1041,7 @@ def main(text_mode: bool = False, brain_mode: bool = False):
             print("   No backups available.")
             return
 
-    # ── STEP 2: GPU check ──
-    check_ollama_gpu()
-    gpu_status = check_gpu_status()
-    print(gpu_status["summary"])
-    if not gpu_status["ok"]:
-        print("   Continuing anyway — but expect slower responses.")
-
-    # ── STEP 3: First-time setup ──
+    # ── STEP 2: First-time setup ──
     check_first_time_setup()
 
     # ── STEP 4: Load everything ──
@@ -1086,6 +1082,25 @@ def main(text_mode: bool = False, brain_mode: bool = False):
     if brain_mode:
         check_startup_message()
 
+    # ── Validate shared state schema — safe merge of any missing keys ──
+    try:
+        from state_manager import validate_and_migrate
+        validate_and_migrate()
+    except Exception as _sm_err:
+        print(f"   [StateManager] Migration failed: {_sm_err}")
+
+    # ── Write session start marker to shared state ──
+    try:
+        from state_manager import write_conversation
+        from datetime import datetime as _dt
+        write_conversation({
+            "session_start":         _dt.now().isoformat(),
+            "last_james_message":    "",
+            "last_hayeong_response": "",
+        })
+    except Exception as _ss_err:
+        print(f"   [StateManager] Session start write failed: {_ss_err}")
+
     # ── Start reasoning loop — runs on its own thread, never speaks to James ──
     try:
         from reasoning_loop import start_reasoning_loop
@@ -1093,6 +1108,14 @@ def main(text_mode: bool = False, brain_mode: bool = False):
         print("   [ReasoningLoop] Heartbeat started.")
     except Exception as _rl_err:
         print(f"   [ReasoningLoop] Failed to start: {_rl_err}")
+
+    # ── Start system health monitor — background hardware awareness ──
+    try:
+        from system_monitor import start_monitor
+        start_monitor()
+        print("   [SystemMonitor] Health monitoring started.")
+    except Exception as _sm_err:
+        print(f"   [SystemMonitor] Failed to start: {_sm_err}")
 
     energy = EnergyManager()  if ENERGY_AVAILABLE   else None
     mixer  = MindStateMixer() if MIND_MIXER_AVAILABLE else None
@@ -1317,6 +1340,19 @@ def main(text_mode: bool = False, brain_mode: bool = False):
             if not user_input:
                 continue
 
+            # ── Quality flagging for fine-tuning ──
+            _u_lower = user_input.lower()
+            _QUALITY_GOOD = ["that was perfect", "exactly right", "that's right", "good answer", "well done", "perfect answer"]
+            _QUALITY_BAD  = ["that was wrong", "that's not right", "wrong answer", "bad response", "no that's wrong", "that's incorrect"]
+            try:
+                from finetune_logger import conversation_logger as _ft_logger
+                if any(p in _u_lower for p in _QUALITY_GOOD):
+                    _ft_logger.flag_last_turn("good")
+                elif any(p in _u_lower for p in _QUALITY_BAD):
+                    _ft_logger.flag_last_turn("bad")
+            except Exception:
+                pass
+
             # ── Route through async presence if available ──
             if _presence is not None:
                 intent = detect_intent(user_input)
@@ -1475,22 +1511,29 @@ def main(text_mode: bool = False, brain_mode: bool = False):
         if long_term_context:
             system_prompt = long_term_context + "\n\n" + system_prompt
 
-        # ── Inject reasoning context — what the 14b wants the 7b to know ──
+        # ── Consume reasoning context — what the 14b wants the 7b to know ──
+        # consume_communication_context() reads AND clears atomically — never injected twice
         try:
-            from state_manager import get_communication_context
-            _rctx = get_communication_context()
-            if _rctx.get("context_for_communication"):
-                system_prompt += (
-                    f"\n\n[Reasoning context: {_rctx['context_for_communication']}]"
-                )
-            if _rctx.get("active_task"):
-                system_prompt += (
-                    f"\n[Currently working on: {_rctx['active_task']} "
-                    f"— {_rctx.get('active_task_status', '')}]"
-                )
+            from state_manager import consume_communication_context
+            _reasoning_ctx = consume_communication_context()
+        except Exception:
+            _reasoning_ctx = ""
+        if _reasoning_ctx:
+            system_prompt += (
+                f"\n\n[REASONING CONTEXT — from your reasoning layer]\n"
+                f"{_reasoning_ctx}\n"
+                f"Use this context naturally in your response if relevant. "
+                f"Do not announce it literally — weave it in as your own awareness."
+            )
+
+        # ── System health — inject warnings so Hayeong can mention hardware issues ──
+        try:
+            from system_monitor import format_for_prompt as _health_for_prompt
+            _health_str = _health_for_prompt()
+            if _health_str:
+                system_prompt += "\n\n" + _health_str
         except Exception:
             pass
-
 
         current_emotion = arch.behavioral.state["interior_state"]["current"]["primary_emotion"]
 
@@ -1590,10 +1633,35 @@ def main(text_mode: bool = False, brain_mode: bool = False):
         if tracker and _snapshot:
             system_prompt = tracker.format_for_prompt(include_backlog=True) + "\n\n" + system_prompt
 
-        # Minecraft live context — injected when a session is active
-        mc_context = get_minecraft_context()
-        if mc_context:
-            system_prompt = mc_context + "\n\n" + system_prompt
+        # Minecraft awareness — 7b reads game state from shared state, never controls the bot
+        mc_active = False
+        try:
+            from state_manager import read_state as _read_state
+            _shared   = _read_state()
+            _mc       = _shared["reasoning"].get("minecraft_state", {})
+            mc_active = _shared["reasoning"].get("minecraft_session_active", False)
+            if mc_active and _mc and _mc.get("active"):
+                _health   = _mc.get("health", 20)
+                _food     = _mc.get("food", 20)
+                _tod      = _mc.get("time_of_day", 0) or 0
+                _time_str = "night" if _tod > 12000 else "day"
+                _inv      = ", ".join(_mc.get("inventory", [])) or "empty"
+                _mobs     = _mc.get("nearby_mobs", [])
+                _mob_str  = ", ".join(f"{m['name']} {m['dist']}m" for m in _mobs) or "none"
+                _mc_goal  = _shared["reasoning"].get("current_goal", "")
+                _mc_last  = _shared["reasoning"].get("last_conclusion", "")
+                system_prompt += (
+                    f"\n\n[MINECRAFT ACTIVE — your awareness of the game]\n"
+                    f"Health: {_health}/20  Food: {_food}/20  Time: {_time_str}\n"
+                    f"Inventory: {_inv}\n"
+                    f"Nearby mobs: {_mob_str}\n"
+                    f"Current goal: {_mc_goal}\n"
+                    f"Last action: {_mc_last}\n"
+                    f"You are aware of this state and can describe it naturally to James.\n"
+                    f"You do not control the bot — your reasoning layer handles all in-game decisions."
+                )
+        except Exception:
+            pass
 
         # ── System health — inject any pending alerts so Hayeong can tell James ──
         if brain_mode:
@@ -1645,7 +1713,7 @@ def main(text_mode: bool = False, brain_mode: bool = False):
         show_thinking()
 
         # Suppress TTS when Minecraft is active — text-only in-game
-        _effective_text_mode = text_mode or bool(mc_context)
+        _effective_text_mode = text_mode or mc_active
 
         ai_response = stream_response_and_speak(
             system_prompt, memory,
@@ -1685,6 +1753,18 @@ def main(text_mode: bool = False, brain_mode: bool = False):
                 "last_james_message":    user_input,
                 "last_hayeong_response": ai_response[:500],
             })
+        except Exception:
+            pass
+
+        # ── Fine-tuning log — append this turn for future training ──
+        try:
+            from finetune_logger import conversation_logger as _ft_logger
+            _ft_logger.log_turn(
+                user=user_input,
+                assistant=ai_response,
+                model=selected_model,
+                mood=current_emotion,
+            )
         except Exception:
             pass
 

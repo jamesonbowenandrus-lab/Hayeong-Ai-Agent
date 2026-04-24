@@ -31,12 +31,16 @@ ROUTER_LOG.parent.mkdir(parents=True, exist_ok=True)
 # ─────────────────────────────────────────────
 
 # VRAM budget on RTX 3090 (24GB CUDA):
-#   qwen2.5:7b  Q4_K_M  ≈  4GB  (communication LLM — port 11434)
-#   qwen2.5:14b Q4_K_M  ≈  8GB  (reasoning LLM    — port 11435)
-#   Kokoro TTS           ≈  2GB
-#   Whisper              ≈  2GB
-#   ─────────────────────────────
-#   Total                ≈ 16GB  (~8GB headroom)
+#   qwen2.5:7b  Q4_K_M  ≈  4GB  (communication LLM — port 11434, always loaded)
+#   qwen2.5:14b Q4_K_M  ≈  8GB  (reasoning LLM    — port 11435, always loaded)
+#   Kokoro TTS           ≈  2GB  (voice server)
+#   Whisper              ≈  2GB  (voice input)
+#   ─────────────────────────────────────────────────────────────
+#   Total core           ≈ 16GB  (~8GB headroom for peaks)
+#
+# RX 7900 XTX (24GB AMD/ROCm) — creative compute, NOT for core LLMs:
+#   Vision models, image gen, music gen, Blender — load on demand
+#   James's games — always free, zero competition from Hayeong
 #
 # Architecture rule:
 #   communication — everything James hears (voice, text responses)

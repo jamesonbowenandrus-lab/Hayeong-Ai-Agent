@@ -112,6 +112,17 @@ ENERGY_RESTORES = {
 }
 
 
+def _read_system_state() -> dict:
+    """Read the latest hardware state written by system_monitor."""
+    try:
+        state_file = BASE_DIR / "state" / "system_state.json"
+        if state_file.exists():
+            return json.loads(state_file.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return {}
+
+
 class EnergyManager:
     """
     Manages Hayeong's operational energy level.
@@ -379,6 +390,22 @@ class EnergyManager:
         """Reset energy to default. Use cautiously."""
         self._state = self._default_state()
         self._save()
+
+    def apply_hardware_modifiers(self):
+        """Apply energy costs based on current hardware health from system_monitor."""
+        state      = _read_system_state()
+        components = state.get("components", {})
+        gpu        = components.get("gpu", {})
+        if gpu.get("temp_c"):
+            if gpu["temp_c"] > 83:
+                self.cost(2, reason="GPU running very hot")
+            elif gpu["temp_c"] > 75:
+                self.cost(1, reason="GPU running warm")
+        if gpu.get("load_pct", 0) > 90:
+            self.cost(1, reason="GPU under heavy load")
+        ram = components.get("ram", {})
+        if ram.get("usage_pct", 0) > 85:
+            self.cost(1, reason="RAM pressure")
 
     def save_on_shutdown(self):
         """

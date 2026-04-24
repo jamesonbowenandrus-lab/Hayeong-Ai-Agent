@@ -439,40 +439,39 @@ def detect_state_of_mind(situation: str, environment: str, mood: dict) -> str:
 
 
 def get_minecraft_context() -> str:
-    """Read live game state from minecraft_state.json.
-    Returns a formatted context string if a session is active and fresh,
-    or an empty string if inactive or stale (>120s since last update)."""
+    """Read live Minecraft game state from shared state.
+    Returns an awareness-only context string for the communication LLM.
+    Returns empty string if session is inactive or stale (>120s since last update)."""
     from datetime import datetime
-    mc_state_path = BASE_DIR / "minecraft_state.json"
-    if not mc_state_path.exists():
-        return ""
     try:
-        with open(mc_state_path, "r", encoding="utf-8") as f:
-            state = json.load(f)
-        if not state.get("active"):
+        from state_manager import read_state
+        rstate = read_state()
+        mc = rstate.get("reasoning", {}).get("minecraft_state", {})
+        mc_active = rstate.get("reasoning", {}).get("minecraft_session_active", False)
+        if not mc_active or not mc.get("active"):
             return ""
-        last = datetime.fromisoformat(state["last_updated"])
+        last = datetime.fromisoformat(mc["last_updated"])
         if (datetime.now() - last).total_seconds() > 120:
             return ""
-        parts = ["[MINECRAFT SESSION ACTIVE]"]
-        if state.get("position"):
-            pos = state["position"]
+        parts = ["[MINECRAFT SESSION ACTIVE — awareness only, do not issue commands]"]
+        if mc.get("position"):
+            pos = mc["position"]
             parts.append(f"Position: x={pos.get('x','?')} y={pos.get('y','?')} z={pos.get('z','?')}")
-        if state.get("health") is not None:
-            parts.append(f"Health: {state['health']}/20  Hunger: {state.get('food', '?')}/20")
-        nearby = state.get("nearby_players") or []
+        if mc.get("health") is not None:
+            parts.append(f"Health: {mc['health']}/20  Hunger: {mc.get('food','?')}/20")
+        nearby = mc.get("nearby_players") or []
         if nearby:
             parts.append(f"Players nearby: {', '.join(nearby)}")
-        mobs = state.get("nearby_mobs") or []
+        mobs = mc.get("nearby_mobs") or []
         if mobs:
             mob_str = ", ".join(f"{m.get('name','?')}({m.get('dist','?')}m)" for m in mobs[:5])
             parts.append(f"Nearby mobs: {mob_str}")
-        inv = state.get("inventory") or []
+        inv = mc.get("inventory") or []
         if inv:
             parts.append(f"Inventory: {', '.join(inv[:8])}")
         parts.append(
-            "You are in-game with James. Respond in text only — no voice. "
-            "Keep responses short and Minecraft-relevant. Use in-game chat naturally."
+            "James is in-game. Respond in text only — no voice. "
+            "The reasoning layer controls all in-game actions."
         )
         return "\n".join(parts)
     except Exception:

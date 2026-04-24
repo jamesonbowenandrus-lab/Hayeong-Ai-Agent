@@ -13,12 +13,25 @@
     "active_task_status": "",
     "last_conclusion": "",
     "context_for_communication": "",
-    "minecraft_state": {}
+    "minecraft_state": {},
+    "minecraft_session_active": false,
+    "minecraft_last_event": "",
+    "minecraft_last_event_detail": {},
+    "minecraft_pending_action": {},
+    "minecraft_last_result": "",
+    "minecraft_voice_input": "",
+    "minecraft_urgency": "normal"
   },
   "system": {
     "active_scripts": [],
     "pending_results": [],
     "priority_flags": [],
-    "models_loaded": []
+    "models_loaded": [],
+    "health": {
+      "communication_llm": "healthy",
+      "reasoning_llm": "unknown",
+      "voice_server": "unknown",
+      "whisper": "unknown"
+    }
   }
 }

@@ -56,8 +56,12 @@ def _stop_all():
             pass
         _bot_process = None
     try:
-        from minecraft_bridge import clear_shared_state
-        clear_shared_state()
+        from state_manager import write_reasoning
+        import datetime
+        write_reasoning({
+            "minecraft_session_active": False,
+            "minecraft_state": {"active": False, "last_updated": datetime.datetime.now().isoformat()},
+        })
     except Exception:
         pass
     print("   [Minecraft] Bot and observer stopped")
@@ -108,6 +112,14 @@ def handle(action: str, user_input: str, context: dict) -> dict:
         return result(success=True, response=f"[MINECRAFT STATUS] {status}")
 
     return result(success=False, response="Unknown minecraft action.")
+
+
+def restart_minecraft_bot() -> bool:
+    """Stop and restart the bot. Called by the reasoning loop on disconnection recovery."""
+    _stop_all()
+    import time
+    time.sleep(2)
+    return _start_bot()
 
 
 def on_unload():
