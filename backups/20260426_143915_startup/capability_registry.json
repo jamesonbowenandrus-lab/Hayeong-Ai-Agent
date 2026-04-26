@@ -39,12 +39,12 @@
         "name":         "Voice Server",
         "type":         "internal",
         "script":       "voice_server.py",
-        "check_url":    "http://localhost:8765/health",
+        "check_url":    "http://localhost:5100/health",
         "needed_by":    ["voice"],
         "vram_cost":    "medium",
         "idle_ok":      true,
         "auto_restart": true,
-        "start_wait":   15,
+        "start_wait":   5,
         "notes":        "F5-TTS voice synthesis. Auto-starts on every launch. Local and phone clients connect to it."
       },
       {
@@ -114,12 +114,12 @@
         "type":         "external",
         "start_cmd":    ["ollama", "serve"],
         "check_url":    "http://localhost:11434",
-        "needed_by":    [],
+        "needed_by":    ["*"],
         "vram_cost":    "high",
         "idle_ok":      true,
-        "auto_restart": false,
+        "auto_restart": true,
         "start_wait":   5,
-        "notes":        "Managed by start_hayeong.bat — do not auto-start from app_manager. If Ollama crashes, James needs to know."
+        "notes":        "Core LLM inference server. Wildcard needed_by — every capability depends on it."
       }
     ]
   },

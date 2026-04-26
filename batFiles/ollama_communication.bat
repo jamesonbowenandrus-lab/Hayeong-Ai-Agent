@@ -8,7 +8,7 @@ set OLLAMA_NUM_GPU=99
 :: Instance-specific home and port
 set OLLAMA_HOME=H:\hayeong\ollama\communication
 set OLLAMA_HOST=127.0.0.1:11434
-set OLLAMA_MODELS=H:\hayeong\ollama\communication\models
+set OLLAMA_MODELS=H:\AI\ollama\models
 
 :: Keep model loaded — never unload between calls
 set OLLAMA_KEEP_ALIVE=-1

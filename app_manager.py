@@ -38,6 +38,14 @@ BASE_DIR      = Path(__file__).parent
 REGISTRY_FILE = BASE_DIR / "capability_registry.json"
 
 
+def _make_startupinfo() -> subprocess.STARTUPINFO:
+    """Windows: open new console minimized, do not steal focus."""
+    si = subprocess.STARTUPINFO()
+    si.dwFlags    = subprocess.STARTF_USESHOWWINDOW
+    si.wShowWindow = 6  # SW_MINIMIZE
+    return si
+
+
 class AppManager:
     """
     Unified process manager for all of Hayeong's processes.
@@ -103,6 +111,12 @@ class AppManager:
 
     def _auto_restart_loop(self):
         """Background thread — restarts crashed processes where auto_restart=true."""
+        # Grace period — bat-launched processes (voice server, Ollama) need time to
+        # start before we begin health-checking them. Without this, a transient HTTP
+        # failure during load causes app_manager to spawn a duplicate terminal.
+        STARTUP_GRACE = 60
+        time.sleep(STARTUP_GRACE)
+
         while self._running:
             time.sleep(10)
             for app_id, app in list(self._apps.items()):
@@ -237,6 +251,7 @@ class AppManager:
             cmd,
             cwd=str(BASE_DIR),
             creationflags=subprocess.CREATE_NEW_CONSOLE if sys.platform == "win32" else 0,
+            startupinfo=_make_startupinfo() if sys.platform == "win32" else None,
         )
 
     def _start_external(self, app_id: str, app: dict) -> Optional[subprocess.Popen]:
@@ -261,6 +276,7 @@ class AppManager:
             shell=use_shell,
             cwd=cwd,
             creationflags=subprocess.CREATE_NEW_CONSOLE if sys.platform == "win32" else 0,
+            startupinfo=_make_startupinfo() if sys.platform == "win32" else None,
         )
 
     def _wait_for_ready(self, app_id: str, app: dict) -> tuple[bool, str]:

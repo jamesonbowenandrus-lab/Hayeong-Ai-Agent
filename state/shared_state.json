@@ -3,7 +3,7 @@
     "last_james_message": "",
     "last_hayeong_response": "",
     "current_topic": "",
-    "session_start": "",
+    "session_start": "2026-04-26T17:07:16.075964",
     "flags": []
   },
   "reasoning": {
@@ -12,8 +12,11 @@
     "active_task": "",
     "active_task_status": "",
     "last_conclusion": "",
-    "context_for_communication": "",
-    "minecraft_state": {},
+    "context_for_communication": "Heads up — system health issue detected: reasoning_llm is not healthy. You might want to mention this to James.",
+    "minecraft_state": {
+      "active": false,
+      "last_updated": "2026-04-25T23:28:57.027885"
+    },
     "minecraft_session_active": false,
     "minecraft_last_event": "",
     "minecraft_last_event_detail": {},
@@ -29,8 +32,8 @@
     "models_loaded": [],
     "health": {
       "communication_llm": "healthy",
-      "reasoning_llm": "unknown",
-      "voice_server": "unknown",
+      "reasoning_llm": "offline",
+      "voice_server": "healthy",
       "whisper": "unknown"
     }
   }

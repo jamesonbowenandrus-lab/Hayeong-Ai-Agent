@@ -4,7 +4,16 @@
       "Bash(python -c \"import reasoning_loop; print\\('reasoning_loop OK'\\)\")",
       "Bash(python -c \"import minecraft_bridge; print\\('minecraft_bridge OK'\\)\")",
       "Bash(python -c \"import reasoning_loop; import minecraft_bridge; print\\('OK'\\)\")",
-      "Bash(python -c ' *)"
+      "Bash(python -c ' *)",
+      "PowerShell(nvidia-smi)",
+      "PowerShell($env:CUDA_VISIBLE_DEVICES = \"0\"; [System.Environment]::SetEnvironmentVariable\\(\"CUDA_VISIBLE_DEVICES\", \"0\", \"Machine\"\\); Write-Output \"Set CUDA_VISIBLE_DEVICES=0 \\(session + system\\)\")",
+      "PowerShell($env:CUDA_VISIBLE_DEVICES = \"0\"; [System.Environment]::SetEnvironmentVariable\\(\"CUDA_VISIBLE_DEVICES\", \"0\", \"User\"\\); Write-Output \"CUDA_VISIBLE_DEVICES=0 set for current session + user environment\")",
+      "PowerShell($env:CUDA_VISIBLE_DEVICES)",
+      "PowerShell(Write-Output \"CUDA_VISIBLE_DEVICES: $env:CUDA_VISIBLE_DEVICES\")",
+      "PowerShell([System.Environment]::GetEnvironmentVariable\\(\"CUDA_VISIBLE_DEVICES\", \"User\"\\))",
+      "PowerShell(cd H:\\\\hayeong; $env:PYTHONIOENCODING = \"utf-8\"; .\\\\.venv\\\\Scripts\\\\python.exe test_kokoro.py 2>&1)",
+      "PowerShell(cd H:\\\\hayeong; $env:PYTHONIOENCODING = \"utf-8\"; .\\\\.venv\\\\Scripts\\\\python.exe -c \"import whisper; import torch; print\\('CUDA:', torch.cuda.is_available\\(\\)\\); model = whisper.load_model\\('base', device='cuda'\\); print\\('Whisper loaded on CUDA'\\)\" 2>&1)",
+      "PowerShell(ollama ps 2>&1)"
     ]
   }
 }

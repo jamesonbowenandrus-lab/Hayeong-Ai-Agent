@@ -1,0 +1,59 @@
+{
+  "timestamp": "2026-04-26T17:09:49.180110",
+  "components": {
+    "communication_llm": {
+      "status": "healthy",
+      "healthy": true,
+      "detail": "fully on GPU",
+      "vram_gb": 8.2,
+      "on_gpu": true
+    },
+    "reasoning_llm": {
+      "status": "offline",
+      "healthy": false,
+      "detail": "Ollama not reachable on port 11435",
+      "vram_gb": 0,
+      "on_gpu": false
+    },
+    "voice_server": {
+      "status": "healthy",
+      "healthy": true,
+      "detail": "voice server responding"
+    },
+    "cpu": {
+      "status": "healthy",
+      "healthy": true,
+      "usage_pct": 33.1,
+      "temp_c": null,
+      "detail": "33% load"
+    },
+    "ram": {
+      "status": "healthy",
+      "healthy": true,
+      "usage_pct": 47.9,
+      "avail_gb": 35.3,
+      "detail": "48% used, 35.3GB free"
+    },
+    "gpu": {
+      "status": "unavailable",
+      "healthy": true,
+      "detail": "pynvml not available — install after 3090"
+    },
+    "disk": {
+      "status": "healthy",
+      "healthy": true,
+      "free_gb": 3871.6,
+      "used_pct": 3.2,
+      "detail": "3871.6GB free (3% used)"
+    },
+    "network": {
+      "status": "healthy",
+      "healthy": true,
+      "detail": "network reachable"
+    }
+  },
+  "overall_healthy": false,
+  "critical_components": [
+    "reasoning_llm"
+  ]
+}
