@@ -1,0 +1,1 @@
+I crashed unexpectedly and the watchdog restarted me. I don't have full context on what happened — check hayeong_outputs/logs/brain_errors.log for details.

@@ -43,9 +43,9 @@
         "needed_by":    ["voice"],
         "vram_cost":    "medium",
         "idle_ok":      true,
-        "auto_restart": false,
-        "start_wait":   35,
-        "notes":        "Whisper + Kokoro take 25-30s to load. start_wait must exceed load time. Started by communication LLM on demand."
+        "auto_restart": true,
+        "start_wait":   15,
+        "notes":        "F5-TTS voice synthesis. Auto-starts on every launch. Local and phone clients connect to it."
       },
       {
         "id":           "discord",
@@ -55,9 +55,9 @@
         "needed_by":    [],
         "vram_cost":    "none",
         "idle_ok":      true,
-        "auto_restart": false,
+        "auto_restart": true,
         "start_wait":   3,
-        "notes":        "Discord JS bot. Started by reasoning LLM on demand. Requires Node.js."
+        "notes":        "Discord JS bot. Auto-starts on every launch. Requires Node.js."
       },
       {
         "id":           "voice_ptt",

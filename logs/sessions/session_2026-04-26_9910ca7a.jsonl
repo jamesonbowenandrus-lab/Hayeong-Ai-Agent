@@ -1,11 +1,3 @@
-{"type": "session_start", "session_id": "af91db6a", "timestamp": "2026-04-26T14:39:14.914943", "date": "2026-04-26"}
-{"type": "session_start", "session_id": "60c09760", "timestamp": "2026-04-26T16:52:46.109967", "date": "2026-04-26"}
-{"type": "session_start", "session_id": "68478270", "timestamp": "2026-04-26T17:06:29.958643", "date": "2026-04-26"}
-{"type": "conversation", "session_id": "68478270", "timestamp": "2026-04-26T17:07:12.989556", "role": "james", "content": "hello", "intent": null, "mood": null, "model_used": null}
-{"type": "session_start", "session_id": "7cf46e46", "timestamp": "2026-04-26T17:21:40.732753", "date": "2026-04-26"}
-{"type": "session_start", "session_id": "502d97e5", "timestamp": "2026-04-26T17:42:43.655843", "date": "2026-04-26"}
-{"type": "conversation", "session_id": "502d97e5", "timestamp": "2026-04-26T17:44:12.469087", "role": "james", "content": "hello", "intent": null, "mood": null, "model_used": null}
-{"type": "conversation", "session_id": "502d97e5", "timestamp": "2026-04-26T17:45:12.492901", "role": "james", "content": "hlee", "intent": null, "mood": null, "model_used": null}
 {"type": "session_start", "session_id": "9910ca7a", "timestamp": "2026-04-26T18:02:48.914271", "date": "2026-04-26"}
 {"type": "conversation", "session_id": "9910ca7a", "timestamp": "2026-04-26T18:04:36.856375", "role": "james", "content": "hello", "intent": null, "mood": null, "model_used": null}
 {"type": "conversation", "session_id": "9910ca7a", "timestamp": "2026-04-26T18:04:59.030892", "role": "hayeong", "content": "Hey there! How can I assist you today, James? Is there anything specific on your mind or just a friendly chat you'd like to have?", "intent": null, "mood": "amused", "model_used": "qwen2.5:7b-instruct-q4_K_M"}

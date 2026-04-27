@@ -69,6 +69,7 @@ class AppManager:
     def __init__(self):
         self._apps:  dict[str, dict]             = {}  # id → registry entry
         self._procs: dict[str, subprocess.Popen] = {}  # id → process we started
+        self._starting: set                      = set()  # app_ids currently in the process of starting
         self._lock    = threading.Lock()
         self._running = False
         self._load()
@@ -110,29 +111,35 @@ class AppManager:
         self._running = False
 
     def _auto_restart_loop(self):
-        """Background thread — restarts crashed processes where auto_restart=true."""
-        # Grace period — bat-launched processes (voice server, Ollama) need time to
-        # start before we begin health-checking them. Without this, a transient HTTP
-        # failure during load causes app_manager to spawn a duplicate terminal.
+        """Background thread — detects crashes and notifies the reasoning LLM.
+        Does NOT restart; restarts are Hayeong's decision."""
         STARTUP_GRACE = 60
         time.sleep(STARTUP_GRACE)
 
         while self._running:
             time.sleep(10)
             for app_id, app in list(self._apps.items()):
-                if not app.get("auto_restart"):
-                    continue
+                crashed = False
                 with self._lock:
+                    if app_id in self._starting:
+                        continue
                     proc = self._procs.get(app_id)
                     if proc is None:
-                        continue  # not started / intentionally stopped
+                        continue
                     if proc.poll() is not None:
-                        log.warning(f"{app['name']} crashed — restarting")
-                # Restart outside lock to avoid blocking
-                try:
-                    self._do_start(app_id)
-                except Exception as e:
-                    log.error(f"Auto-restart failed for {app_id}: {e}")
+                        del self._procs[app_id]
+                        crashed = True
+
+                if crashed:
+                    log.warning(f"{app['name']} crashed — notifying reasoning LLM")
+                    try:
+                        from hayeong_state import push_system_alert
+                        push_system_alert(
+                            app_id, "crashed",
+                            reason=f"{app['name']} process exited unexpectedly",
+                        )
+                    except Exception as e:
+                        log.error(f"Could not push system alert for {app_id}: {e}")
 
     # ─────────────────────────────────────────
     # IS RUNNING
@@ -143,6 +150,12 @@ class AppManager:
         Check if a process is currently running.
         Tries HTTP health check → process we own → process name check.
         """
+        # A process that is starting is considered running — prevents duplicate spawns
+        # while Whisper/Kokoro are loading (can take 30s+, health check fails during this window)
+        with self._lock:
+            if app_id in self._starting:
+                return True
+
         app = self._apps.get(app_id)
         if not app:
             return False
@@ -198,29 +211,44 @@ class AppManager:
 
     def _do_start(self, app_id: str) -> tuple[bool, str]:
         """Internal start — no duplicate check. Safe to call from auto-restart."""
-        app = self._apps.get(app_id)
-        if not app:
-            return False, f"No registry entry for '{app_id}'."
-
-        app_type = app.get("type", "external")
+        # Concurrent start protection — voice server takes 30s+ to load Whisper+Kokoro.
+        # Health check fails during loading; without this guard every failure spawns a new instance.
+        with self._lock:
+            if app_id in self._starting:
+                name = self._apps.get(app_id, {}).get("name", app_id)
+                log.info(f"[AppManager] {app_id} is already starting — skipping duplicate start")
+                return True, f"{name} is already starting."
+            self._starting.add(app_id)
 
         try:
-            if app_type == "internal":
-                proc = self._start_internal(app_id, app)
-            else:
-                proc = self._start_external(app_id, app)
+            app = self._apps.get(app_id)
+            if not app:
+                return False, f"No registry entry for '{app_id}'."
 
-            if proc is None:
-                return False, f"Failed to launch {app['name']}."
+            app_type = app.get("type", "external")
 
+            try:
+                if app_type == "internal":
+                    proc = self._start_internal(app_id, app)
+                else:
+                    proc = self._start_external(app_id, app)
+
+                if proc is None:
+                    return False, f"Failed to launch {app['name']}."
+
+                with self._lock:
+                    self._procs[app_id] = proc
+
+                return self._wait_for_ready(app_id, app)
+
+            except Exception as e:
+                log.error(f"Failed to start {app['name']}: {e}")
+                return False, f"I tried to start {app['name']} but got an error: {e}"
+
+        finally:
+            # Always release the starting lock — success or failure
             with self._lock:
-                self._procs[app_id] = proc
-
-            return self._wait_for_ready(app_id, app)
-
-        except Exception as e:
-            log.error(f"Failed to start {app['name']}: {e}")
-            return False, f"I tried to start {app['name']} but got an error: {e}"
+                self._starting.discard(app_id)
 
     def _start_internal(self, app_id: str, app: dict) -> Optional[subprocess.Popen]:
         """

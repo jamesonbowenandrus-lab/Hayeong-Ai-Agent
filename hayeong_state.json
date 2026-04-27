@@ -2,7 +2,7 @@
   "input_queue": [],
   "output_queue": [],
   "interface_status": {
-    "voice": "reconnecting",
+    "voice": "running",
     "text": "running",
     "discord": "unknown"
   },

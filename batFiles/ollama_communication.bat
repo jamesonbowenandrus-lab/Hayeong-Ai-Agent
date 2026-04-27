@@ -1,9 +1,11 @@
 @echo off
 title Hayeong — Ollama Communication LLM (port 11434)
 
-:: CUDA targeting — RTX 3090
+:: CUDA targeting — RTX 3090 only, exclude AMD ROCm
 set CUDA_VISIBLE_DEVICES=0
 set OLLAMA_NUM_GPU=99
+set ROCR_VISIBLE_DEVICES=
+set HIP_VISIBLE_DEVICES=
 
 :: Instance-specific home and port
 set OLLAMA_HOME=H:\hayeong\ollama\communication

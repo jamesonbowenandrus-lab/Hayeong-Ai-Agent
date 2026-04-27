@@ -44,9 +44,32 @@ REASONING_MODEL = "qwen2.5:14b-instruct-q4_K_M"
 HEARTBEAT_FALLBACK = 5.0   # sleep duration after an exception — never used as default
 TIMEOUT_SECONDS    = 30    # per Ollama call
 
-_stop_event = threading.Event()
-_tick_lock  = threading.Lock()
+_stop_event   = threading.Event()
+_tick_lock    = threading.Lock()
 _thread: threading.Thread | None = None
+_startup_done = False
+
+# ─────────────────────────────────────────────
+# STARTUP CHECK
+# Runs once on the first heartbeat tick — Hayeong's first conscious decision.
+# ─────────────────────────────────────────────
+
+def _do_startup_check():
+    """On first wake, start the communication LLM if it isn't already running."""
+    global _startup_done
+    if _startup_done:
+        return
+    _startup_done = True
+    try:
+        from app_manager import get_app_manager
+        mgr = get_app_manager()
+        if not mgr.is_running("communication_llm"):
+            print("[reasoning_loop] Starting communication LLM...")
+            ok, msg = mgr.start("communication_llm")
+            print(f"[reasoning_loop] Communication LLM: {msg}")
+    except Exception as e:
+        print(f"[reasoning_loop] Startup check failed: {e}")
+
 
 # ─────────────────────────────────────────────
 # DOMAIN KNOWLEDGE CACHE
@@ -712,6 +735,9 @@ def _heartbeat():
             continue
 
         try:
+            # 0. Startup check — runs only once, on the first tick
+            _do_startup_check()
+
             # 1. Priority flags — always first, always immediate
             flags = pop_priority_flags()
             if flags:

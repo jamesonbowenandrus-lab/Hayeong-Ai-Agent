@@ -7,3 +7,21 @@ Traceback (most recent call last):
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 AttributeError: 'HayeongArchitecture' object has no attribute 'sync_mood_to_behavioral_state'
 ---
+[2026-04-26 17:44:12] AttributeError: 'HayeongArchitecture' object has no attribute 'sync_mood_to_behavioral_state'
+Traceback (most recent call last):
+  File "H:\hayeong\main.py", line 1800, in <module>
+    main(text_mode=args.text, brain_mode=args.brain)
+  File "H:\hayeong\main.py", line 1503, in main
+    arch.sync_mood_to_behavioral_state(mood_state)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'HayeongArchitecture' object has no attribute 'sync_mood_to_behavioral_state'
+---
+[2026-04-26 17:45:12] AttributeError: 'HayeongArchitecture' object has no attribute 'sync_mood_to_behavioral_state'
+Traceback (most recent call last):
+  File "H:\hayeong\main.py", line 1800, in <module>
+    main(text_mode=args.text, brain_mode=args.brain)
+  File "H:\hayeong\main.py", line 1503, in main
+    arch.sync_mood_to_behavioral_state(mood_state)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'HayeongArchitecture' object has no attribute 'sync_mood_to_behavioral_state'
+---

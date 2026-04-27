@@ -94,7 +94,6 @@ def start_brain():
     log("Starting Hayeong brain...")
     brain_process = subprocess.Popen(
         [sys.executable, BRAIN_SCRIPT, "--brain"],
-        creationflags=subprocess.CREATE_NEW_CONSOLE,
         cwd=str(BASE_DIR),
     )
     log(f"Brain started (PID {brain_process.pid}).")
