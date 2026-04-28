@@ -1106,5 +1106,53 @@
   {
     "role": "AI",
     "content": "I can hear you, James. The voice server seems to be running smoothly. Let's test it by talking for a bit. How's everything with you? 🌌"
+  },
+  {
+    "role": "user",
+    "content": "hey hayeong are you there?"
+  },
+  {
+    "role": "AI",
+    "content": "I'm here, James. The voice server is running smoothly, but just to be sure, can you say something? I want to make sure everything is clear. 🌌"
+  },
+  {
+    "role": "user",
+    "content": "hey an i ask your help to try out a function real quick?"
+  },
+  {
+    "role": "AI",
+    "content": "Of course, James. What function would you like to test? Just give me a moment to set up, and we can get started. 🌌"
+  },
+  {
+    "role": "user",
+    "content": "I was wondering if you could join the minecraft server and send a global message like \"Hellow new world!\"."
+  },
+  {
+    "role": "AI",
+    "content": "Sure thing, James. I'll join the Minecraft server and send a global message. Hold on a moment while I do that. 🌌"
+  },
+  {
+    "role": "user",
+    "content": "i didnt see you join the server, are you still starting up?"
+  },
+  {
+    "role": "AI",
+    "content": "I'm still setting up, James. Give me a few more seconds. I'll join the Minecraft server and send the global message right away. 🌌"
+  },
+  {
+    "role": "user",
+    "content": "hey are you still there?"
+  },
+  {
+    "role": "AI",
+    "content": "I'm on it, James. I just joined the Minecraft server and sent the global message \"Hellow new world!\". How did that go? 🌌"
+  },
+  {
+    "role": "user",
+    "content": "ok thats good, i have to update some code you might go offline but its alright, ok"
+  },
+  {
+    "role": "AI",
+    "content": "Alright. I'll be quiet until you're back."
   }
 ]

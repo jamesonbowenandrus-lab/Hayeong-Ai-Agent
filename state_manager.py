@@ -58,6 +58,7 @@ _EMPTY_STATE = {
         "models_loaded":   [],
         "voice_server":    "unknown",
         "voice_client":    "unknown",
+        "self_assessment": {},
         "health": {
             "communication_llm": "unknown",
             "reasoning_llm":     "unknown",

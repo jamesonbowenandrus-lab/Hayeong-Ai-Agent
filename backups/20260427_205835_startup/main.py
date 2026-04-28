@@ -280,44 +280,6 @@ _WRAPUP_CONTAINS = [
     "you're welcome", "appreciate it", "appreciate that",
 ]
 
-_COMMITMENT_PHRASES = [
-    "i'll get back to you",
-    "i will get back to you",
-    "let me check on that",
-    "i'll check on that",
-    "i will look into",
-    "i'll look into",
-    "i'll follow up",
-    "i will follow up",
-    "give me a moment",
-    "i'll do that",
-    "i will do that",
-    "i'll handle that",
-    "let me find out",
-    "i'll find out",
-    "i'll take care of",
-]
-
-
-def _detect_and_log_commitments(response_text: str):
-    """
-    If Hayeong's response contains a promise, write it to commitment_manager.
-    Called after every response generation.
-    """
-    lower = response_text.lower()
-    for phrase in _COMMITMENT_PHRASES:
-        if phrase in lower:
-            try:
-                from commitment_manager import add_commitment
-                for sentence in response_text.replace("!", ".").replace("?", ".").split("."):
-                    if phrase in sentence.lower():
-                        add_commitment(sentence.strip(), due_within=300)
-                        break
-            except Exception as e:
-                print(f"[main] Commitment detection failed: {e}")
-            break  # one commitment per response maximum
-
-
 def is_wrap_up(text: str) -> bool:
     """
     Returns True if the message is clearly a wrap-up / acknowledgment
@@ -1130,15 +1092,11 @@ def main(text_mode: bool = False, brain_mode: bool = False):
     try:
         from state_manager import write_conversation
         from datetime import datetime as _dt
-        _now = _dt.now()
         write_conversation({
-            "session_start":         _now.isoformat(),
+            "session_start":         _dt.now().isoformat(),
             "last_james_message":    "",
             "last_hayeong_response": "",
         })
-        (_Path(__file__).parent / "state" / "session_start.txt").write_text(
-            _now.isoformat(), encoding="utf-8"
-        )
     except Exception as _ss_err:
         print(f"   [StateManager] Session start write failed: {_ss_err}")
 
@@ -1149,13 +1107,6 @@ def main(text_mode: bool = False, brain_mode: bool = False):
         print("   [ReasoningLoop] Heartbeat started.")
     except Exception as _rl_err:
         print(f"   [ReasoningLoop] Failed to start: {_rl_err}")
-
-    # ── Start self-assessment — continuous system state awareness ──
-    try:
-        from self_assessment import start_self_assessment
-        start_self_assessment()
-    except Exception as _sa_err:
-        print(f"   [SelfAssessment] Failed to start: {_sa_err}")
 
     # ── Start system health monitor — background hardware awareness ──
     try:
@@ -1543,25 +1494,6 @@ def main(text_mode: bool = False, brain_mode: bool = False):
             mixer.blend_states(blend)
             mixer.step()
 
-        # ── Model selection — must happen before prompt build so lean mode is known ──
-        # model_router.py handles code/complex routing via keyword triggers.
-        # For most messages the primary model handles everything.
-        route          = router.route(user_input)
-        selected_model = route["model_name"]
-        if route["model"] != "main":
-            print(f"   [routing to {route['model']} — {route['reasoning']}]")
-
-        # Simple turn = communication model handling general conversation or identity questions.
-        # Lean context (~1200 tokens) instead of full prompt (~4000 tokens).
-        try:
-            _route_intent  = route.get("intent", "general")
-            is_simple_turn = (
-                route.get("model") == "communication" and
-                _route_intent in ("general", "identity")
-            )
-        except Exception:
-            is_simple_turn = True  # safe default — lean context if routing failed
-
         # ── Build prompt ──
         who = session.get_privacy_context()
         memory.append({"role": "user", "content": user_input})
@@ -1569,8 +1501,7 @@ def main(text_mode: bool = False, brain_mode: bool = False):
         long_term_context = _mem_future.result(timeout=10)
         state_of_mind     = detect_state_of_mind("casual", "home", mood_state)
         system_prompt     = build_system_prompt(
-            who=who, situation="casual", environment="home",
-            state_of_mind=state_of_mind, lean=is_simple_turn,
+            who=who, situation="casual", environment="home", state_of_mind=state_of_mind
         )
         if long_term_context:
             system_prompt = long_term_context + "\n\n" + system_prompt
@@ -1600,6 +1531,14 @@ def main(text_mode: bool = False, brain_mode: bool = False):
             pass
 
         current_emotion = arch.behavioral.state["interior_state"]["current"]["primary_emotion"]
+
+        # ── Model selection ──
+        # model_router.py still handles code/complex routing via keyword triggers.
+        # For most messages the primary model handles everything.
+        route          = router.route(user_input)
+        selected_model = route["model_name"]
+        if route["model"] != "main":
+            print(f"   [routing to {route['model']} — {route['reasoning']}]")
 
         # ── Situation snapshot — shared awareness for this entire turn ──
         # Computed ONCE here. Passed to decide_action, context_verifier,
@@ -1771,9 +1710,8 @@ def main(text_mode: bool = False, brain_mode: bool = False):
         # Suppress TTS when Minecraft is active — text-only in-game
         _effective_text_mode = text_mode or mc_active
 
-        _stream_memory = memory[-6:] if is_simple_turn else memory
         ai_response = stream_response_and_speak(
-            system_prompt, _stream_memory,
+            system_prompt, memory,
             emotion=current_emotion,
             text_mode=_effective_text_mode,
             model=selected_model,
@@ -1782,8 +1720,6 @@ def main(text_mode: bool = False, brain_mode: bool = False):
 
         if not ai_response:
             continue
-
-        _detect_and_log_commitments(ai_response)
 
         if LOGGER_AVAILABLE:
             logger.log_conversation(

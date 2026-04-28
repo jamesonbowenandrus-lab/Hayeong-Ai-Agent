@@ -293,6 +293,7 @@ class ModelRouter:
         else:
             decision["reasoning"] = f"Intent: {intent} — communication LLM (Qwen 7b)."
 
+        print(f"[router] '{message[:50]}' → {decision['model']} ({decision['reasoning'][:60]})")
         self._log(message[:100], decision)
         return decision
 

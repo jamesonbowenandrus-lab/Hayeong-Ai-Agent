@@ -1,11 +1,11 @@
 {
-  "timestamp": "2026-04-27T20:42:10.722864",
+  "timestamp": "2026-04-28T15:46:01.907067",
   "components": {
     "communication_llm": {
       "status": "healthy",
       "healthy": true,
       "detail": "fully on GPU",
-      "vram_gb": 4.7,
+      "vram_gb": 8.2,
       "on_gpu": true
     },
     "reasoning_llm": {
@@ -23,16 +23,16 @@
     "cpu": {
       "status": "healthy",
       "healthy": true,
-      "usage_pct": 19.6,
+      "usage_pct": 5.8,
       "temp_c": null,
-      "detail": "20% load"
+      "detail": "6% load"
     },
     "ram": {
       "status": "healthy",
       "healthy": true,
-      "usage_pct": 49.1,
-      "avail_gb": 34.5,
-      "detail": "49% used, 34.5GB free"
+      "usage_pct": 47.5,
+      "avail_gb": 35.6,
+      "detail": "48% used, 35.6GB free"
     },
     "gpu": {
       "status": "unavailable",

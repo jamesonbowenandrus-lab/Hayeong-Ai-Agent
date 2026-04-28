@@ -1543,25 +1543,6 @@ def main(text_mode: bool = False, brain_mode: bool = False):
             mixer.blend_states(blend)
             mixer.step()
 
-        # ── Model selection — must happen before prompt build so lean mode is known ──
-        # model_router.py handles code/complex routing via keyword triggers.
-        # For most messages the primary model handles everything.
-        route          = router.route(user_input)
-        selected_model = route["model_name"]
-        if route["model"] != "main":
-            print(f"   [routing to {route['model']} — {route['reasoning']}]")
-
-        # Simple turn = communication model handling general conversation or identity questions.
-        # Lean context (~1200 tokens) instead of full prompt (~4000 tokens).
-        try:
-            _route_intent  = route.get("intent", "general")
-            is_simple_turn = (
-                route.get("model") == "communication" and
-                _route_intent in ("general", "identity")
-            )
-        except Exception:
-            is_simple_turn = True  # safe default — lean context if routing failed
-
         # ── Build prompt ──
         who = session.get_privacy_context()
         memory.append({"role": "user", "content": user_input})
@@ -1600,6 +1581,25 @@ def main(text_mode: bool = False, brain_mode: bool = False):
             pass
 
         current_emotion = arch.behavioral.state["interior_state"]["current"]["primary_emotion"]
+
+        # ── Model selection ──
+        # model_router.py still handles code/complex routing via keyword triggers.
+        # For most messages the primary model handles everything.
+        route          = router.route(user_input)
+        selected_model = route["model_name"]
+        if route["model"] != "main":
+            print(f"   [routing to {route['model']} — {route['reasoning']}]")
+
+        # Simple turn = communication model handling general conversation or identity questions.
+        # Lean context (~1200 tokens) instead of full prompt (~4000 tokens).
+        try:
+            _route_intent  = route.get("intent", "general")
+            is_simple_turn = (
+                route.get("model") == "communication" and
+                _route_intent in ("general", "identity")
+            )
+        except Exception:
+            is_simple_turn = True  # safe default — lean context if routing failed
 
         # ── Situation snapshot — shared awareness for this entire turn ──
         # Computed ONCE here. Passed to decide_action, context_verifier,

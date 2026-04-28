@@ -233,6 +233,28 @@ def _check_voice_awareness():
     write_reasoning({"context_for_communication": msg})
 
 
+def _check_commitments():
+    """
+    Check for overdue commitments and raise them as priority flags.
+    Called every heartbeat tick.
+    """
+    try:
+        from commitment_manager import get_overdue
+        overdue = get_overdue()
+        if not overdue:
+            return
+        from state_manager import flag_priority
+        for cmt in overdue:
+            print(f"[reasoning_loop] Overdue commitment: {cmt['text'][:80]}")
+            flag_priority(
+                f"You made a commitment and haven't followed through: '{cmt['text']}' "
+                f"(promised {cmt['made_at']}). Address this now or drop it intentionally.",
+                level="high",
+            )
+    except Exception as e:
+        print(f"[reasoning_loop] Commitment check failed: {e}")
+
+
 # ─────────────────────────────────────────────
 # DOMAIN KNOWLEDGE CACHE
 # Warmed at startup; used to inject context into reasoning prompts.
@@ -777,6 +799,16 @@ def _advance_active_task():
                     task=task,
                     result=result.get("progress", "")[:400],
                 )
+                try:
+                    from commitment_manager import get_all_active, fulfill_commitment
+                    task_words = set(task.lower().split())
+                    for cmt in get_all_active():
+                        cmt_words = set(cmt["text"].lower().split())
+                        if len(task_words & cmt_words) >= 3:
+                            fulfill_commitment(cmt["id"])
+                            print(f"[reasoning_loop] Auto-fulfilled commitment: {cmt['text'][:60]}")
+                except Exception:
+                    pass
             write_reasoning(updates)
 
 
@@ -884,7 +916,62 @@ def _get_next_interval(state: dict) -> float:
     if goal:
         return 15.0
 
-    return 30.0
+    return 60.0
+
+
+# ─────────────────────────────────────────────
+# PROACTIVE CHECKS
+# Run every idle tick regardless of message activity — keeps Hayeong
+# alive and self-aware between conversations.
+# ─────────────────────────────────────────────
+
+_TICK_INTERVAL = 60.0   # seconds between idle ticks
+
+def _proactive_checks():
+    """
+    Checks that fire every heartbeat tick unconditionally.
+    1. Self-assessment freshness — warn if >60s since last assessment.
+    2. Stale unread context — re-flag as urgent if sitting >2 minutes.
+    """
+    state = read_state()
+
+    # 1. Self-assessment freshness
+    assessment = state.get("system", {}).get("self_assessment", {})
+    if assessment:
+        try:
+            assessed_at = datetime.fromisoformat(assessment.get("assessed_at", ""))
+            age = (datetime.now() - assessed_at).total_seconds()
+            if age > 60:
+                print(f"[reasoning_loop] Self-assessment is {age:.0f}s old — background assessor may be stalled")
+        except Exception:
+            pass
+
+    # 2. Stale context_for_communication — if non-empty, note it hasn't been consumed
+    ctx = state.get("reasoning", {}).get("context_for_communication", "")
+    if ctx:
+        # Track how long this context has been sitting using a module-level timestamp.
+        # If we wrote it and it hasn't been consumed after 2 minutes, escalate urgency.
+        now = time.time()
+        _proactive_checks._ctx_hash  = getattr(_proactive_checks, "_ctx_hash",  "")
+        _proactive_checks._ctx_since = getattr(_proactive_checks, "_ctx_since", 0.0)
+        ctx_id = ctx[:40]   # stable identifier across ticks
+        if ctx_id != _proactive_checks._ctx_hash:
+            # New context written since last tick — record when we first saw it
+            _proactive_checks._ctx_hash  = ctx_id
+            _proactive_checks._ctx_since = now
+        elif now - _proactive_checks._ctx_since > 120:
+            print(f"[reasoning_loop] context_for_communication unread for >2 min — re-flagging urgent")
+            from state_manager import flag_priority
+            flag_priority(
+                f"Reasoning layer wrote a message for James over 2 minutes ago "
+                f"and it hasn't been delivered yet: '{ctx[:120]}'",
+                level="urgent",
+            )
+            _proactive_checks._ctx_since = now   # reset so we don't spam
+    else:
+        # Context was consumed — clear tracking
+        _proactive_checks._ctx_hash  = ""
+        _proactive_checks._ctx_since = 0.0
 
 
 # ─────────────────────────────────────────────
@@ -906,6 +993,9 @@ def _heartbeat():
             # 0.5. Wake assessment — reads own state, decides what to keep (runs once)
             _do_wake_assessment()
 
+            # 0.75. Commitment check — raises overdue items as priority flags
+            _check_commitments()
+
             # 1. Priority flags — always first after wake
             flags = pop_priority_flags()
             if flags:
@@ -921,6 +1011,9 @@ def _heartbeat():
 
             # 4. Background cognition
             _background_cognition()
+
+            # 4.5. Proactive self-checks — unconditional every tick
+            _proactive_checks()
 
             # 5. Adaptive sleep
             state    = read_state()

@@ -2,9 +2,9 @@
   "input_queue": [],
   "output_queue": [],
   "interface_status": {
-    "voice": "running",
+    "voice": "down",
     "text": "running",
-    "dashboard": "running"
+    "dashboard": "down"
   },
   "brain_status": "running"
 }
