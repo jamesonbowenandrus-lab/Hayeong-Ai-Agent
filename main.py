@@ -1,12 +1,11 @@
 # main.py
 # Hayeong — brain and process supervisor.
 #
-# This is the one thing you run. Everything else — Discord, voice, Minecraft —
+# This is the one thing you run. Everything else — voice, Minecraft —
 # she starts herself when she decides to, or when you ask her to.
 #
 # Architecture:
 #   main.py  ←── always running (her consciousness + text chat)
-#     ├── auto-launches: discord_hayeong.py  (her outside line to James)
 #     ├── on request:    voice_ptt.py        ("open your mic")
 #     ├── on request:    minecraft_bridge.py ("load minecraft")
 #     └── monitors all: restarts if crashed
@@ -1117,14 +1116,6 @@ def main(text_mode: bool = False, brain_mode: bool = False):
     except Exception as _sm_err:
         print(f"   [SystemMonitor] Failed to start: {_sm_err}")
 
-    # ── Live2D — optional, starts only if VTube Studio is reachable ──
-    try:
-        from live2d_controller import start_live2d
-        start_live2d()
-        print("   [Live2D] Controller started.")
-    except Exception as _l2d_err:
-        print(f"   [Live2D] Not available ({_l2d_err}) — skipping.")
-
     energy = EnergyManager()  if ENERGY_AVAILABLE   else None
     mixer  = MindStateMixer() if MIND_MIXER_AVAILABLE else None
 
@@ -1172,12 +1163,8 @@ def main(text_mode: bool = False, brain_mode: bool = False):
         if not text_mode:
             speak(text, emotion=emotion)
 
-    # Discord deferred — scrapped for now. Revisit when voice pipeline is stable.
-
-
     # ── STEP 5b: Auto-launch Voice Server ──
     # The voice server is the primary voice pipeline.
-    # It starts automatically on every launch — same as Discord bridge.
     # Local client (voice_client_local.py) connects to it at the desktop.
     # Phone app (Phase 10) connects to it over Tailscale when away.
     print("\n🎙️  Starting voice server...")

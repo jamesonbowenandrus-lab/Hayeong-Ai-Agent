@@ -9,14 +9,16 @@ Bootstrap layer (this script's job):
 Hayeong's layer (monitored, never started here):
   - Communication LLM (model loaded in 11434)
   - Voice server
-  - Discord bridge
   - Active capability scripts
 """
 
 import asyncio
 import json
+import os
+import re
 import subprocess
 import urllib.request
+from collections import deque
 from datetime import datetime
 from pathlib import Path
 
@@ -31,9 +33,20 @@ try:
 except ImportError:
     _STATE_OK = False
 
+try:
+    import pyperclip
+    _CLIP_OK = True
+except ImportError:
+    _CLIP_OK = False
+
 PYTHON       = Path(r"H:\hayeong\.venv\Scripts\python.exe")
 BASE_DIR     = Path(r"H:\hayeong")
 SHARED_STATE = BASE_DIR / "state" / "shared_state.json"
+LOG_DIR      = BASE_DIR / "logs" / "dashboard"
+LOG_DIR.mkdir(parents=True, exist_ok=True)
+
+_ERROR_KEYWORDS = {"error", "fail", "crash", "exception", "traceback", "critical"}
+_MARKUP_RE      = re.compile(r'\[/?[^\]]*\]')
 
 _UP   = {"running", "up", "ok", "healthy"}
 _DOWN = {"down", "error", "crashed", "offline"}
@@ -49,6 +62,10 @@ def _dot(status: str) -> str:
 
 def _ts() -> str:
     return datetime.now().strftime("%H:%M:%S")
+
+
+def _strip_markup(text: str) -> str:
+    return _MARKUP_RE.sub("", text)
 
 
 async def _http_ok(url: str, timeout: float = 3.0) -> bool:
@@ -74,6 +91,42 @@ async def _comm_llm_model_loaded() -> bool:
             pass
         return False
     return await asyncio.get_running_loop().run_in_executor(None, _req)
+
+
+async def _fetch_voice_health() -> dict:
+    """Fetch full health data from voice server including active_connections."""
+    def _req():
+        try:
+            with urllib.request.urlopen(
+                "http://localhost:8765/health", timeout=3
+            ) as r:
+                data        = json.loads(r.read())
+                server_ok   = data.get("status") == "healthy"
+                connections = data.get("active_connections", 0)
+                return {
+                    "server_status":      "running" if server_ok else "degraded",
+                    "client_status":      "connected" if connections > 0 else "disconnected",
+                    "active_connections": connections,
+                }
+        except Exception:
+            return {
+                "server_status":      "down",
+                "client_status":      "unknown",
+                "active_connections": 0,
+            }
+    return await asyncio.get_running_loop().run_in_executor(None, _req)
+
+
+def _write_voice_state(server_status: str, client_status: str) -> None:
+    """Write real voice status to shared state so Hayeong can read it."""
+    try:
+        from state_manager import write_system
+        write_system({
+            "voice_server": server_status,
+            "voice_client": client_status,
+        })
+    except Exception:
+        pass
 
 
 def _read_active_scripts() -> list[str]:
@@ -109,8 +162,11 @@ class ServiceLog(Vertical):
 
     def __init__(self, label: str, svc_id: str) -> None:
         super().__init__()
-        self._label = label
-        self.svc_id = svc_id
+        self._label        = label
+        self.svc_id        = svc_id
+        self._log_file     = None
+        self.recent_lines  = deque(maxlen=20)
+        self.last_error_time = 0.0
 
     def compose(self) -> ComposeResult:
         yield Static(f"▸ {self._label}", classes="svc-header")
@@ -124,6 +180,19 @@ class ServiceLog(Vertical):
             self.query_one(RichLog).write(line)
         except Exception:
             pass
+
+        plain = _strip_markup(line)
+        self.recent_lines.append(plain)
+
+        if any(kw in plain.lower() for kw in _ERROR_KEYWORDS):
+            import time
+            self.last_error_time = time.monotonic()
+
+        if self._log_file is not None:
+            try:
+                self._log_file.write(plain + "\n")
+            except Exception:
+                pass
 
 
 # ─────────────────────────────────────────────
@@ -163,6 +232,13 @@ class HayeongDashboard(App):
         overflow-y: scroll;
     }
 
+    #key-hint {
+        height: 1;
+        background: $panel-darken-1;
+        color: $text-muted;
+        padding: 0 1;
+    }
+
     #input-bar {
         height: 3;
         border-top: solid $panel-lighten-1;
@@ -179,6 +255,7 @@ class HayeongDashboard(App):
     def __init__(self) -> None:
         super().__init__()
         self._watchdog_proc: asyncio.subprocess.Process | None = None
+        self._log_handles: list = []
 
         # Bootstrap layer
         self._s_ollama_comm   = "unknown"   # Ollama process on 11434
@@ -186,10 +263,10 @@ class HayeongDashboard(App):
         self._s_watchdog      = "unknown"
 
         # Hayeong's layer (monitored, not started here)
-        self._s_brain    = "unknown"   # brain_status from hayeong_state
-        self._s_comm_llm = "unknown"   # model loaded in 11434
-        self._s_voice    = "unknown"
-        self._s_discord  = "unknown"
+        self._s_brain        = "unknown"   # brain_status from hayeong_state
+        self._s_comm_llm     = "unknown"   # model loaded in 11434
+        self._s_voice_server = "unknown"   # voice_server.py process + models
+        self._s_voice_client = "unknown"   # voice_io.py connected
 
         self._shutting_down = False
 
@@ -209,8 +286,8 @@ class HayeongDashboard(App):
             with Vertical(id="svc-pane"):
                 yield ServiceLog("WATCHDOG / BRAIN", "watchdog")
                 yield ServiceLog("VOICE SERVER",     "voice")
-                yield ServiceLog("DISCORD",          "discord")
                 yield ServiceLog("ACTIVE SCRIPTS",   "scripts")
+        yield Static("[E] Copy last error   [Q] Quit", id="key-hint")
         with Horizontal(id="input-bar"):
             yield Input(placeholder="Message Hayeong...", id="msg-input")
             yield Button("Send", id="send-btn", variant="primary")
@@ -220,7 +297,26 @@ class HayeongDashboard(App):
     # ─────────────────────────────────────────
 
     def on_mount(self) -> None:
+        self._open_log_files()
         self._startup()
+
+    def _open_log_files(self) -> None:
+        """Open per-session log files and wire them to service panels."""
+        panel_files = [
+            ("watchdog", "watchdog.log"),
+            ("voice",    "voice_server.log"),
+        ]
+        for svc_id, filename in panel_files:
+            try:
+                fh = open(LOG_DIR / filename, "w", encoding="utf-8", buffering=1)
+                self._log_handles.append(fh)
+                panel = next(
+                    (w for w in self.query(ServiceLog) if w.svc_id == svc_id), None
+                )
+                if panel is not None:
+                    panel._log_file = fh
+            except Exception:
+                pass
 
     @work
     async def _startup(self) -> None:
@@ -248,12 +344,15 @@ class HayeongDashboard(App):
 
         # 3. Start watchdog (watchdog starts brain)
         conv.write(f"[{_ts()}] Starting watchdog...")
+        _env = os.environ.copy()
+        _env["PYTHONIOENCODING"] = "utf-8"
         try:
             self._watchdog_proc = await asyncio.create_subprocess_exec(
                 str(PYTHON), str(BASE_DIR / "watchdog.py"),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
                 cwd=str(BASE_DIR),
+                env=_env,
             )
             self._s_watchdog = "running"
             self._refresh_bars()
@@ -284,11 +383,14 @@ class HayeongDashboard(App):
         if not await _http_ok(url):
             conv.write(f"[{_ts()}] Starting {bat_name}...")
             try:
+                _bat_env = os.environ.copy()
+                _bat_env["PYTHONIOENCODING"] = "utf-8"
                 subprocess.Popen(
                     str(BASE_DIR / "batFiles" / bat_name),
                     shell=True,
                     cwd=str(BASE_DIR / "batFiles"),
                     creationflags=subprocess.CREATE_NO_WINDOW,
+                    env=_bat_env,
                 )
             except Exception as e:
                 conv.write(
@@ -346,7 +448,7 @@ class HayeongDashboard(App):
 
     @work
     async def _poll_hayeong_state(self) -> None:
-        """Read brain + discord status from hayeong_state every 3 s."""
+        """Read brain status from hayeong_state every 3 s."""
         loop = asyncio.get_running_loop()
         while not self._shutting_down:
             await asyncio.sleep(3)
@@ -358,8 +460,7 @@ class HayeongDashboard(App):
             if _STATE_OK:
                 try:
                     s = await loop.run_in_executor(None, get_status)
-                    self._s_brain   = s.get("brain", "unknown")
-                    self._s_discord = s.get("interfaces", {}).get("discord", "unknown")
+                    self._s_brain = s.get("brain", "unknown")
                 except Exception:
                     pass
             self._refresh_bars()
@@ -383,26 +484,46 @@ class HayeongDashboard(App):
 
     @work
     async def _poll_voice(self) -> None:
-        """Poll voice server health every 10 s; write to voice log on change."""
-        voice_log = next(
+        """Poll voice server health + client connections every 10 s."""
+        voice_log   = next(
             (w for w in self.query(ServiceLog) if w.svc_id == "voice"), None
         )
-        prev = "unknown"
+        loop        = asyncio.get_running_loop()
+        prev_server = "unknown"
+        prev_client = "unknown"
+
         while not self._shutting_down:
             await asyncio.sleep(10)
-            ok = await _http_ok("http://localhost:8765/health")
-            new_status = "running" if ok else "down"
-            if new_status != prev:
-                self._s_voice = new_status
+
+            health      = await _fetch_voice_health()
+            new_server  = health["server_status"]
+            new_client  = health["client_status"]
+
+            if new_server != prev_server or new_client != prev_client:
+                self._s_voice_server = new_server
+                self._s_voice_client = new_client
                 self._refresh_bars()
+
                 if voice_log:
-                    msg = (
-                        "[green]Healthy on port 8765.[/green]"
-                        if ok else
-                        "[red]Not responding.[/red]"
-                    )
-                    voice_log.append(f"[{_ts()}] {msg}")
-                prev = new_status
+                    if new_server == "running":
+                        client_str = (
+                            "[green]Client connected.[/green]"
+                            if new_client == "connected" else
+                            "[yellow]No client connected.[/yellow]"
+                        )
+                        voice_log.append(
+                            f"[{_ts()}] [green]Server healthy.[/green] {client_str}")
+                    elif new_server == "degraded":
+                        voice_log.append(
+                            f"[{_ts()}] [yellow]Server degraded (models loading?).[/yellow]")
+                    else:
+                        voice_log.append(f"[{_ts()}] [red]Server not responding.[/red]")
+
+                await loop.run_in_executor(
+                    None, lambda s=new_server, c=new_client: _write_voice_state(s, c)
+                )
+                prev_server = new_server
+                prev_client = new_client
 
     @work
     async def _poll_active_scripts(self) -> None:
@@ -446,8 +567,8 @@ class HayeongDashboard(App):
             f"  HAYEONG:    "
             f"{_dot(self._s_brain)} Reasoning LLM   "
             f"{_dot(self._s_comm_llm)} Comm LLM   "
-            f"{_dot(self._s_voice)} Voice   "
-            f"{_dot(self._s_discord)} Discord"
+            f"{_dot(self._s_voice_server)} Voice Server   "
+            f"{_dot(self._s_voice_client)} Voice Client"
         )
 
     # ─────────────────────────────────────────
@@ -474,6 +595,45 @@ class HayeongDashboard(App):
             return
         push_input(text, source="dashboard")
         conv.write("[dim]…[/dim]")
+
+    # ─────────────────────────────────────────
+    # KEY HANDLING
+    # ─────────────────────────────────────────
+
+    def on_key(self, event) -> None:
+        if event.key == "e":
+            self._copy_last_error()
+        elif event.key == "q":
+            self.app.exit()
+
+    def _copy_last_error(self) -> None:
+        panel = self._find_panel_with_latest_error()
+        conv  = self.query_one("#conv-log", RichLog)
+        if panel is None:
+            conv.write(f"[{_ts()}] [dim]No error recorded yet.[/dim]")
+            return
+        if not _CLIP_OK:
+            conv.write(f"[{_ts()}] [yellow]pyperclip not available.[/yellow]")
+            return
+        lines = "\n".join(panel.recent_lines)
+        try:
+            pyperclip.copy(lines)
+            conv.write(
+                f"[{_ts()}] [green]Copied last 20 lines from "
+                f"{panel._label} to clipboard.[/green]"
+            )
+        except Exception as e:
+            conv.write(f"[{_ts()}] [red]Clipboard copy failed: {e}[/red]")
+
+    def _find_panel_with_latest_error(self) -> "ServiceLog | None":
+        """Return the service panel that had an error most recently, or None."""
+        best = None
+        best_t = 0.0
+        for panel in self.query(ServiceLog):
+            if panel.last_error_time > best_t:
+                best_t = panel.last_error_time
+                best   = panel
+        return best if best_t > 0.0 else None
 
     # ─────────────────────────────────────────
     # SHUTDOWN
@@ -503,6 +663,12 @@ class HayeongDashboard(App):
                     None, lambda: set_interface_status("dashboard", "down"))
             except Exception:
                 pass
+        for fh in self._log_handles:
+            try:
+                fh.close()
+            except Exception:
+                pass
+        self._log_handles.clear()
 
 
 if __name__ == "__main__":

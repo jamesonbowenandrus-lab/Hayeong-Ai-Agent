@@ -413,7 +413,7 @@ def build_system_prompt(
 def detect_state_of_mind(situation: str, environment: str, mood: dict) -> str:
     """
     Infers the right state of mind from context.
-    Used by main.py and discord_hayeong.py before calling build_system_prompt.
+    Used by main.py before calling build_system_prompt.
     """
     if environment in ["minecraft", "gaming"]:
         return "play"

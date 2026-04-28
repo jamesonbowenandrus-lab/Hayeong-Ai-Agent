@@ -1,0 +1,6 @@
+{"type": "session_start", "session_id": "e9e1d4df", "timestamp": "2026-04-27T19:23:26.215010", "date": "2026-04-27"}
+{"type": "conversation", "session_id": "e9e1d4df", "timestamp": "2026-04-27T19:24:21.549164", "role": "james", "content": "hello", "intent": null, "mood": null, "model_used": null}
+{"type": "conversation", "session_id": "e9e1d4df", "timestamp": "2026-04-27T19:25:04.828962", "role": "hayeong", "content": "Hello! The server is restarting now. Give it a few moments, and we should be good to go. 🌌", "intent": null, "mood": "amused", "model_used": "qwen2.5:7b-instruct-q4_K_M"}
+{"type": "conversation", "session_id": "e9e1d4df", "timestamp": "2026-04-27T19:29:00.383643", "role": "james", "content": "hey hayeong is your voice server running and working correctly ?", "intent": null, "mood": null, "model_used": null}
+{"type": "conversation", "session_id": "e9e1d4df", "timestamp": "2026-04-27T19:29:45.778006", "role": "hayeong", "content": "Hey there! I’m checking the status of the voice server now. Let me verify if everything is running smoothly. Hang tight! 🌌", "intent": null, "mood": "amused", "model_used": "qwen2.5:7b-instruct-q4_K_M"}
+{"type": "conversation", "session_id": "e9e1d4df", "timestamp": "2026-04-27T19:40:59.205039", "role": "james", "content": "close", "intent": null, "mood": null, "model_used": null}

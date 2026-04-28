@@ -26,9 +26,9 @@ _EMPTY_STATE = {
     "input_queue":  [],
     "output_queue": [],
     "interface_status": {
-        "voice":   "unknown",
-        "text":    "unknown",
-        "discord": "unknown",
+        "voice_server": "unknown",
+        "voice_client": "unknown",
+        "text":         "unknown",
     },
     "brain_status": "unknown",
 }

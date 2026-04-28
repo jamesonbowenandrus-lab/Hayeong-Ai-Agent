@@ -104,7 +104,7 @@ from system_prompt_builder import build_system_prompt
 system_prompt = build_system_prompt(
     who="james",          # or whoever she's talking to
     situation="casual",   # casual / task_focused / emotional / etc
-    environment="home"    # home / minecraft / discord / etc
+    environment="home"    # home / minecraft / etc
 )
 
 # Pass to Ollama/Qwen as usual

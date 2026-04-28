@@ -1,18 +1,18 @@
 {
   "conversation": {
-    "last_james_message": "hello hayeong",
-    "last_hayeong_response": "Hey there! I'm working on restarting the Minecraft server to get everything running smoothly. Just a moment, please. 🌌",
+    "last_james_message": "",
+    "last_hayeong_response": "",
     "current_topic": "",
-    "session_start": "2026-04-26T18:02:48.990656",
+    "session_start": "2026-04-27T20:37:13.918172",
     "flags": []
   },
   "reasoning": {
-    "current_goal": "Resolve Ollama Model Loading Issue",
+    "current_goal": "Restore Voice Server Functionality",
     "task_queue": [],
-    "active_task": "Check Ollama service configuration and load the appropriate model",
+    "active_task": "Check the status of any voice-related tasks that were paused due to the voice_server issue and resume them if possible.",
     "active_task_status": "in_progress",
-    "last_conclusion": "Identified the need to verify the configuration settings for the Ollama service and ensure the correct model is specified for loading.",
-    "context_for_communication": "Heads up — system health issue detected: communication_llm is not healthy. You might want to mention this to James.",
+    "last_conclusion": "Checked the status of voice-related tasks that were paused due to the voice_server issue. No tasks are currently in a state where they can be automatically resumed as the underlying issue with the voice server has not been resolved.",
+    "context_for_communication": "The voice server issue is still ongoing and preventing the resumption of voice-related tasks.",
     "minecraft_state": {
       "active": false,
       "last_updated": "2026-04-25T23:28:57.027885"
@@ -31,10 +31,12 @@
     "priority_flags": [],
     "models_loaded": [],
     "health": {
-      "communication_llm": "online_no_model",
+      "communication_llm": "healthy",
       "reasoning_llm": "healthy",
       "voice_server": "healthy",
       "whisper": "unknown"
-    }
+    },
+    "voice_server": "running",
+    "voice_client": "disconnected"
   }
 }

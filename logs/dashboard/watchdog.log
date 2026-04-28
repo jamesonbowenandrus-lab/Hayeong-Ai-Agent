@@ -1,0 +1,36 @@
+ 🖥️  Torch device: cuda (NVIDIA GeForce RTX 3090)
+ Loading Whisper model...
+ ✅ Whisper loaded on cuda
+ ✅  Auth verified — App Password working
+  Session f8e1f7a5 started
+     Audit log active
+     Workstation Fund: $0.00 / $3000.00  (0.0%)
+ 🔍 Running health check...
+ 🗑️  Rotated old backup: 20260426_170629_startup
+ ✅ Backup created: 20260427_203713_startup (14 files)
+ ✅ Hayeong is healthy.
+     Resumed session — 4 snapshot(s) loaded.
+  State validated and migrated.
+  Knowledge cache warmed: 
+  Heartbeat started.
+  Starting communication LLM...
+  Communication LLM: 'communication_llm' isn't in my application registry.
+     Heartbeat started.
+  Started.
+     Health monitoring started.
+     38 min offline → +1.0 recovery (4.6 → 5.0)
+     Mode: present
+  Wake assessment: was offline ~0.0 minutes, reviewing state...
+ ✅  Auth verified — App Password working
+     22 actions loaded: 
+  Connecting to Gmail IMAP...
+  ✅ Email monitor started (IMAP IDLE)
+ 🎙️  Starting voice server...
+  ✅ Connected — entering IDLE mode
+     Voice Server is already running.
+     Presence layer active — she stays responsive mid-task
+    Warming communication (7b)...  Wake assessment decision: Since the voice server issue has been resolved and the system health indicates all components are healthy, it is appropriate to continue with the active task of checking and resuming voice-related tasks, maintain the goal of restoring voice server functionality, and inform James about the current status.
+  Wake assessment: has message for James
+  Advancing task: Check the status of any voice-related tasks that were paused due to the voice_server issue and resume them if possible. (in_progress)
+  Next tick in 3.0s
+ ready.

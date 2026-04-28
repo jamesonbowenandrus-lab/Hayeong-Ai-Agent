@@ -56,6 +56,8 @@ _EMPTY_STATE = {
         "pending_results": [],
         "priority_flags":  [],
         "models_loaded":   [],
+        "voice_server":    "unknown",
+        "voice_client":    "unknown",
         "health": {
             "communication_llm": "unknown",
             "reasoning_llm":     "unknown",

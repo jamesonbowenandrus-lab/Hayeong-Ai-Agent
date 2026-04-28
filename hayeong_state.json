@@ -4,7 +4,7 @@
   "interface_status": {
     "voice": "running",
     "text": "running",
-    "discord": "unknown"
+    "dashboard": "running"
   },
   "brain_status": "running"
 }

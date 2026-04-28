@@ -199,8 +199,9 @@ def _load_core_modules():
 # A lock prevents two simultaneous generations.
 # ─────────────────────────────────────────────
 
-_generation_lock = asyncio.Lock()
-_server_start    = time.time()
+_generation_lock    = asyncio.Lock()
+_server_start       = time.time()
+_active_connections = 0
 
 
 class _WebSocketFillerGate:
@@ -284,14 +285,15 @@ async def health():
     overall = whisper_ok and tts_ok
 
     return JSONResponse({
-        "status":       "healthy" if overall else "degraded",
-        "whisper":      "loaded" if whisper_ok else "not loaded",
-        "tts_kokoro":   "loaded" if kokoro_ok  else "not loaded",
-        "tts_f5":       "loaded" if f5_ok      else "not loaded",
-        "tts_active":   "kokoro" if kokoro_ok  else ("f5" if f5_ok else "none"),
-        "uptime_s":     round(time.time() - _server_start),
-        "voice_loaded": _voice_loaded,
-        "core_loaded":  _core_loaded,
+        "status":             "healthy" if overall else "degraded",
+        "whisper":            "loaded" if whisper_ok else "not loaded",
+        "tts_kokoro":         "loaded" if kokoro_ok  else "not loaded",
+        "tts_f5":             "loaded" if f5_ok      else "not loaded",
+        "tts_active":         "kokoro" if kokoro_ok  else ("f5" if f5_ok else "none"),
+        "active_connections": _active_connections,
+        "uptime_s":           round(time.time() - _server_start),
+        "voice_loaded":       _voice_loaded,
+        "core_loaded":        _core_loaded,
     })
 
 
@@ -583,7 +585,9 @@ async def _process_utterance(ws: WebSocket, user_text: str,
 
 @app.websocket("/ws/voice")
 async def voice_ws(websocket: WebSocket):
+    global _active_connections
     await websocket.accept()
+    _active_connections += 1
     client = websocket.client
     log.info(f"Client connected: {client}")
 
@@ -686,6 +690,8 @@ async def voice_ws(websocket: WebSocket):
             await _send_json(websocket, {"type": "error", "message": str(e)})
         except Exception:
             pass
+    finally:
+        _active_connections -= 1
 
 
 # ─────────────────────────────────────────────

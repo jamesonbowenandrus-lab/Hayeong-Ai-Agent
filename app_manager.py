@@ -275,11 +275,13 @@ class AppManager:
             cmd = [sys.executable, str(script_path)]
             log.info(f"Starting internal [{app_id}]: {' '.join(cmd)}")
 
+        _env = os.environ.copy()
+        _env["PYTHONIOENCODING"] = "utf-8"
         return subprocess.Popen(
             cmd,
             cwd=str(BASE_DIR),
-            creationflags=subprocess.CREATE_NEW_CONSOLE if sys.platform == "win32" else 0,
-            startupinfo=_make_startupinfo() if sys.platform == "win32" else None,
+            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+            env=_env,
         )
 
     def _start_external(self, app_id: str, app: dict) -> Optional[subprocess.Popen]:
@@ -299,12 +301,14 @@ class AppManager:
         cwd = str(cmd_path.parent) if cmd_path.exists() else None
         log.info(f"Starting external [{app_id}]: {' '.join(str(c) for c in start_cmd)}")
 
+        _env = os.environ.copy()
+        _env["PYTHONIOENCODING"] = "utf-8"
         return subprocess.Popen(
             start_cmd[0] if use_shell else start_cmd,
             shell=use_shell,
             cwd=cwd,
-            creationflags=subprocess.CREATE_NEW_CONSOLE if sys.platform == "win32" else 0,
-            startupinfo=_make_startupinfo() if sys.platform == "win32" else None,
+            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+            env=_env,
         )
 
     def _wait_for_ready(self, app_id: str, app: dict) -> tuple[bool, str]:

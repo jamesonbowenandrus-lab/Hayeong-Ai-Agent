@@ -10,7 +10,7 @@
       {"id": "memory_short", "name": "Short Term Memory", "description": "Session memory via memory.json", "status": "active", "approved_by": "built_in"},
       {"id": "voice_in", "name": "Voice Input", "description": "Speech to text via faster-whisper. Launch with: open your mic", "status": "active", "approved_by": "built_in"},
       {"id": "voice_out", "name": "Voice Output", "description": "Text to speech via F5-TTS. Active in voice mode.", "status": "active", "approved_by": "built_in"},
-      {"id": "discord", "name": "Discord Integration", "description": "Discord bot bridge. Auto-launches on startup.", "status": "active", "approved_by": "built_in", "script": "discord_hayeong.py"},
+
       {"id": "email", "name": "Email Bridge", "description": "Send and receive email via hayeong.agent@gmail.com. Say: email me, send me a summary, check your email.", "status": "active", "approved_by": "built_in", "script": "email_bridge.py"},
       {"id": "tasks", "name": "Task Manager", "description": "Personal task log. Say: show tasks, add a task, what are you working on.", "status": "active", "approved_by": "built_in", "script": "task_manager.py"},
       {"id": "self_mod", "name": "Self-Modification Manager", "description": "Write new capability scripts, propose core changes. Say: what did you change, show proposals.", "status": "active", "approved_by": "built_in", "script": "self_mod_manager.py"},
@@ -47,18 +47,21 @@
         "start_wait":   35,
         "notes":        "Whisper + Kokoro take 25-30s to load. start_wait must exceed load time. Started by communication LLM on demand."
       },
+
       {
-        "id":           "discord",
-        "name":         "Discord Bot",
+        "id":           "voice_io",
+        "name":         "Voice Client",
         "type":         "internal",
-        "start_cmd":    ["node", "discord_hayeong.js"],
-        "needed_by":    [],
+        "script":       "voice_io.py",
+        "needed_by":    ["voice"],
+        "check_url":    null,
         "vram_cost":    "none",
         "idle_ok":      true,
         "auto_restart": false,
-        "start_wait":   3,
-        "notes":        "Discord JS bot. Started by reasoning LLM on demand. Requires Node.js."
+        "start_wait":   2,
+        "notes":        "Desktop voice client. Connects to voice_server via WebSocket. Started by communication LLM after voice_server is healthy. Captures mic, plays TTS audio."
       },
+
       {
         "id":           "voice_ptt",
         "name":         "Voice PTT",

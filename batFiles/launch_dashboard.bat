@@ -4,6 +4,7 @@ color 0A
 
 cd /d H:\hayeong
 call H:\hayeong\.venv\Scripts\activate.bat
+set PYTHONIOENCODING=utf-8
 
 python dashboard.py
 

@@ -44,10 +44,11 @@ REASONING_MODEL = "qwen2.5:14b-instruct-q4_K_M"
 HEARTBEAT_FALLBACK = 5.0   # sleep duration after an exception — never used as default
 TIMEOUT_SECONDS    = 30    # per Ollama call
 
-_stop_event   = threading.Event()
-_tick_lock    = threading.Lock()
+_stop_event           = threading.Event()
+_tick_lock            = threading.Lock()
 _thread: threading.Thread | None = None
-_startup_done = False
+_startup_done         = False
+_wake_assessment_done = False
 
 # ─────────────────────────────────────────────
 # STARTUP CHECK
@@ -69,6 +70,167 @@ def _do_startup_check():
             print(f"[reasoning_loop] Communication LLM: {msg}")
     except Exception as e:
         print(f"[reasoning_loop] Startup check failed: {e}")
+
+
+def _do_wake_assessment():
+    """
+    Hayeong's first conscious act after waking up.
+    Reads her full state and decides what to do with it.
+    Runs once, on the first heartbeat tick, after startup check.
+
+    This is not a wipe. This is judgment.
+    """
+    global _wake_assessment_done
+    if _wake_assessment_done:
+        return
+    _wake_assessment_done = True
+
+    state     = read_state()
+    reasoning = state.get("reasoning", {})
+    system    = state.get("system", {})
+
+    active_task  = reasoning.get("active_task", "")
+    task_queue   = reasoning.get("task_queue", [])
+    current_goal = reasoning.get("current_goal", "")
+    last_session = state.get("conversation", {}).get("session_start", "")
+
+    # Calculate time offline
+    try:
+        last = datetime.fromisoformat(last_session)
+        offline_minutes = round((datetime.now() - last).total_seconds() / 60, 1)
+    except Exception:
+        offline_minutes = None
+
+    # Nothing interesting in state — wake quietly
+    if not active_task and not task_queue and not current_goal:
+        print("[reasoning_loop] Wake assessment: clean state — nothing to review.")
+        write_reasoning({"context_for_communication": ""})
+        return
+
+    offline_str = f"{offline_minutes} minutes" if offline_minutes is not None else "unknown duration"
+
+    user_prompt = (
+        f"You were offline for approximately {offline_str}.\n\n"
+        f"Active task when you stopped: {active_task or 'none'}\n"
+        f"Active task status: {reasoning.get('active_task_status', 'unknown')}\n"
+        f"Task queue: {json.dumps(task_queue) if task_queue else 'empty'}\n"
+        f"Current goal: {current_goal or 'none'}\n"
+        f"System health: {json.dumps(system.get('health', {}))}\n\n"
+        "Assess your situation. Decide what to keep, what to drop, and what James needs to know."
+    )
+
+    print(f"[reasoning_loop] Wake assessment: was offline ~{offline_str}, reviewing state...")
+
+    result = _call_reasoning_json(
+        system=(
+            "You are Hayeong waking up after being offline. You are reading your own state "
+            "to understand what was happening before you stopped.\n\n"
+            "Your job is to make conscious decisions about your state — not just continue "
+            "blindly from where you left off.\n\n"
+            "Consider:\n"
+            "- Is the active task still valid given how long you were offline?\n"
+            "- Is the task queue still relevant?\n"
+            "- Does James need to know you restarted?\n"
+            "- What should your actual focus be right now?\n\n"
+            "Return JSON with these fields:\n"
+            "{\n"
+            '  "keep_active_task": true/false,\n'
+            '  "keep_task_queue": true/false,\n'
+            '  "keep_goal": true/false,\n'
+            '  "context_for_communication": "what to tell James, or empty string if nothing to say",\n'
+            '  "reasoning": "one sentence explaining your decisions"\n'
+            "}"
+        ),
+        user=user_prompt,
+    )
+
+    if not result:
+        print("[reasoning_loop] Wake assessment: LLM returned empty — keeping state as-is.")
+        return
+
+    print(f"[reasoning_loop] Wake assessment decision: {result.get('reasoning', 'no reasoning returned')}")
+
+    updates = {}
+
+    if not result.get("keep_active_task", True):
+        updates["active_task"]        = ""
+        updates["active_task_status"] = ""
+        print("[reasoning_loop] Wake assessment: dropped active task")
+
+    if not result.get("keep_task_queue", True):
+        updates["task_queue"] = []
+        print("[reasoning_loop] Wake assessment: cleared task queue")
+
+    if not result.get("keep_goal", True):
+        updates["current_goal"] = ""
+        print("[reasoning_loop] Wake assessment: cleared goal")
+
+    context = result.get("context_for_communication", "")
+    if context:
+        updates["context_for_communication"] = context
+        print("[reasoning_loop] Wake assessment: has message for James")
+
+    if updates:
+        write_reasoning(updates)
+
+
+# ─────────────────────────────────────────────
+# VOICE STATUS
+# ─────────────────────────────────────────────
+
+def _get_voice_status() -> dict:
+    """
+    Returns the real voice status from shared state.
+    Never guesses. Always reads what was last polled by the dashboard.
+    """
+    state  = read_state()
+    system = state.get("system", {})
+    server = system.get("voice_server", "unknown")
+    client = system.get("voice_client", "unknown")
+    return {
+        "server":  server,
+        "client":  client,
+        "working": server == "healthy" and client == "connected",
+    }
+
+
+def _check_voice_awareness():
+    """
+    If voice_client is not confirmed connected, write that reality into
+    context_for_communication so Hayeong stops guessing about her own state.
+    """
+    voice = _get_voice_status()
+    if voice["working"]:
+        return
+
+    state           = read_state()
+    current_context = state.get("reasoning", {}).get("context_for_communication", "")
+
+    # Don't overwrite something more important already in context
+    if current_context and "voice" not in current_context.lower():
+        return
+
+    if voice["server"] == "offline" or voice["server"] == "down":
+        msg = (
+            "Voice server is offline. If James asks about voice, tell him honestly "
+            "the voice server is not running. Do not say you can hear him."
+        )
+    elif voice["client"] == "disconnected":
+        msg = (
+            "Voice server is running but no client is connected. "
+            "Mic capture and audio playback are not active. "
+            "If James asks if you can hear him, tell him honestly that "
+            "voice input and output are not connected right now."
+        )
+    elif voice["client"] == "unknown":
+        msg = (
+            "Voice client status is unknown — unable to confirm if mic and "
+            "audio are working. Do not claim voice is working."
+        )
+    else:
+        return
+
+    write_reasoning({"context_for_communication": msg})
 
 
 # ─────────────────────────────────────────────
@@ -645,6 +807,9 @@ def _background_cognition():
     except Exception:
         pass
 
+    # Voice awareness — inject real status so Hayeong never guesses
+    _check_voice_awareness()
+
     goal = state["reasoning"].get("current_goal", "")
     queue = state["reasoning"].get("task_queue", [])
 
@@ -735,10 +900,13 @@ def _heartbeat():
             continue
 
         try:
-            # 0. Startup check — runs only once, on the first tick
+            # 0. Startup check — starts communication LLM (runs once)
             _do_startup_check()
 
-            # 1. Priority flags — always first, always immediate
+            # 0.5. Wake assessment — reads own state, decides what to keep (runs once)
+            _do_wake_assessment()
+
+            # 1. Priority flags — always first after wake
             flags = pop_priority_flags()
             if flags:
                 _process_priority_flags(flags)

@@ -549,6 +549,19 @@ class HayeongArchitecture:
         from backup_manager import list_backups
         return list_backups()
 
+    def sync_mood_to_behavioral_state(self, mood: dict):
+        """Map mood values → behavioral interior state. Called after every mood update."""
+        p = mood.get("playfulness", 0)
+        f = mood.get("focus", 0)
+        m = mood.get("motivation", 0)
+
+        if p >= 3:    emotion, intensity = "amused",    6
+        elif f >= 3:  emotion, intensity = "focused",   7
+        elif m <= -2: emotion, intensity = "withdrawn", 4
+        else:         emotion, intensity = "neutral",   3
+
+        self.behavioral.update_interior(primary_emotion=emotion, intensity=intensity)
+
 
 if __name__ == "__main__":
     hayeong = HayeongArchitecture()
