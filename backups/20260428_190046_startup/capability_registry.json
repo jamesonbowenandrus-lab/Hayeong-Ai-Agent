@@ -49,6 +49,20 @@
       },
 
       {
+        "id":           "voice_io",
+        "name":         "Voice Client",
+        "type":         "internal",
+        "script":       "voice_io.py",
+        "needed_by":    ["voice"],
+        "check_url":    null,
+        "vram_cost":    "none",
+        "idle_ok":      true,
+        "auto_restart": false,
+        "start_wait":   2,
+        "notes":        "Desktop voice client. Connects to voice_server via WebSocket. Started by communication LLM after voice_server is healthy. Captures mic, plays TTS audio."
+      },
+
+      {
         "id":           "voice_ptt",
         "name":         "Voice PTT",
         "type":         "internal",

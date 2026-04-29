@@ -1,65 +1,9 @@
 {
-  "current": 4.500000000000002,
-  "last_updated": "2026-04-28T15:44:52.866874",
-  "last_rest": "2026-04-28T15:44:52.864753",
+  "current": 4.700000000000001,
+  "last_updated": "2026-04-28T19:23:38.681699",
+  "last_rest": "2026-04-28T19:20:21.820084",
   "session_started": "2026-03-09T20:33:47.066820",
   "log": [
-    {
-      "ts": "2026-03-17T16:10:30.532217",
-      "op": "cost",
-      "amount": 0.1,
-      "reason": "turn_tick (casual/light)",
-      "before": 2.3,
-      "after": 2.2
-    },
-    {
-      "ts": "2026-03-17T16:26:15.066219",
-      "op": "rest",
-      "amount": 1.8,
-      "reason": "rest state",
-      "before": 2.2,
-      "after": 4.0
-    },
-    {
-      "ts": "2026-03-18T12:48:38.530249",
-      "op": "cost",
-      "amount": 0.1,
-      "reason": "turn_tick (casual/light)",
-      "before": 4.0,
-      "after": 3.9
-    },
-    {
-      "ts": "2026-03-18T12:51:40.751603",
-      "op": "cost",
-      "amount": 0.1,
-      "reason": "turn_tick (casual/light)",
-      "before": 3.9,
-      "after": 3.8
-    },
-    {
-      "ts": "2026-03-18T13:05:18.908901",
-      "op": "cost",
-      "amount": 0.5,
-      "reason": "turn_tick (casual/heavy)",
-      "before": 3.8,
-      "after": 3.3
-    },
-    {
-      "ts": "2026-03-18T13:24:23.956308",
-      "op": "cost",
-      "amount": 0.1,
-      "reason": "turn_tick (casual/light)",
-      "before": 3.3,
-      "after": 3.2
-    },
-    {
-      "ts": "2026-03-18T14:07:52.086518",
-      "op": "cost",
-      "amount": 0.1,
-      "reason": "turn_tick (casual/light)",
-      "before": 3.2,
-      "after": 3.1
-    },
     {
       "ts": "2026-03-18T14:13:15.373200",
       "op": "rest",
@@ -803,6 +747,62 @@
       "reason": "rest state",
       "before": 4.5,
       "after": 4.5
+    },
+    {
+      "ts": "2026-04-28T19:00:46.599565",
+      "op": "offline_recovery",
+      "amount": 1.5,
+      "reason": "offline 196 min",
+      "before": 4.5,
+      "after": 5.0
+    },
+    {
+      "ts": "2026-04-28T19:01:58.639837",
+      "op": "cost",
+      "amount": 0.1,
+      "reason": "turn_tick (casual/light)",
+      "before": 5.0,
+      "after": 4.9
+    },
+    {
+      "ts": "2026-04-28T19:14:59.491531",
+      "op": "cost",
+      "amount": 0.1,
+      "reason": "turn_tick (casual/light)",
+      "before": 4.9,
+      "after": 4.8
+    },
+    {
+      "ts": "2026-04-28T19:20:21.820084",
+      "op": "offline_recovery",
+      "amount": 0.5,
+      "reason": "offline 5 min",
+      "before": 4.8,
+      "after": 5.0
+    },
+    {
+      "ts": "2026-04-28T19:21:32.905054",
+      "op": "cost",
+      "amount": 0.1,
+      "reason": "turn_tick (casual/light)",
+      "before": 5.0,
+      "after": 4.9
+    },
+    {
+      "ts": "2026-04-28T19:22:54.164132",
+      "op": "cost",
+      "amount": 0.1,
+      "reason": "turn_tick (casual/light)",
+      "before": 4.9,
+      "after": 4.8
+    },
+    {
+      "ts": "2026-04-28T19:23:38.681699",
+      "op": "cost",
+      "amount": 0.1,
+      "reason": "turn_tick (casual/light)",
+      "before": 4.8,
+      "after": 4.7
     }
   ]
 }

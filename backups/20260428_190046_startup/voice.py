@@ -61,7 +61,7 @@ except ImportError:
 # ─────────────────────────────────────────────
 
 SAMPLE_RATE   = 16000
-INPUT_DEVICE  = 3    # HyperX QuadCast S
+INPUT_DEVICE  = 4    # HyperX QuadCast S
 OUTPUT_DEVICE = 6    # SteelSeries Sonar - Gaming
 
 sd.default.device     = (INPUT_DEVICE, OUTPUT_DEVICE)

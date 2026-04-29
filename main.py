@@ -1536,7 +1536,10 @@ def main(text_mode: bool = False, brain_mode: bool = False):
 
         # ── Update mood and behavioral state ──
         adjust_mood_by_context(user_input, mood_state)
-        arch.sync_mood_to_behavioral_state(mood_state)
+        try:
+            arch.sync_mood_to_behavioral_state(mood_state)
+        except AttributeError:
+            pass
 
         if mixer:
             blend = suggest_blend_for_context("casual", "home")
@@ -1609,7 +1612,11 @@ def main(text_mode: bool = False, brain_mode: bool = False):
             _snapshot = tracker.build_snapshot(user_input, memory, model=selected_model)
 
         # ── JSON DECISION — what does Hayeong need to do? ──
-        decision = decide_action(user_input, memory, model=selected_model, snapshot=_snapshot)
+        # Skip the 14b reasoning calls entirely for simple conversational turns.
+        if is_simple_turn:
+            decision = {"action": "none"}
+        else:
+            decision = decide_action(user_input, memory, model=selected_model, snapshot=_snapshot)
         action   = decision.get("action", "none")
 
         # ── Think Together — align before acting ──
@@ -1630,7 +1637,7 @@ def main(text_mode: bool = False, brain_mode: bool = False):
         # Extracts constraints and confirms the action is genuinely requested.
         _constraints = []
 
-        if action != "none":
+        if action != "none" and not is_simple_turn:
             verification = context_verifier(
                 user_input, action, decision, memory,
                 model=selected_model, snapshot=_snapshot

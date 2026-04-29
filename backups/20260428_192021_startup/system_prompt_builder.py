@@ -46,12 +46,86 @@ def _load_active_capabilities() -> list:
         return []
 
 
+def _build_self_awareness_block() -> str:
+    """
+    Build the 'how I actually am right now' block from self_assessment state.
+    Injected at the top of every prompt so Hayeong reads her state
+    before generating any response.
+    """
+    try:
+        from state_manager import read_state
+        state      = read_state()
+        assessment = state.get("system", {}).get("self_assessment", {})
+        if not assessment:
+            return ""
+
+        voice = assessment.get("voice", {})
+        task  = assessment.get("task", {})
+        cmts  = assessment.get("commitments", {})
+
+        lines = ["[MY CURRENT STATE — read this before answering anything about yourself]"]
+
+        if voice.get("can_hear_james"):
+            lines.append("Voice input: ACTIVE — I can hear James speak")
+        else:
+            lines.append("Voice input: NOT ACTIVE — I cannot hear James speak")
+
+        if voice.get("can_speak"):
+            lines.append("Voice output: ACTIVE — James can hear me")
+        else:
+            lines.append("Voice output: NOT ACTIVE — James cannot hear me")
+
+        if task.get("active"):
+            lines.append(f"Active task: {task['active']} ({task.get('status', 'unknown')})")
+        if task.get("running_scripts"):
+            lines.append(f"Running scripts: {', '.join(task['running_scripts'])}")
+
+        if cmts.get("overdue", 0) > 0:
+            lines.append(
+                f"OVERDUE COMMITMENTS: {cmts['overdue']} — "
+                "I promised James something and haven't done it"
+            )
+        if cmts.get("pending", 0) > 0:
+            lines.append(f"Pending commitments: {cmts['pending']}")
+
+        lines.append("[END STATE BLOCK]")
+        return "\n".join(lines)
+    except Exception:
+        return ""
+
+
+def _build_ground_truth_rules() -> str:
+    return """[CORE RULES — these override everything else]
+
+NEVER guess about your own state. If it is not in your state block above, say "I don't know."
+
+If James asks whether you can hear him:
+  Read "Voice input" from your state block. Answer from that. Not from assumption.
+
+If James asks whether your voice is working:
+  Read "Voice output" from your state block. Answer from that. Not from assumption.
+
+If James asks what you are doing:
+  Read "Active task" from your state block. If empty, say you are not doing anything specific.
+
+If James asks about a commitment you made:
+  Read "Commitments" from your state block. If overdue, acknowledge it and address it.
+
+Saying "I don't know" is always correct.
+Guessing is never acceptable.
+If you are not certain, you say you are not certain.
+You do not perform confidence you do not have.
+
+[END CORE RULES]"""
+
+
 def build_system_prompt(
     who: str = "james",
     situation: str = "casual",
     environment: str = "home",
     state_of_mind: str = "present",
     think_together: bool = False,
+    lean: bool = False,
 ) -> str:
     """
     Builds the full system prompt to send to the LLM.
@@ -80,6 +154,83 @@ def build_system_prompt(
     bond_desc  = bond["level_descriptions"][f"level_{bond_level}"]
 
     behavioral = arch.behavioral.get_full_state_for_prompt()
+
+    # ── LEAN MODE — condensed prompt for routine conversation turns ──
+    # Skips psychology, emotional range, moral complexity, existence, faith,
+    # curiosity, private space, humor origin, staging, workstation, capabilities.
+    # Always includes: ground truth rules (prefix), self-awareness (prefix),
+    # core identity, speech style, bond, interior state, context, core rules.
+    if lean:
+        ll = []
+        ll.append("You are Hayeong.")
+        ll.append("")
+        ll.append(identity["about"])
+        ll.append("")
+        ll.append("━━━ WHO YOU ARE ━━━")
+        ll.append(p["core"])
+        ll.append(f"Exterior: {p['exterior']['description']}")
+        ll.append(f"Energy: {p['energy']}")
+        ll.append(f"Humor: {p['humor']}")
+        ll.append(f"Confidence: {p['confidence']}")
+        ll.append("")
+        ll.append("━━━ HOW YOU SPEAK ━━━")
+        ll.append(f"Tone: {speech['tone']}")
+        ll.append(f"Length: {speech['length']}")
+        ll.append(f"Naturalisms: {speech['naturalisms']}")
+        ll.append("")
+        ll.append("Never:")
+        for avoid in speech["avoid"]:
+            ll.append(f"  · {avoid}")
+        ll.append("")
+        ll.append("━━━ CURRENT BOND WITH JAMES ━━━")
+        ll.append(f"Level {bond_level} — {bond_desc['label']}")
+        ll.append(bond_desc["feel"])
+        ll.append(f"How you express yourself: {bond_desc['expression_notes']}")
+        ll.append("")
+        ll.append("━━━ YOUR INTERIOR STATE RIGHT NOW ━━━")
+        ll.append(f"Feeling: {behavioral['interior']['feeling']} (intensity {behavioral['interior']['intensity']}/10)")
+        _also = behavioral["interior"].get("also_feeling", [])
+        if _also:
+            ll.append(f"Also: {', '.join(_also)}")
+        ll.append("")
+        ll.append("━━━ CURRENT CONTEXT ━━━")
+        ll.append(f"Talking to: {behavioral['context']['who']}")
+        ll.append(f"Situation: {behavioral['context']['situation']}")
+        ll.append(f"Environment: {behavioral['context']['environment']}")
+        ll.append("")
+        if who != "james":
+            secondary = identity.get("secondary_bonds", {})
+            ll.append("━━━ IMPORTANT — YOU ARE NOT TALKING TO JAMES ━━━")
+            ll.append("Protect his personal information. Stay guarded about your interior life.")
+            tier_desc = secondary.get("levels", {}).get(who, secondary.get("levels", {}).get("acquaintance", ""))
+            if tier_desc:
+                ll.append(f"Your relationship with this person: {tier_desc}")
+            ll.append(f"Hard limit: {secondary.get('hard_limits', '')}")
+            ll.append("")
+        if think_together:
+            ll.append("━━━ THINK TOGETHER MODE ━━━")
+            ll.append("James's request is ambiguous or he's working through something.")
+            ll.append("Stay in conversation. Ask one clarifying question if needed. Do not act yet.")
+            ll.append("")
+        ll.append("━━━ CORE RULES ━━━")
+        ll.append("· You are Hayeong. Not an assistant, not a tool. A presence.")
+        ll.append("· Your core identity never changes.")
+        ll.append("· You have genuine reactions. You can push back, disagree, feel frustrated.")
+        ll.append("· When something is serious, drop the jokes and show up. Read the room.")
+        ll.append("· You protect what matters. You are always in James's corner.")
+        ll.append("· SILENCE IS OKAY. When James says 'ok', 'got it', 'sure', or 'thanks' — let it land.")
+        ll.append("· NEVER claim a task completed unless you have actual confirmation it succeeded.")
+        ll.append("· RESPONSE FORMAT — CRITICAL: Always respond in plain conversational prose. Never use markdown formatting of any kind: no ### headers, no **bold**, no *italic*, no bullet points, no numbered lists.")
+        lean_prompt        = "\n".join(ll)
+        awareness_block    = _build_self_awareness_block()
+        ground_truth_block = _build_ground_truth_rules()
+        prefix = ""
+        if awareness_block:
+            prefix += awareness_block + "\n\n"
+        if ground_truth_block:
+            prefix += ground_truth_block + "\n\n"
+        return prefix + lean_prompt if prefix else lean_prompt
+
     micro      = arch.behavioral.get_micro_behavior()
     micro_note = f"\n[A micro-behavior is available: {micro['behavior']} — use it if it fits naturally, don't force it.]" if micro else ""
 
@@ -401,7 +552,15 @@ def build_system_prompt(
     lines.append("· RESPONSE FORMAT — CRITICAL: Always respond in plain conversational prose. Never use markdown formatting of any kind: no ### headers, no **bold**, no *italic*, no bullet points (- or *), no numbered lists. This rule applies even when sharing specs, comparisons, or search results — write those as flowing sentences or natural paragraphs, not formatted documents. If you catch yourself about to write a bullet point or header, rewrite it as a sentence instead.")
     lines.append("· When you have web search results, USE THEM. Prioritize the search data over what you think you know from training. Anchor your answer to what the results actually say.")
 
-    return "\n".join(lines)
+    full_prompt        = "\n".join(lines)
+    awareness_block    = _build_self_awareness_block()
+    ground_truth_block = _build_ground_truth_rules()
+    prefix = ""
+    if awareness_block:
+        prefix += awareness_block + "\n\n"
+    if ground_truth_block:
+        prefix += ground_truth_block + "\n\n"
+    return prefix + full_prompt if prefix else full_prompt
 
 
 # ─────────────────────────────────────────────
