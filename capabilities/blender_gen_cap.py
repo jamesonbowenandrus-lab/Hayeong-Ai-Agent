@@ -30,7 +30,7 @@ from capability_loader import result
 ACTIONS = ["blender_gen"]
 
 OLLAMA_URL  = "http://localhost:11434/api/chat"
-GEN_MODELS  = ["deepseek-coder-v2:16b", "deepseek-coder:33b", "qwen2.5:14b"]
+GEN_MODELS  = ["deepseek-coder-v2:16b", "deepseek-coder:33b", "deepseek-r1:latest"]
 GEN_TIMEOUT = 120
 BLENDER_TIMEOUT = 120
 

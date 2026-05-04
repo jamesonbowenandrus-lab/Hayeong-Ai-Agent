@@ -72,7 +72,7 @@ MAX_LOG_ENTRIES  = 500
 
 # Ollama config for classification
 OLLAMA_URL       = "http://localhost:11434/api/chat"
-CLASSIFY_MODEL   = "qwen2.5:14b"
+CLASSIFY_MODEL   = "deepseek-r1:latest"
 
 
 # ─────────────────────────────────────────────

@@ -45,7 +45,7 @@ COMFYUI_URL          = "http://127.0.0.1:8188"
 OLLAMA_URL           = "http://localhost:11434/api/chat"
 VISION_MODEL_FAST    = "moondream:latest"   # Quick screen grabs — fast, lightweight
 VISION_MODEL_DEEP    = "llava:13b"          # Reference image analysis — rich and detailed
-LANGUAGE_MODEL       = "qwen2.5:14b"        # Prompt building — strong instruction following
+LANGUAGE_MODEL       = "deepseek-r1:latest"  # Prompt building — strong instruction following
 OUTPUT_DIR      = Path(r"H:\ComfyUI_windows_portable\ComfyUI\output")
 MODELS_DIR      = Path(r"H:\ComfyUI_windows_portable\ComfyUI\models")
 

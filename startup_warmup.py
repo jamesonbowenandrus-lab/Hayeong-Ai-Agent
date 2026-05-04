@@ -13,8 +13,8 @@ import requests
 
 COMMUNICATION_URL   = "http://localhost:11434/api/generate"
 REASONING_URL       = "http://localhost:11435/api/generate"
-COMMUNICATION_MODEL = "qwen2.5:7b-instruct-q4_K_M"
-REASONING_MODEL     = "qwen2.5:14b-instruct-q4_K_M"
+COMMUNICATION_MODEL = "llama3.2:latest"
+REASONING_MODEL     = "deepseek-r1:latest"
 WARMUP_TIMEOUT      = 120  # seconds — 14b can be slow to load
 
 

@@ -83,6 +83,19 @@ def _build_assessment() -> dict:
         current_goal   = ""
         active_scripts = []
 
+    # Minecraft bot
+    minecraft_running = False
+    try:
+        import psutil
+        for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+            cmdline = proc.info.get('cmdline') or []
+            if any('hayeong_bot' in str(c) or 'mineflayer' in str(c).lower()
+                   for c in cmdline):
+                minecraft_running = True
+                break
+    except Exception:
+        pass
+
     # Commitments
     try:
         from commitment_manager import get_all_active
@@ -128,11 +141,15 @@ def _build_assessment() -> dict:
             "pending": pending_count,
             "overdue": overdue_count,
         },
+        "minecraft": {
+            "bot_running": minecraft_running,
+        },
     }
 
 
 def _assessment_loop():
     """Background loop — runs every 30 seconds."""
+    import time
     while not _stop_event.is_set():
         try:
             assessment = _build_assessment()
@@ -140,7 +157,13 @@ def _assessment_loop():
             write_system({"self_assessment": assessment})
         except Exception as e:
             print(f"[self_assessment] Error: {e}")
-        _stop_event.wait(timeout=30)
+        # Wait 30s in 1s increments so the stop flag is checked each second.
+        # Avoids _stop_event.wait(timeout=30) returning early if the event
+        # was set by a previous session and never cleared.
+        for _ in range(30):
+            if _stop_event.is_set():
+                return
+            time.sleep(1)
 
 
 def start_self_assessment():

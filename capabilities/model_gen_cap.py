@@ -31,7 +31,7 @@ from capability_loader import result
 ACTIONS = ["model_gen"]
 
 OLLAMA_URL      = "http://localhost:11434/api/chat"
-SPEC_MODELS     = ["deepseek-coder-v2:16b", "deepseek-coder:33b", "qwen2.5:14b"]
+SPEC_MODELS     = ["deepseek-coder-v2:16b", "deepseek-coder:33b", "deepseek-r1:latest"]
 OUTPUT_DIR      = Path(__file__).parent.parent / "hayeong_outputs" / "3d_models"
 GEN_TIMEOUT     = 120
 INCHES_TO_METERS = 0.0254

@@ -24,17 +24,33 @@ def _start_bridge():
     start_server()
 
 
+def _pipe_bot_output(proc):
+    for line in proc.stdout:
+        try:
+            print(f"[minecraft_bot] {line.decode('utf-8', errors='replace').rstrip()}")
+        except Exception:
+            pass
+
+
 def _start_bot():
     global _bot_process
     if not BOT_PATH.exists():
         print("⚠️  hayeong_bot.js not found")
         return False
     try:
+        import os
+        env = os.environ.copy()
+        env["PYTHONIOENCODING"] = "utf-8"
         _bot_process = subprocess.Popen(
             ["node", str(BOT_PATH)],
             cwd=str(BASE_DIR),
-            creationflags=subprocess.CREATE_NEW_CONSOLE if sys.platform == "win32" else 0,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            env=env,
         )
+        threading.Thread(
+            target=_pipe_bot_output, args=(_bot_process,), daemon=True
+        ).start()
         print(f"   [Minecraft] Bot started (pid {_bot_process.pid})")
         return True
     except FileNotFoundError:

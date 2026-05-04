@@ -1,3 +1,12 @@
+
+
+
+
+
+
+
+
+
 @echo off
 title Hayeong — Ollama Reasoning LLM (port 11435)
 
@@ -17,7 +26,7 @@ set OLLAMA_KEEP_ALIVE=-1
 
 echo ─────────────────────────────────────────
 echo   Hayeong Reasoning LLM
-echo   Model: qwen2.5:14b-instruct-q4_K_M
+echo   Model: deepseek-r1:latest
 echo   Port:  11435
 echo   GPU:   CUDA (RTX 3090)
 echo ─────────────────────────────────────────

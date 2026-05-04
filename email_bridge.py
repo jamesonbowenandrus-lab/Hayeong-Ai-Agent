@@ -102,7 +102,7 @@ class EmailBridge:
             mail = imaplib.IMAP4_SSL(GMAIL_IMAP_HOST, GMAIL_IMAP_PORT)
             mail.login(HAYEONG_EMAIL, EMAIL_PASSWORD)
             mail.logout()
-            print("✅ [EmailBridge] Auth verified — App Password working")
+            pass  # auth ok — no startup print needed
         except imaplib.IMAP4.error as e:
             err = str(e).lower()
             if "application-specific password required" in err or "invalid credentials" in err:
@@ -500,7 +500,17 @@ class EmailBridge:
 #   hayeong_email.send("Done", "Task completed.")
 # ─────────────────────────────────────────────
 
-hayeong_email = EmailBridge(agent_name="Hayeong")
+_email_bridge: "EmailBridge | None" = None
+
+def get_email_bridge() -> "EmailBridge":
+    """Lazy getter — only creates the bridge (and connects to Gmail) on first call."""
+    global _email_bridge
+    if _email_bridge is None:
+        _email_bridge = EmailBridge(agent_name="Hayeong")
+    return _email_bridge
+
+# Keep for backwards compatibility with any direct imports still in the codebase
+hayeong_email = None  # use get_email_bridge() instead
 
 
 # ─────────────────────────────────────────────
@@ -556,7 +566,7 @@ if __name__ == "__main__":
 
     if "--send" in sys.argv:
         print("Sending test email...")
-        ok = hayeong_email.send(
+        ok = get_email_bridge().send(
             subject="Test email",
             body=(
                 "This is a test from Hayeong's email bridge.\n\n"
@@ -568,7 +578,7 @@ if __name__ == "__main__":
 
     elif "--inbox" in sys.argv:
         print("Checking inbox...")
-        messages = hayeong_email.check_inbox(unread_only=True)
+        messages = get_email_bridge().check_inbox(unread_only=True)
         if messages:
             for m in messages:
                 print(f"\nFrom:    {m['from']}")

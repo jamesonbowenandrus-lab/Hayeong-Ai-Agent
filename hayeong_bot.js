@@ -9,7 +9,7 @@ const net = require("net");
 const MC_HOST     = "localhost";
 const MC_PORT     = 25565;
 const MC_USERNAME = "Hayeong";
-const MC_VERSION  = "1.21.11";
+const MC_VERSION  = "1.21.4";
 const BRIDGE_HOST = "127.0.0.1";
 const BRIDGE_PORT = 9876;
 

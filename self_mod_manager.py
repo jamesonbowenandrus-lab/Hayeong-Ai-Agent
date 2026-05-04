@@ -410,7 +410,7 @@ class SelfModManager:
     def _notify_james_new_capability(self, filename: str, reason: str, category: str):
         """Send James an email when a new capability is written."""
         try:
-            from email_bridge import hayeong_email
+            from email_bridge import get_email_bridge
             subject = f"New capability written: {filename}"
             body = (
                 f"I just wrote a new capability that's waiting for your review.\n\n"
@@ -422,7 +422,7 @@ class SelfModManager:
                 f"Reply DENY {filename} to permanently disable it.\n\n"
                 f"You can also say 'show proposals' or 'what did you change' next time we talk."
             )
-            hayeong_email.send(subject, body)
+            get_email_bridge().send(subject, body)
             print(f"[SelfMod] James notified by email about: {filename}")
         except Exception as e:
             print(f"[SelfMod] Email notification failed (non-fatal): {e}")

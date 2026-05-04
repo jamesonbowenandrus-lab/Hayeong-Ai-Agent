@@ -17,7 +17,7 @@ set OLLAMA_KEEP_ALIVE=-1
 
 echo ─────────────────────────────────────────
 echo   Hayeong Communication LLM
-echo   Model: qwen2.5:7b-instruct-q4_K_M
+echo   Model: llama3.2:latest
 echo   Port:  11434
 echo   GPU:   CUDA (RTX 3090)
 echo ─────────────────────────────────────────

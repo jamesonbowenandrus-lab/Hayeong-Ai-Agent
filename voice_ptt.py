@@ -60,7 +60,7 @@ CHUNK_SECONDS    = 0.3    # how often to check volume while recording
 MAX_RECORD_SECS  = 15     # hard cap per utterance
 SILENCE_SECS     = 1.2    # stop recording after this much quiet (TOGGLE mode)
 OLLAMA_URL       = "http://localhost:11434/api/chat"
-PRIMARY_MODEL    = "qwen2.5:7b"
+PRIMARY_MODEL    = "llama3.2:latest"
 FALLBACK_MODEL   = "llama3.2:latest"
 
 # ─────────────────────────────────────────────

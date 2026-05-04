@@ -31,8 +31,9 @@ ROUTER_LOG.parent.mkdir(parents=True, exist_ok=True)
 # ─────────────────────────────────────────────
 
 # VRAM budget on RTX 3090 (24GB CUDA):
-#   qwen2.5:7b  Q4_K_M  ≈  4GB  (communication LLM — port 11434, always loaded)
-#   qwen2.5:14b Q4_K_M  ≈  8GB  (reasoning LLM    — port 11435, always loaded)
+#   llama3.2:latest    ≈  2GB  (communication LLM — port 11434, always loaded)
+#   deepseek-r1:latest ≈  5GB  (reasoning LLM    — port 11435, always loaded)
+#   phi3:mini          ≈  2GB  (task agent        — port 11436, always loaded)
 #   Kokoro TTS           ≈  2GB  (voice server)
 #   Whisper              ≈  2GB  (voice input)
 #   ─────────────────────────────────────────────────────────────
@@ -47,22 +48,33 @@ ROUTER_LOG.parent.mkdir(parents=True, exist_ok=True)
 #   reasoning     — all decisions, planning, capability dispatch, Minecraft
 
 MODELS = {
-    # ── Communication LLM — all James-facing output ──
+    # ── Communication LLM — all James-facing output (port 11434) ──
+    # llama3.2: ~2GB VRAM, fast and natural for conversation
     "communication": {
-        "name":           "qwen2.5:7b-instruct-q4_K_M",
-        "ollama_name":    "qwen2.5:7b-instruct-q4_K_M",
+        "name":           "llama3.2:latest",
+        "ollama_name":    "llama3.2:latest",
         "ollama_url":     "http://localhost:11434/api/chat",
-        "description":    "Communication LLM — all James-facing responses, voice, text",
-        "context_window": 32768,
+        "description":    "Communication agent — all James-facing responses, voice, text",
+        "context_window": 8192,
     },
 
-    # ── Reasoning LLM — all decisions and task execution ──
+    # ── Reasoning LLM — deep planning and decisions (port 11435) ──
     "reasoning": {
-        "name":           "qwen2.5:14b-instruct-q4_K_M",
-        "ollama_name":    "qwen2.5:14b-instruct-q4_K_M",
+        "name":           "deepseek-r1:latest",
+        "ollama_name":    "deepseek-r1:latest",
         "ollama_url":     "http://localhost:11435/api/chat",
-        "description":    "Reasoning LLM — planning, decisions, capability dispatch, Minecraft",
-        "context_window": 32768,
+        "description":    "Reasoning agent — planning, decisions, cross-domain thinking",
+        "context_window": 8192,
+    },
+
+    # ── Task execution LLM — runs plans, controls Minecraft (port 11436) ──
+    # Phi-3 Mini 3.8b: ~2GB VRAM, fast and reliable at structured execution
+    "task": {
+        "name":           "phi3:mini",
+        "ollama_name":    "phi3:mini",
+        "ollama_url":     "http://localhost:11436/api/chat",
+        "description":    "Task execution agent — follows plans, runs scripts, controls Minecraft",
+        "context_window": 8192,
     },
 
     # ── Coding specialist ──
@@ -321,10 +333,11 @@ class ModelRouter:
         gen_url  = base_url.replace("/api/chat", "/api/generate")
 
         payload = {
-            "model":   model_name,
-            "prompt":  prompt,
-            "stream":  False,
-            "options": {"temperature": temperature},
+            "model":      model_name,
+            "prompt":     prompt,
+            "stream":     False,
+            "keep_alive": -1,
+            "options":    {"num_ctx": 16384},
         }
         if system:
             payload["system"] = system

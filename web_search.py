@@ -73,7 +73,7 @@ def _get_ddgs():
 DDGS_AVAILABLE = _check_ddgs()
 
 OLLAMA_URL      = "http://localhost:11434/api/chat"
-QUERY_MODEL     = "qwen2.5:7b"   # Fast model for query extraction only
+QUERY_MODEL     = "llama3.2:latest"   # Query extraction — comm model, always loaded
 
 
 # ─────────────────────────────────────────────
@@ -487,7 +487,7 @@ class WebSearch:
         }
 
     def format_as_document(self, query: str, data: dict, topic: str = "",
-                           model: str = "qwen2.5:14b",
+                           model: str = "deepseek-r1:latest",
                            constraints: list = None) -> str:
         """
         Generate a proper synthesized research document using the LLM.

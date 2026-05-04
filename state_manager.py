@@ -62,9 +62,21 @@ _EMPTY_STATE = {
         "health": {
             "communication_llm": "unknown",
             "reasoning_llm":     "unknown",
+            "task_llm":          "unknown",
             "voice_server":      "unknown",
             "whisper":           "unknown",
         },
+    },
+    "task_agent": {
+        "assignment": {
+            "type":        "",
+            "description": "",
+            "params":      {},
+            "status":      "idle",
+            "assigned_at": "",
+        },
+        "last_result": "",
+        "result_at":   "",
     },
 }
 
@@ -128,6 +140,16 @@ def write_reasoning(updates: dict):
     with _lock():
         state = _read()
         state["reasoning"].update(updates)
+        _write(state)
+
+
+def write_state_section(section: str, updates: dict):
+    """Generic writer for any top-level section of shared state."""
+    with _lock():
+        state = _read()
+        if section not in state:
+            state[section] = {}
+        state[section].update(updates)
         _write(state)
 
 

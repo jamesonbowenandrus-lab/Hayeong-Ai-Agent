@@ -39,10 +39,10 @@ from state_manager import (
 # ─────────────────────────────────────────────
 
 REASONING_URL   = "http://localhost:11435/api/chat"
-REASONING_MODEL = "qwen2.5:14b-instruct-q4_K_M"
+REASONING_MODEL = "deepseek-r1:latest"
 
 HEARTBEAT_FALLBACK = 5.0   # sleep duration after an exception — never used as default
-TIMEOUT_SECONDS    = 30    # per Ollama call
+TIMEOUT_SECONDS    = 120   # per Ollama call — deepseek-r1 can be slow under VRAM pressure
 
 _stop_event           = threading.Event()
 _tick_lock            = threading.Lock()
@@ -56,20 +56,20 @@ _wake_assessment_done = False
 # ─────────────────────────────────────────────
 
 def _do_startup_check():
-    """On first wake, start the communication LLM if it isn't already running."""
+    """On first wake, verify the communication LLM (Ollama port 11434) is reachable.
+    Ollama is started by the bat files — this is a health check only, not a start."""
     global _startup_done
     if _startup_done:
         return
     _startup_done = True
     try:
-        from app_manager import get_app_manager
-        mgr = get_app_manager()
-        if not mgr.is_running("communication_llm"):
-            print("[reasoning_loop] Starting communication LLM...")
-            ok, msg = mgr.start("communication_llm")
-            print(f"[reasoning_loop] Communication LLM: {msg}")
-    except Exception as e:
-        print(f"[reasoning_loop] Startup check failed: {e}")
+        resp = requests.get("http://localhost:11434/", timeout=3)
+        if resp.ok:
+            print("[reasoning_loop] Communication LLM: reachable on port 11434.")
+        else:
+            print(f"[reasoning_loop] Communication LLM: port 11434 returned {resp.status_code}.")
+    except Exception:
+        print("[reasoning_loop] Communication LLM: not reachable on port 11434 — check Ollama.")
 
 
 def _do_wake_assessment():
@@ -278,24 +278,30 @@ SCRIPT_TO_DOMAIN = {
 # OLLAMA CALL
 # ─────────────────────────────────────────────
 
+def _strip_think_tags(text: str) -> str:
+    """Remove DeepSeek R1 chain-of-thought <think>...</think> tags from response."""
+    return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+
+
 def _call_reasoning(system: str, user: str) -> str:
     """Single call to the reasoning LLM. Returns response text or empty string on failure."""
     try:
         resp = requests.post(
             REASONING_URL,
             json={
-                "model":   REASONING_MODEL,
+                "model":      REASONING_MODEL,
                 "messages": [
                     {"role": "system", "content": system},
                     {"role": "user",   "content": user},
                 ],
-                "stream":  False,
-                "options": {"temperature": 0.3},
+                "stream":     False,
+                "keep_alive": -1,
+                "options":    {"temperature": 0.3},
             },
             timeout=TIMEOUT_SECONDS,
         )
         resp.raise_for_status()
-        return resp.json()["message"]["content"].strip()
+        return _strip_think_tags(resp.json()["message"]["content"].strip())
     except Exception as e:
         print(f"[reasoning_loop] LLM call failed: {e}")
         return ""
@@ -307,19 +313,19 @@ def _call_reasoning_json(system: str, user: str) -> dict:
         resp = requests.post(
             REASONING_URL,
             json={
-                "model":   REASONING_MODEL,
+                "model":      REASONING_MODEL,
                 "messages": [
                     {"role": "system", "content": system},
                     {"role": "user",   "content": user},
                 ],
-                "stream":  False,
-                "format":  "json",
-                "options": {"temperature": 0.0},
+                "stream":     False,
+                "keep_alive": -1,
+                "options":    {"temperature": 0.0},
             },
             timeout=TIMEOUT_SECONDS,
         )
         resp.raise_for_status()
-        raw = resp.json()["message"]["content"].strip()
+        raw = _strip_think_tags(resp.json()["message"]["content"].strip())
         raw = re.sub(r"^```[a-z]*\n?", "", raw)
         raw = re.sub(r"\n?```$",       "", raw)
         return json.loads(raw.strip())
@@ -367,7 +373,14 @@ def _process_priority_flags(flags: list):
         if result.get("new_task"):
             updates["active_task"] = result["new_task"]
             updates["active_task_status"] = "started"
+            # Delegate execution to the task agent — 14b continues reasoning immediately
+            try:
+                from task_agent import assign_task
+                assign_task("generic", result["new_task"])
+            except Exception:
+                pass
         write_reasoning(updates)
+        _write_reasoning_insight(result.get("conclusion", ""))
 
 
 def _consume_pending_results(results: list):
@@ -397,6 +410,9 @@ def _consume_pending_results(results: list):
             updates["context_for_communication"] = message
 
         write_reasoning(updates)
+
+        if not conclusion.startswith("TELL JAMES:"):
+            _write_proactive_context(conclusion[:400], script)
 
         # Update domain knowledge from script result
         domain = SCRIPT_TO_DOMAIN.get(script.split("_")[0], "general")
@@ -721,6 +737,57 @@ def _warm_knowledge_cache():
 
 
 # ─────────────────────────────────────────────
+# REASONING INSIGHT WRITER
+# ─────────────────────────────────────────────
+
+def _write_reasoning_insight(insight: str, domains: list = None):
+    """
+    Write a cross-domain insight from the 14b to shared state.
+    The 7b's triggered retrieval will surface this when relevant.
+    Only writes if insight is non-empty.
+    """
+    if not insight:
+        return
+    try:
+        write_reasoning({
+            "latest_insight":  insight,
+            "insight_domains": domains or [],
+            "insight_at":      datetime.now().isoformat(),
+        })
+        print(f"[reasoning] Insight written: {insight[:80]}")
+    except Exception:
+        pass
+
+
+# ─────────────────────────────────────────────
+# PROACTIVE CONTEXT WRITER
+# ─────────────────────────────────────────────
+
+def _write_proactive_context(conclusion: str, task: str):
+    """
+    After the 14b finishes meaningful work, surface the conclusion to the 7b
+    so it has something current to weave into its next response.
+    Only writes if the conclusion is non-empty and no higher-priority context
+    is already waiting (avoids overwriting urgent messages).
+    """
+    if not conclusion:
+        return
+    try:
+        state = read_state()
+        existing = state.get("reasoning", {}).get("context_for_communication", "")
+        if existing:
+            return
+        write_reasoning({
+            "context_for_communication": (
+                f"I just finished thinking about: {task}. "
+                f"Conclusion: {conclusion}"
+            )
+        })
+    except Exception:
+        pass
+
+
+# ─────────────────────────────────────────────
 # TASK ADVANCEMENT
 # ─────────────────────────────────────────────
 
@@ -810,6 +877,10 @@ def _advance_active_task():
                 except Exception:
                     pass
             write_reasoning(updates)
+            if result.get("task_complete"):
+                if not result.get("context_for_communication"):
+                    _write_proactive_context(result.get("progress", "")[:400], task)
+                _write_reasoning_insight(result.get("progress", "")[:400], domains=[domain])
 
 
 def _background_cognition():

@@ -251,8 +251,8 @@ def _run_checks(include_slow: bool = False) -> dict:
     state = {
         "timestamp": datetime.now().isoformat(),
         "components": {
-            "communication_llm": _check_ollama(11434, "qwen2.5:7b"),
-            "reasoning_llm":     _check_ollama(11435, "qwen2.5:14b"),
+            "communication_llm": _check_ollama(11434, "llama3.2"),
+            "reasoning_llm":     _check_ollama(11435, "deepseek-r1"),
             "voice_server":      _check_voice_server(),
             "cpu":               _check_cpu(),
             "ram":               _check_ram(),

@@ -66,7 +66,7 @@ from typing import Optional
 # ─────────────────────────────────────────────
 
 OLLAMA_URL       = "http://localhost:11434/api/chat"
-SNAPSHOT_MODEL   = "qwen2.5:14b"   # Same model as decide_action — already loaded
+SNAPSHOT_MODEL   = "deepseek-r1:latest"   # Same model as decide_action — already loaded
 BACKLOG_SIZE     = 10              # Rolling window of snapshots kept in memory
 SESSION_FILE     = Path(__file__).parent / "session_context.json"
 
@@ -356,7 +356,7 @@ class SituationTracker:
             "just_completed":     raw.get("just_completed") or None,
             "james_intent":       str(raw.get("james_intent", "unknown")),
             "james_tone":         tone,
-            "active_constraints": [str(c) for c in raw.get("active_constraints", [])],
+            "active_constraints": [str(c) for c in (raw.get("active_constraints") or [])],
             "open_task":          bool(raw.get("open_task", False)),
             "task_switching":     bool(raw.get("task_switching", False)),
             "timestamp":          "",   # filled by caller

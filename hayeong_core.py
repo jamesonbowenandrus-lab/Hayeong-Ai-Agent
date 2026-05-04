@@ -34,13 +34,14 @@ MEMORY_FILE    = BASE_DIR / "memory.json"
 IDENTITY_FILE  = BASE_DIR / "identity.json"
 MOOD_FILE      = BASE_DIR / "mood.json"
 
-# ── Two-model architecture ──
-# Communication LLM (7b) — everything James hears, port 11434
-# Reasoning LLM (14b)    — all decisions and planning, port 11435
+# ── Three-model architecture ──
+# Communication LLM (llama3.2) — everything James hears, port 11434
+# Reasoning LLM (deepseek-r1)  — all decisions and planning, port 11435
+# Task Agent (phi3:mini)        — execution, scripts, Minecraft, port 11436
 COMMUNICATION_URL   = "http://localhost:11434/api/chat"
 REASONING_URL       = "http://localhost:11435/api/chat"
-COMMUNICATION_MODEL = "qwen2.5:7b-instruct-q4_K_M"
-REASONING_MODEL     = "qwen2.5:14b-instruct-q4_K_M"
+COMMUNICATION_MODEL = "llama3.2:latest"
+REASONING_MODEL     = "deepseek-r1:latest"
 FALLBACK_MODEL      = "llama3.2:latest"
 
 # Backwards-compat aliases — imported by other modules

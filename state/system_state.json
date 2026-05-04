@@ -1,18 +1,18 @@
 {
-  "timestamp": "2026-04-28T19:33:19.558055",
+  "timestamp": "2026-05-01T08:36:17.596859",
   "components": {
     "communication_llm": {
-      "status": "healthy",
-      "healthy": true,
-      "detail": "fully on GPU",
-      "vram_gb": 8.2,
-      "on_gpu": true
+      "status": "online_no_model",
+      "healthy": false,
+      "detail": "Ollama running on 11434 but no model loaded",
+      "vram_gb": 0,
+      "on_gpu": false
     },
     "reasoning_llm": {
       "status": "healthy",
       "healthy": true,
       "detail": "fully on GPU",
-      "vram_gb": 17.8,
+      "vram_gb": 10.3,
       "on_gpu": true
     },
     "voice_server": {
@@ -23,16 +23,16 @@
     "cpu": {
       "status": "healthy",
       "healthy": true,
-      "usage_pct": 8.0,
+      "usage_pct": 20.2,
       "temp_c": null,
-      "detail": "8% load"
+      "detail": "20% load"
     },
     "ram": {
       "status": "healthy",
       "healthy": true,
-      "usage_pct": 54.7,
-      "avail_gb": 30.7,
-      "detail": "55% used, 30.7GB free"
+      "usage_pct": 51.7,
+      "avail_gb": 32.7,
+      "detail": "52% used, 32.7GB free"
     },
     "gpu": {
       "status": "unavailable",
@@ -42,9 +42,9 @@
     "disk": {
       "status": "healthy",
       "healthy": true,
-      "free_gb": 3871.6,
-      "used_pct": 3.2,
-      "detail": "3871.6GB free (3% used)"
+      "free_gb": 3869.4,
+      "used_pct": 3.3,
+      "detail": "3869.4GB free (3% used)"
     },
     "network": {
       "status": "healthy",
@@ -52,6 +52,8 @@
       "detail": "network reachable"
     }
   },
-  "overall_healthy": true,
-  "critical_components": []
+  "overall_healthy": false,
+  "critical_components": [
+    "communication_llm"
+  ]
 }
