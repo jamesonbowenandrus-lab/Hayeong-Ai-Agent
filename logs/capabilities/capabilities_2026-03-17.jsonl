@@ -1,2 +1,0 @@
-{"type": "capability_used", "session_id": "1ea60a8e", "timestamp": "2026-03-17T09:59:55.165799", "capability": "web_search", "action": "search", "outcome": "success", "details": {"query": "information gathered", "results": 4}, "error": null}
-{"type": "capability_used", "session_id": "e17f4c6c", "timestamp": "2026-03-17T16:10:03.050882", "capability": "web_search", "action": "search", "outcome": "success", "details": {"query": "AMD Threadripper new series differences from earlier series", "results": 4}, "error": null}

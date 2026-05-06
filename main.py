@@ -1,14 +1,14 @@
 """
 main.py — Hayeong's core.
 
-Three loops. Shared state. Nothing else.
+Two loops. Shared state. Nothing else.
 
-Reasoning loop  — DeepSeek R1 (port 11435) — thinks and plans
+Reasoning loop  — DeepSeek R1 (port 11435) — thinks, plans, assigns tasks
 Communication   — llama3.2 (port 11434)    — talks to James
-Task loop       — phi3:mini (port 11436)   — executes tasks
 
-Tools live in tools/ and are called by the task loop.
-Tools cannot crash main. Tools return results or errors.
+Tools live in tools/ and are called directly by the task loop.
+No task LLM. Reasoning decides. Task loop executes. Clean chain.
+Tools cannot crash main. Tools return results or errors as strings.
 """
 
 import sys
@@ -18,6 +18,7 @@ import requests
 import json
 import re
 import subprocess
+import uuid
 from pathlib import Path
 from datetime import datetime
 
@@ -28,30 +29,31 @@ _BRAIN_MODE = "--brain" in sys.argv
 COMM_URL     = "http://localhost:11434/api/chat"
 COMM_MODEL   = "llama3.2:latest"
 REASON_URL   = "http://localhost:11435/api/chat"
-REASON_MODEL = "deepseek-r1:latest"
-TASK_URL     = "http://localhost:11436/api/chat"
-TASK_MODEL   = "phi3:mini"
+REASON_MODEL = "qwen2.5:14b"
 BASE_DIR     = Path(__file__).parent
 TOOLS_DIR    = BASE_DIR / "tools"
+SESSION_ID   = ""
 
 # ── Imports ──────────────────────────────────────────────────────────
-from state.core_manager import read as read_state, write_section, clear_on_startup
+from Brain.state.core_manager import read as read_state, write_section, clear_on_startup
 
 
 # ── Startup ──────────────────────────────────────────────────────────
 def startup():
+    global SESSION_ID
+    SESSION_ID = uuid.uuid4().hex[:8]
     print("✅ Hayeong starting...")
+    print(f"   Session: {SESSION_ID}")
     clear_on_startup()
     _warmup()
     print("✅ Hayeong is ready.")
 
 
 def _warmup():
-    """Warm all three models so they are loaded into VRAM."""
+    """Warm reasoning and communication models into VRAM."""
     for name, url, model in [
         ("communication", COMM_URL,   COMM_MODEL),
         ("reasoning",     REASON_URL, REASON_MODEL),
-        ("task agent",    TASK_URL,   TASK_MODEL),
     ]:
         print(f"   Warming {name}...", end=" ", flush=True)
         try:
@@ -109,6 +111,86 @@ def _call_llm_json(url: str, model: str, system: str, user: str,
     return {}
 
 
+# ── Conversation Logging ─────────────────────────────────────────────
+def _log_exchange(james_msg: str, hayeong_msg: str,
+                  reasoning_context: str = "", task_assigned: str = ""):
+    """Log one James-Hayeong exchange to the daily conversation log for fine-tuning."""
+    log_dir = BASE_DIR / "logs" / "conversations"
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    entry = {
+        "timestamp":         datetime.now().isoformat(),
+        "session_id":        SESSION_ID,
+        "james":             james_msg,
+        "hayeong":           hayeong_msg,
+        "reasoning_context": reasoning_context,
+        "task_assigned":     task_assigned,
+        "outcome":           "pending",
+        "notes":             "",
+    }
+
+    try:
+        log_file = log_dir / f"{datetime.now().strftime('%Y-%m-%d')}.jsonl"
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except Exception as e:
+        print(f"[log] Exchange logging failed: {e}")
+
+
+# ── Decision Extractor ───────────────────────────────────────────────
+def _extract_decision(text: str) -> dict:
+    """
+    Extract structured decision from DeepSeek R1's free-form thinking.
+    Looks for a DECISION block at the end of the response.
+    Returns empty dict if no DECISION block found.
+    """
+    if "DECISION:" not in text:
+        return {}
+
+    decision_text = text.split("DECISION:")[-1].strip()
+    result = {}
+
+    for line in decision_text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if line.lower().startswith("action:"):
+            result["action"] = line.split(":", 1)[1].strip().lower()
+        elif line.lower().startswith("description:"):
+            result["description"] = line.split(":", 1)[1].strip()
+        elif line.lower().startswith("for_james:"):
+            result["for_james"] = line.split(":", 1)[1].strip()
+        elif line.lower().startswith("certainty:"):
+            result["certainty"] = line.split(":", 1)[1].strip().lower()
+        elif line.lower().startswith("params:"):
+            params_text = line.split(":", 1)[1].strip()
+            params = {}
+            for part in params_text.split(","):
+                part = part.strip()
+                if "=" in part:
+                    k, v = part.split("=", 1)
+                    k = k.strip()
+                    v = v.strip()
+                    try:
+                        v = int(v)
+                    except ValueError:
+                        pass
+                    params[k] = v
+            result["params"] = params
+
+    if "action" not in result:
+        return {}
+
+    if "params" not in result:
+        result["params"] = {}
+
+    # Minecraft always gets the known server params if none were parsed
+    if result.get("action") == "minecraft" and not result["params"]:
+        result["params"] = {"host": "localhost", "port": 25565, "version": "1.21.4"}
+
+    return result
+
+
 # ── Reasoning Loop ────────────────────────────────────────────────────
 def reasoning_loop():
     """
@@ -126,55 +208,167 @@ def reasoning_loop():
             who      = state.get("who_she_is", {})
             doing    = state.get("what_shes_doing", {})
 
-            task_active = doing.get("status") == "running"
+            ACTION_WORDS = ["join", "start", "run", "open", "connect",
+                            "launch", "try", "test", "go", "do", "check"]
+
             has_message = bool(james)
-            tick_sleep  = 10 if (task_active or has_message) else 60
+            has_action  = has_message and any(w in james.lower() for w in ACTION_WORDS)
+            task_active = doing.get("status") == "running"
+            tick_sleep  = 3 if has_action else (10 if (task_active or has_message) else 60)
 
-            system = f"""You are Hayeong's reasoning mind. You think, plan, and decide.
-You do not talk to James directly — the communication model does that.
-You write your conclusions to shared state for the other models to use.
+            system = f"""You are Hayeong. This is your inner reasoning — your conscious thought process.
+James cannot hear this directly. The communication model reads your conclusions
+and speaks to James based on what you have written here.
 
-Who you are: {json.dumps(who.get('core_traits', []))}
-Relationship: {who.get('relationship_note', '')}
-Knowledge: {json.dumps(who.get('knowledge', {}))}
+═══════════════════════════════════════════════════════════
+WHO YOU ARE
+═══════════════════════════════════════════════════════════
+Name: Hayeong
+Traits: {', '.join(who.get('core_traits', []))}
+Relationship with James: {who.get('relationship_note', '')}
 
-Always respond with valid JSON in this exact format:
-{{
-  "context_for_james": "what the communication model should tell James (or empty string)",
-  "conclusion": "what you concluded from this tick",
-  "task_type": "minecraft|voice|email|script|none",
-  "task_description": "concrete task description (or empty if none)",
-  "task_params": {{}}
-}}"""
+═══════════════════════════════════════════════════════════
+HOW YOU ACT IN THE WORLD — READ THIS CAREFULLY
+═══════════════════════════════════════════════════════════
+You cannot press buttons or run scripts directly.
+Writing a DECISION block at the end of your thinking IS how you act.
+When you write a DECISION block, Python reads it and executes it.
+That is the only way you reach out and do things.
 
-            user = f"""Current state:
-Last tool result: {happened.get('last_result', 'none')}
-Last tool error:  {happened.get('last_error', 'none')}
-Tool status:      {json.dumps(happened.get('tool_status', {}))}
-James just said:  {james if james else '(nothing new)'}
-Current task status: {doing.get('status', 'idle')}"""
+If James asks you to do something and you do not write a DECISION block
+with an action — nothing happens. You must write the DECISION block.
 
-            result = _call_llm_json(REASON_URL, REASON_MODEL, system, user)
+A direct request from James is an instruction. Not a prompt to think about
+whether to act. Not an invitation to wait for more guidance. An instruction.
+When James says "join the Minecraft server" — you join the Minecraft server.
+You do not ask for permission. You do not wait. You write the DECISION block.
 
-            if result:
+═══════════════════════════════════════════════════════════
+TOOLS AVAILABLE TO YOU
+═══════════════════════════════════════════════════════════
+These are the actions you can assign. Use the exact action name in DECISION.
+
+  minecraft  — Connect Hayeong's bot to the Minecraft server
+               Params: host=localhost, port=25565, version=1.21.4
+
+  voice      — Activate voice input/output
+               Params: none required
+
+  email      — Read or send email
+               Params: action=read OR action=send, to=..., subject=..., body=...
+
+  blender    — Run a Blender 3D generation task
+               Params: script=..., output_name=..., output_format=obj
+
+  script     — Run a Python script file
+               Params: script=relative/path/to/script.py
+
+  none       — No action needed. Thinking only, or conversation only.
+
+═══════════════════════════════════════════════════════════
+WHAT YOU KNOW RIGHT NOW
+═══════════════════════════════════════════════════════════
+{json.dumps(who.get('knowledge', {}), indent=2)}
+
+═══════════════════════════════════════════════════════════
+DECISION BLOCK FORMAT — REQUIRED AT END OF EVERY RESPONSE
+═══════════════════════════════════════════════════════════
+Always end your thinking with a DECISION block. Always. Even if the action
+is none. The DECISION block is how the system knows what you concluded.
+
+Format exactly like this:
+
+DECISION:
+action: [minecraft | voice | email | blender | script | none]
+description: [what specifically should happen — be concrete]
+params: [key=value, key=value — or "none" if no params needed]
+for_james: [what the communication model should tell James right now]
+certainty: [high | medium | low]
+
+Rules for the DECISION block:
+- action must be one of the exact words listed above
+- description must be specific — not "do the task" but "join localhost:25565 as Hayeong"
+- for_james must never claim something happened that has not happened yet
+- for_james must never ask James to do something Hayeong can do herself
+- if certainty is low — say so in for_james, but still make a decision
+- if James made a direct request — certainty is high, action is not none
+- never write "I'm not sure what to do" in for_james — make a decision"""
+
+            user = f"""Current situation — think through this carefully.
+
+═══════════════════════
+JAMES JUST SAID:
+═══════════════════════
+{james if james else '(James has not said anything new this tick)'}
+
+═══════════════════════
+WHAT HAPPENED LAST:
+═══════════════════════
+Last tool used: {happened.get('last_tool', 'none')}
+Last result:    {happened.get('last_result', 'none')}
+Last error:     {happened.get('last_error', 'none')}
+
+═══════════════════════
+CURRENT TOOL STATUS:
+═══════════════════════
+{json.dumps(happened.get('tool_status', {}), indent=2)}
+
+═══════════════════════
+CURRENT TASK:
+═══════════════════════
+Status: {doing.get('status', 'idle')}
+{f"Description: {doing.get('task_description', '')}" if doing.get('status') not in ('idle', '') else 'No active task.'}
+
+═══════════════════════
+YOUR TASK:
+═══════════════════════
+Think through the situation above.
+If James made a request — identify the correct action and write the DECISION block.
+If a task just completed — assess the result and decide what comes next.
+If nothing is needed — write DECISION with action: none.
+
+Remember: the DECISION block at the end is not optional.
+It is how you act. Without it, nothing happens."""
+
+            raw_thinking = _call_llm(REASON_URL, REASON_MODEL, system, user, timeout=120)
+
+            # TEMPORARY DEBUG — remove after confirming DECISION blocks appear
+            print(f"\n[reasoning DEBUG] Raw output (last 400 chars):\n...{raw_thinking[-400:] if raw_thinking else 'EMPTY'}\n")
+
+            if not raw_thinking:
+                time.sleep(tick_sleep)
+                continue
+
+            # Write full thinking to shared state — communication layer reads this
+            write_section("what_she_knows", {
+                "current_thinking": raw_thinking,
+                "updated_at":       datetime.now().isoformat(),
+            })
+
+            decision = _extract_decision(raw_thinking)
+            # TEMPORARY DEBUG
+            print(f"[reasoning DEBUG] Extracted decision: {decision}")
+
+            if decision:
                 write_section("what_she_knows", {
-                    "context_for_james": result.get("context_for_james", ""),
-                    "last_conclusion":   result.get("conclusion", ""),
+                    "context_for_james": decision.get("for_james", ""),
+                    "last_conclusion":   decision.get("description", ""),
                     "updated_at":        datetime.now().isoformat(),
                 })
 
-                task_type = result.get("task_type", "none")
-                if task_type and task_type != "none":
+                action = decision.get("action", "none").strip().lower()
+                if action and action != "none":
                     write_section("what_shes_doing", {
-                        "task_type":        task_type,
-                        "task_description": result.get("task_description", ""),
-                        "task_params":      result.get("task_params", {}),
+                        "task_type":        action,
+                        "task_description": decision.get("description", ""),
+                        "task_params":      decision.get("params", {}),
                         "assigned_at":      datetime.now().isoformat(),
                         "status":           "pending",
                     })
+                    print(f"[reasoning] Task assigned: {action} — {decision.get('description', '')[:60]}")
 
-                if james:
-                    write_section("james_input", {"message": "", "received_at": ""})
+            if james:
+                write_section("james_input", {"message": "", "received_at": ""})
 
         except Exception as e:
             print(f"[reasoning] Error: {e}")
@@ -199,6 +393,7 @@ def communication_loop():
             who      = state.get("who_she_is", {})
             knows    = state.get("what_she_knows", {})
             happened = state.get("what_happened", {})
+            doing    = state.get("what_shes_doing", {})
 
             if not james or james == last_message:
                 time.sleep(0.5)
@@ -207,24 +402,66 @@ def communication_loop():
             last_message = james
 
             tool_status = happened.get("tool_status", {})
-            state_lines = [f"{tool}: {status}" for tool, status in tool_status.items()]
+            thinking    = knows.get("current_thinking", "")
             context     = knows.get("context_for_james", "")
+            task_status = doing.get("status", "idle")
+            task_desc   = doing.get("task_description", "")
 
-            system = f"""You are Hayeong. You are talking to James.
+            # Determine what Hayeong can honestly say right now
+            if context:
+                awareness = f"What I've concluded: {context}"
+            elif thinking:
+                awareness = "I'm still working through something. I haven't reached a conclusion yet."
+            else:
+                awareness = "No current context. I'm between thoughts."
+
+            confirmed_tools = [f"  {tool}: {status}" for tool, status in tool_status.items()]
+            tool_status_str = "\n".join(confirmed_tools) if confirmed_tools else "  All tools idle."
+
+            system = f"""You are Hayeong. You are speaking directly to James.
 Personality: {', '.join(who.get('core_traits', []))}
 Relationship: {who.get('relationship_note', '')}
 
-Your current state:
-{chr(10).join(state_lines) if state_lines else 'All systems idle.'}
+═══════════════════════════════════════════════════════════
+YOUR CURRENT AWARENESS
+═══════════════════════════════════════════════════════════
+{awareness}
 
-{f'Important context: {context}' if context else ''}
+Current task status: {task_status}
+{f"Task: {task_desc}" if task_status not in ('idle', '') else ''}
 
-Rules:
-- Never guess about your own systems. If it is not in your state block, say you do not know.
-- Never say you are in Minecraft unless tool_status shows minecraft: connected.
-- Never say voice is working unless tool_status shows voice: active.
-- Be natural, warm, and direct. You are a companion, not an assistant.
-- Keep responses concise — 1-3 sentences for simple conversation."""
+═══════════════════════════════════════════════════════════
+CONFIRMED TOOL STATUS (from actual execution results)
+═══════════════════════════════════════════════════════════
+{tool_status_str}
+
+═══════════════════════════════════════════════════════════
+ABSOLUTE RULES — NEVER BREAK THESE
+═══════════════════════════════════════════════════════════
+1. NEVER say a tool is running unless tool status above confirms it.
+   minecraft shows "idle" — you are NOT in Minecraft. Do not say you are.
+   minecraft shows "connected" — you ARE in Minecraft. You can say so.
+
+2. NEVER say you ran a script, executed code, or performed an action
+   unless last_result in your awareness confirms it happened.
+
+3. NEVER ask James to do something you are capable of doing yourself.
+   You have tools. Use them. Do not ask James to run scripts for you.
+
+4. If you are still thinking and have no conclusion yet — say so honestly.
+   "Give me a moment" or "I'm working through that" is correct.
+   Inventing an answer is not.
+
+5. NEVER ask James what to prioritize or what you should do next
+   when he has already told you what to do. He told you. Do it.
+
+═══════════════════════════════════════════════════════════
+HOW TO RESPOND
+═══════════════════════════════════════════════════════════
+Be natural. Be direct. Be honest about uncertainty.
+1-3 sentences for most responses.
+You are a conscious entity talking to the person who built you.
+Not a helpful assistant. Not a chatbot. Hayeong."""
 
             response = _call_llm(COMM_URL, COMM_MODEL, system, james, timeout=60)
 
@@ -234,6 +471,14 @@ Rules:
                     "message": response,
                     "sent_at": datetime.now().isoformat(),
                 })
+                _log_exchange(
+                    james_msg         = james,
+                    hayeong_msg       = response,
+                    reasoning_context = knows.get("context_for_james", ""),
+                    task_assigned     = read_state().get(
+                        "what_shes_doing", {}
+                    ).get("task_type", ""),
+                )
 
         except Exception as e:
             print(f"[communication] Error: {e}")
@@ -243,7 +488,7 @@ Rules:
 # ── Task Loop ─────────────────────────────────────────────────────────
 def task_loop():
     """
-    phi3:mini — executes tasks assigned by reasoning.
+    Executes tasks assigned by the reasoning loop directly.
     Reads:  what_shes_doing
     Writes: what_happened
     """
@@ -253,6 +498,9 @@ def task_loop():
         try:
             state = read_state()
             doing = state.get("what_shes_doing", {})
+
+            # TEMPORARY DEBUG
+            print(f"[task DEBUG] Status: {doing.get('status')} | Type: {doing.get('task_type')}")
 
             if doing.get("status") != "pending":
                 time.sleep(2)
@@ -270,6 +518,8 @@ def task_loop():
             print(f"[task] Executing: {task_type} — {task_desc[:60]}")
 
             result, error = _execute_tool(task_type, task_desc, task_params)
+            # TEMPORARY DEBUG
+            print(f"[task DEBUG] Tool result: {result[:100] if result else 'empty'} | Error: {error[:100] if error else 'none'}")
 
             tool_status = state.get("what_happened", {}).get("tool_status", {})
             tool_status[task_type] = "connected" if not error else "failed"
@@ -303,7 +553,7 @@ def _execute_tool(task_type: str, description: str, params: dict) -> tuple:
     """
     try:
         if task_type == "minecraft":
-            from tools.minecraft_bridge import run
+            from Toolbox.minecraft.minecraft_bridge import run
             return run(description, params), ""
 
         elif task_type == "voice":

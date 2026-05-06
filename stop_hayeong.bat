@@ -1,25 +1,41 @@
 @echo off
-title Hayeong — Shutting Down
-
 echo.
-echo Stopping Hayeong...
+echo ========================================
+echo  Stopping Hayeong...
+echo ========================================
 echo.
 
-:: Stop Hayeong main process
-:: main.py handles SIGINT gracefully -- saves memory and state before exit
-taskkill /FI "WINDOWTITLE eq Hayeong — Starting Up" /F >nul 2>&1
-taskkill /FI "WINDOWTITLE eq Hayeong*" /F >nul 2>&1
+REM Stop Python processes (main.py and all threads)
+echo Stopping Python processes...
+taskkill /F /IM python.exe /T >nul 2>&1
+if %errorlevel% == 0 (
+    echo   Python stopped.
+) else (
+    echo   No Python processes found.
+)
 
-timeout /t 2 /nobreak >nul
+REM Stop Node.js processes (Minecraft bot)
+echo Stopping Node processes...
+taskkill /F /IM node.exe /T >nul 2>&1
+if %errorlevel% == 0 (
+    echo   Node stopped.
+) else (
+    echo   No Node processes found.
+)
 
-:: Stop supporting services
-echo Stopping voice server...
-taskkill /FI "WINDOWTITLE eq Hayeong — Voice Server" /F >nul 2>&1
-
+REM Stop Ollama instances (unloads models from VRAM)
 echo Stopping Ollama instances...
-taskkill /FI "WINDOWTITLE eq Hayeong — Communication LLM*" /F >nul 2>&1
-taskkill /FI "WINDOWTITLE eq Hayeong — Reasoning LLM*" /F >nul 2>&1
+taskkill /F /IM ollama.exe /T >nul 2>&1
+taskkill /F /IM ollama_llama_server.exe /T >nul 2>&1
+if %errorlevel% == 0 (
+    echo   Ollama stopped. VRAM freed.
+) else (
+    echo   No Ollama processes found.
+)
 
 echo.
-echo Hayeong stopped.
+echo ========================================
+echo  Hayeong is offline. VRAM cleared.
+echo ========================================
+echo.
 pause
