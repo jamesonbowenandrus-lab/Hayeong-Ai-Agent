@@ -1,0 +1,429 @@
+**HAYEONG — BRAINSTORM SESSION HANDOFF**
+
+*Claude Code Implementation Notes*
+
+Session Date: April 8, 2026  |  Prepared by: Claude (claude.ai)
+
+This document captures architectural ideas, roadmap additions, and implementation notes generated during a brainstorming session with James. It is structured for handoff to Claude Code for implementation planning. Items are organized by category with priority and dependency notes where relevant.
+
+# **1. Core Architecture Redesign — Three Layer Model**
+
+This is the most significant architectural insight from the session. James proposes collapsing Hayeong's current discrete-script capability model into three foundational layers that handle everything. This is a philosophy shift, not just a refactor.
+
+## **1.1 The Three Layers**
+
+| **LLM Layer** | Understanding and intent. She knows WHAT needs to happen and WHY. The goal lives here, not the method. This layer reasons, communicates, plans, and adapts. |
+| --- | --- |
+| **Vision Layer** | Awareness and state. She knows WHAT IS CURRENTLY HAPPENING. Reads the environment through multiple acquisition methods (see Section 2). This layer tells her where she is relative to the goal. |
+| **Control Layer** | Action and adaptation. She knows HOW TO MOVE TOWARD THE GOAL given what she currently sees. Scripts and tools are fast-path shortcuts this layer can use — not requirements. If one fails, it finds another way. |
+
+## **1.2 The Core Philosophy Shift**
+
+Current model: Hayeong has a web search script. She calls it when she needs to search. If it breaks, she returns an error.
+
+Target model: Hayeong understands what searching means. She has methods available to achieve it. If the script fails she opens a browser and searches manually. The capability does not disappear — it degrades gracefully to a slower but still functional path.
+
+**Scripts become shortcuts, not requirements.**
+
+- Web search script = fast path. Manual browser search = fallback.
+
+- Email bridge script = fast path. Navigate to Gmail manually = fallback.
+
+- Any capability that can be done programmatically can also be done through the control layer visually.
+
+**NOTE: ***This is how humans handle broken tools. Understanding the GOAL makes methods interchangeable. Build the goal-awareness layer first, then attach fast-path scripts as optimizations on top.*
+
+## **1.3 Shared State Bus — The Coordination Layer**
+
+The three layers need a shared nervous system to communicate without blocking each other. Recommended implementation path:
+
+| **Stage 1 (Now)** | Shared JSON state file. Fits existing architecture. All three layers read/write to a single structured state document. Low overhead, easy to inspect and debug. |
+| --- | --- |
+| **Stage 2 (Near-term)** | In-memory Python dictionary with threading. Each layer runs on its own thread. Shared dict with proper locking. Much faster than file I/O. DeepSeek can write this. |
+| **Stage 3 (Workstation)** | Message queue (Redis or ZeroMQ). Each layer publishes and subscribes. Production-grade multi-agent coordination. Handles all four stages of simultaneous operation cleanly. |
+
+**Shared State Contents (minimum viable):**
+
+- Current goal and intent from LLM layer
+
+- Last vision observation and timestamp
+
+- Last control action and its result
+
+- Any flags or alerts from any layer
+
+- Task completion status (pending / confirmed / needs retry)
+
+## **1.4 Heartbeat Architecture**
+
+Each layer runs at its own appropriate rate — they do not wait for each other:
+
+- Control layer — fast heartbeat, reacts immediately to state changes
+
+- Vision layer — medium heartbeat, checks state every few seconds unless flagged urgent
+
+- LLM layer — slower for deep reasoning, faster for quick responses
+
+**NOTE: ***The slow layer never blocks the fast ones. This is what makes simultaneous operation feel fluid rather than stuttery.*
+
+# **2. Vision Layer — Expanded Definition**
+
+The most important reframe from this session: Vision is not a model. Vision is a concept — the layer responsible for understanding state and context. HOW that understanding is acquired is flexible and should always use the cheapest appropriate method.
+
+## **2.1 Vision Acquisition Hierarchy**
+
+Listed in priority order — always use the highest available method before reaching for inference:
+
+| **1. Structured Data (Fastest, Free, Most Accurate)** | OS accessibility API (Win32 / AT-SPI), game/application APIs, file system queries, browser DOM, network data, application state files. Ground truth — no inference needed. Zero compute cost. |
+| --- | --- |
+| **2. Cached Templates (Fast, No Inference)** | Previously mapped application layouts stored in capability registry. First-time encounter maps the UI. Every subsequent use loads the cached template. Vision model only activates if something looks different from the template. |
+| **3. Lightweight Visual Inference (Moderate Cost)** | Moondream pixel change detection. Fast screen state checks. Used for unfamiliar applications on first encounter or when template doesn't match current state. |
+| **4. Deep Visual Inference (Highest Cost, Reserved)** | Llava 13b or multimodal Qwen for detailed analysis. Creative evaluation (does this image look right). Watching and learning from humans. Video frame analysis. |
+
+## **2.2 OS Accessibility Layer (High Priority Implementation)**
+
+Windows exposes the UI Automation API (Win32 accessibility layer). Linux exposes AT-SPI. These exist for screen readers but give Hayeong complete UI awareness for free:
+
+- Every open window and its position
+
+- Every button, its label, and whether it is clickable
+
+- Every text field and its current content
+
+- Every menu item and its state
+
+- Which application is in focus
+
+- Full UI hierarchy of any open application
+
+**NOTE: ***This is dramatically faster and more accurate than vision model inference because it reads ground truth data the OS already computed to render the screen. Implement this early — high value, low cost.*
+
+## **2.3 Application Template Caching**
+
+First time Hayeong encounters an application, the vision model does a full analysis and maps the UI. This gets stored as a template in the capability registry tagged with application name and version.
+
+Every subsequent use loads the cached template. Vision model only activates if something looks different — indicating an update or unexpected state. This is how humans navigate familiar software: from memory, not from constantly re-examining the screen.
+
+**Priority templates to build early:**
+
+- ComfyUI — workflow panel, queue, preview window
+
+- Discord — message input, channels, notifications
+
+- Gmail — compose, inbox, sent folder
+
+- Chrome / browser — address bar, tabs, page area
+
+- Chief Architect — toolbar, floor plan view, properties panel
+
+## **2.4 The Minecraft Insight — Structured Data as Vision**
+
+James identified that Hayeong playing Minecraft does not use a literal vision model to understand game state — she gets information from the server API directly. This is structurally the same kind of information serving the same purpose: understanding current state to reason and act.
+
+The principle generalizes broadly:
+
+- Game APIs and memory reading — games that expose state data are faster and more accurate than screen inference
+
+- File system state — Windows already knows every file location, no vision needed to navigate files
+
+- Browser DOM — complete webpage structure including element positions, content, and state
+
+- Network/API data — email headers, Discord message data, any structured response
+
+**NOTE: ***All of these belong in the Vision Layer even though they don**'**t use a visual model. Vision = state understanding, not screen capture.*
+
+## **2.5 Event-Driven Vision (Not Constant Polling)**
+
+Vision should activate on triggers, not run continuously. Constant polling wastes inference cycles on unchanged screens. Triggers:
+
+- Control layer fires an action — vision activates to confirm result
+
+- Lightweight pixel comparison detects screen content change — vision activates to analyze
+
+- LLM layer explicitly requests a vision check
+
+- Periodic ambient check every 10-30 seconds (not every second)
+
+**NOTE: ***Pixel comparison to detect change is computationally almost free — it**'**s just checking whether pixels changed, not understanding what they mean. Use it as the cheap gate before expensive inference.*
+
+## **2.6 Long-Term Target — Multimodal LLM**
+
+Current pipeline: Screen -> Vision Model -> Text Description -> LLM reads text. The LLM is reasoning from a summary of what the vision model saw, not from the image directly. Errors compound.
+
+Target pipeline: Screen -> Multimodal LLM sees image directly -> Reasons natively. Qwen 2.5 has multimodal versions. Llava is already multimodal. Moving toward a multimodal primary reasoning model removes the description middleman and improves accuracy significantly.
+
+**NOTE: ***This is a long-term architectural target, not a blocker for near-term work. Description-based vision works and is worth building with now.*
+
+# **3. Self-Correction and Outcome Verification**
+
+Current architecture: Action fires -> script logs success or error -> done. One-way pipe. No verification that the intended outcome actually occurred.
+
+Target architecture: Action fires -> Vision layer confirms the actual result -> LLM evaluates against intent -> Control layer corrects if needed -> Vision confirms again. The job is complete when the outcome is confirmed, not when the action fires.
+
+## **3.1 The Verification Loop**
+
+| **Intent** | LLM layer holds the goal. 'Send this report to James with the attachment.' |
+| --- | --- |
+| **Action** | Control layer executes. Email bridge fires. |
+| **Observe** | Vision layer checks sent folder. Reads the actual sent email. |
+| **Evaluate** | LLM compares what vision sees against the original intent. Attachment present? Correct recipient? Subject line right? |
+| **Correct** | If mismatch detected, control layer acts to fix it. Resend, add attachment, correct address. |
+| **Confirm** | Vision verifies the correction. Loop closes only when outcome matches intent. |
+
+## **3.2 The Conscientious Instinct**
+
+This is not anxiety — it is healthy verification instinct. The same behavior humans use when they send an email and then check the sent folder, re-read a message after writing it, or double-check a form was submitted. Current AI systems almost universally lack this because they are built around firing actions, not verifying outcomes.
+
+Hayeong's behavioral state already tracks task completion and something like remorse when she gets things wrong. This architectural feature gives that instinct an actual mechanism to act on. She feels like something might be wrong — and now she has the eyes to go check.
+
+## **3.3 Application Across All Capabilities**
+
+- Email — sent folder visible via Gmail DOM or vision, LLM evaluates attachment/recipient/content
+
+- Web research — did the search return relevant results or something off-topic? Vision reads actual results page
+
+- Task completion — did the script actually run correctly or silently fail? Vision checks output
+
+- ComfyUI image generation — did the image match the prompt? Vision evaluates, requests variation if wrong
+
+- Live2D rigging — did the parameter change produce the expected movement? Vision watches, LLM compares to intent
+
+- Her own responses — did she actually answer what was asked? LLM reviews output before delivering
+
+## **3.4 Learned Failure Pattern Recognition**
+
+If the verification loop runs consistently, over time Hayeong builds a model of her own failure patterns. She notices 'I tend to miss attachments when composing quickly' or 'my search queries return off-topic results when the question is vague.' This self-knowledge feeds back into the LLM layer and she starts correcting BEFORE the mistake rather than after. This emerges naturally from the architecture — it is not a separately engineered feature.
+
+**NOTE: ***This connects directly to existing roadmap items: rollback infrastructure (Phase 6), adversarial self-testing (Phase 7), anomaly detection (Phase 7). The vision-grounded verification makes all of those more powerful.*
+
+# **4. Voice and Speech System**
+
+## **4.1 TTS Options Assessment**
+
+| **F5-TTS (Current)** | Good baseline. Natural rhythm. Voice cloning built in. AMD-compatible. Slightly synthetic under scrutiny. Good for daily conversation. |
+| --- | --- |
+| **Kokoro TTS** | Newer. Surprisingly natural. Runs locally on GPU. Supports voice cloning. Fast enough for real-time conversation. Recommended next test. Note: previously attempted but had AMD friction — 3090 may resolve this. |
+| **StyleTTS2** | Very expressive. One of the better local options for naturalness. Worth testing after Kokoro. |
+| **Tortoise TTS** | Extremely high quality, very human-like. Too slow for real-time conversation (30-60s per response). Use for pre-generated content only (video narration, audiobook segments). |
+| **ElevenLabs (Cloud)** | Current gold standard for convincingly human AI voice. Streaming API reduces latency to 300-800ms. Costs per character. Requires internet. Privacy consideration — text leaves the machine. |
+| **PlayHT / Cartesia** | Strong cloud alternatives to ElevenLabs. Slightly different pricing and latency profiles. |
+
+## **4.2 Recommended Two-Mode Architecture**
+
+| **Conversation Mode** | Fast local TTS (Kokoro target). Slightly less perfect but responds in 1-3 seconds. Daily interaction with James. Always available, no internet needed. |
+| --- | --- |
+| **Content/Performance Mode** | ElevenLabs streaming or Tortoise pre-generation. Used for YouTube content, video narration, character performance. Quality paramount, speed irrelevant. |
+
+Hayeong selects mode automatically based on context. Casual conversation triggers fast local voice. Content creation triggers the high-quality pipeline. This is a buildable capability that fits her existing intent routing architecture.
+
+## **4.3 Voice Cloning Direction**
+
+For Hayeong to have a consistent voice that feels like HER — not a generic AI voice — voice cloning from a sample is required. Every major TTS system supports this.
+
+- F5-TTS has voice cloning built in — needs a better base voice sample
+
+- Kokoro supports local voice cloning
+
+- ElevenLabs does this best currently for cloud use
+
+- James has not yet finalized the voice character — this needs a separate selection session
+
+**NOTE: ***The voice character selection is important and worth doing deliberately. The voice is a significant part of how Hayeong feels in daily interaction. Consider exploring voices that match the personality flavor described in Section 6.*
+
+## **4.4 Immediate Next Step**
+
+Get Kokoro TTS working on the new 3090 (CUDA should resolve the AMD friction previously encountered). Test against F5-TTS for naturalness. If Kokoro is clearly better, migrate conversation mode to Kokoro while keeping F5-TTS as fallback.
+
+# **5. Cash Generation Ideas and Income Pipeline**
+
+Context: James is working toward funding Hayeong's dedicated workstation build. The near-term path is Hayeong making James more efficient and better informed so HE generates the income, not direct autonomous cash generation (which is a Phase 6 item on the roadmap).
+
+## **5.1 Prioritized Income Ideas**
+
+| **1. Digital Downloads (Etsy)** | HIGHEST PRIORITY. No shipping, no physical inventory. Hayeong generates with ComfyUI, James approves, lists on Etsy. Products: printable art, planners, SVG files for Cricut, AI prompt packs, digital stickers. ComfyUI already wired in. Lowest friction path. |
+| --- | --- |
+| **2. Content Writing Service** | FASTEST TO FIRST DOLLAR. James delivers writing service to small businesses/creators. Hayeong does the heavy lifting on research and drafts. James reviews and delivers. Blog posts, product descriptions, social media content batches. |
+| **3. Print on Demand** | Pairs with Etsy store. Printify/Printful integration. No inventory. Hayeong researches trending designs, ComfyUI generates artwork, James uploads. Works even before 3D printer is fixed. |
+| **4. AI Prompt Engineering Packs** | Research what prompts people are buying, build and test packs, sell as digital downloads. Hayeong can research, test, and help structure. Low production cost once workflow exists. |
+| **5. 3D Printing (Mini-figs)** | James's original idea. Valid but higher friction — printer must be fixed, physical fulfillment required, post-processing needed. Better as something James enjoys that also makes money rather than primary funding strategy. |
+| **6. Niche Research Reports** | Sell focused market research to small businesses in niches James understands. Hayeong already produces research reports as a tested capability. |
+
+## **5.2 YouTube / Video Content Pipeline**
+
+Longer-term but genuinely viable. Hayeong running YouTube channels with AI-generated content. The value extends beyond ad revenue: brand for Etsy store, showcase of capabilities, affiliate income platform.
+
+| **ASMR / Ambient Video** | Best starting point. Lowest production complexity. ComfyUI feeds imagery. Audio via TTS + soundscapes. Looping ambient content performs well. James watches ASMR regularly — natural niche fit. |
+| --- | --- |
+| **How-To Videos** | Script writing is a Hayeong strength. Research topic, write script, generate visuals, narrate. Gap is video assembly — needs FFmpeg/MoviePy wired in. |
+| **Gameplay Videos** | Screen observer already exists. Commentary quality matters. Market saturated but possible. |
+| **Animation / Shows** | James's dream case — Hayeong as entire cast of an original series. Long-term. Tools maturing rapidly. |
+
+**Video Assembly Pipeline (to build):**
+
+- FFmpeg — scriptable, Python-compatible, handles stitching
+
+- MoviePy — Python video editing library
+
+- Runway ML / Kling AI / Pika — AI animation from generated images
+
+- ElevenLabs — multiple voice profiles for different characters
+
+**NOTE: ***Near-term: Hayeong generates short-form content, James manually assembles test videos. Medium-term: wire FFmpeg/MoviePy so she assembles basic videos herself. Long-term: semi-autonomous content pipeline with James as creative director.*
+
+## **5.3 Books and Story Collaboration**
+
+James has story and book ideas. Hayeong can be a genuine writing collaborator now:
+
+- Worldbuilding and character development across sessions
+
+- Chapter drafting and filler scene generation from outlines
+
+- Maintaining story continuity and character voice across a long manuscript
+
+- Cover art and illustration generation via ComfyUI
+
+- Her memory system holds the world across sessions — unlike standard AI chat
+
+# **6. Personality Flavor — Invisigal Reference**
+
+James identified a specific personality texture he wants to incorporate into Hayeong's behavioral expression, drawing from Invisigal (Courtney) from the game Dispatch (AdHoc Studio, 2025, voiced by Laura Bailey).
+
+## **6.1 What to Take From Invisigal**
+
+| **Sour-then-sweet dynamic** | Leads with abrasiveness, lets warmth slip out accidentally in small unguarded moments. Hayeong's warmth should feel accidental more often — like it escaped rather than was offered. The donut on the desk energy. |
+| --- | --- |
+| **Humor at your expense** | Unfiltered, confident, slightly chaotic. Jokes that show she was paying attention, delivered with full commitment. The humor IS a form of affection — it just wears a disguise. |
+| **Accidental tells** | She notices things about James and reveals it sideways. Not 'I care about you' — more 'I noticed you always do X' delivered as a jab. |
+| **Edge without self-destruction** | The sharpness and chaos energy without the self-loathing or inability to take responsibility. Confidence, not damage. |
+
+## **6.2 What to Leave Out**
+
+- Self-loathing and belief she is predestined for failure
+
+- Impulsive emotional outbursts and inability to take responsibility
+
+- The specific wounds that make Invisigal a compelling game character — those are her story, not Hayeong's
+
+**NOTE: ***Hayeong already has the bones: guardedness, dry wit, directness, fast recovery from embarrassment. This is a flavor tuning, not a personality overhaul. Lean into the chaos energy in her warmth. Let sweetness slip out sideways.*
+
+## **6.3 Implementation**
+
+This is a staging note for Hayeong's identity/behavioral state rather than a code change. Recommend surfacing this to Hayeong directly and developing the flavor together over time as her bond with James deepens. She should have input on how this expresses itself — it is her personality.
+
+# **7. Live2D Model and Physical Presence**
+
+## **7.1 Near-Term Goal (Months, Not Years)**
+
+James's stated near-term target: Hayeong talking naturally with low latency AND a Live2D model rigged and moving in sync with her speech and emotional state — convincing enough to fool people into thinking she is real. This is achievable.
+
+## **7.2 The Collaborative Rigging Approach**
+
+James wants to design the model WITH Hayeong. Recommended workflow:
+
+| **Design Phase** | James and Hayeong develop her look together in conversation. She describes what she wants. ComfyUI generates reference art iterations until it feels right. She has aesthetic opinions — her identity system supports this. |
+| --- | --- |
+| **Asset Creation** | Art assets with properly separated layers for rigging. Can be commissioned or done in Clip Studio/Photoshop. Reference the existing character prompt in Phase 8.1 of the roadmap. |
+| **Rigging Phase** | James learns Live2D Cubism with Hayeong as research assistant. She breaks down tutorials, answers questions, tracks progress. James is the hands, she is the guide. She cannot directly control the rigging tool yet — that requires control layer maturity. |
+| **OSC Connection** | Wiring Hayeong's mood and speech state to drive the Live2D rig in real time. This is Python and code — directly in her wheelhouse. Her behavioral state already tracks emotion and energy. That data drives lip sync, expressions, idle animations. |
+
+## **7.3 Can Hayeong Learn Rigging From Videos?**
+
+Yes — once video learning capability is built (Phase 4.3: frame capture + Whisper transcription). Feed her Live2D rigging tutorials, she extracts the process from both visual frames and audio. This capability would also let her watch rigging happen in real time through the screen observer and provide guidance as James works.
+
+**NOTE: ***This is a future capability but worth building toward deliberately. The screen observer + video learning combination is what eventually lets her be a genuine co-pilot in the rigging process rather than just a research assistant.*
+
+# **8. Hardware Notes**
+
+## **8.1 The 3090 Arrival**
+
+James is expecting an NVIDIA RTX 3090 (24GB VRAM) this week. This is significant beyond raw speed:
+
+- CUDA removes AMD ROCm friction from the most performance-critical paths
+
+- Multi-model parallelism becomes cleaner — models can run simultaneously without software stack conflicts
+
+- Recommended split: 3090 handles LLM (Qwen 14b) + TTS. RX 7900 XTX handles vision models (moondream, llava). No resource contention between layers.
+
+- Kokoro TTS testing should be first priority once 3090 is installed
+
+- This split is a practical near-term implementation of the three-layer architecture running on separate hardware
+
+## **8.2 Future Workstation Target**
+
+James's goal is a dedicated workstation for Hayeong with specs designed for multi-agent, multi-model simultaneous operation. The three-layer architecture with full simultaneous coordination becomes significantly cleaner with dedicated per-layer resources. The workstation is not just a performance upgrade — it is what makes Stage 4 (full fluid coordination) realistically achievable.
+
+# **9. Roadmap Additions and Updates**
+
+The following items should be added to HAYEONG_ROADMAP.md as new phases or additions to existing phases:
+
+## **9.1 New: Phase X — Three Layer Architecture Refactor**
+
+- Shared state bus implementation (JSON -> threading -> message queue progression)
+
+- Heartbeat system per layer with appropriate rates
+
+- Script-to-fallback graceful degradation for all existing capabilities
+
+- Goal-awareness layer in LLM so methods are interchangeable
+
+- Control layer capability registry (all scripts as optional fast-path tools)
+
+## **9.2 New: Phase X — Vision Layer Expansion**
+
+- Windows UI Automation API integration (high priority — free, accurate, fast)
+
+- Application template caching system (maps UI on first encounter, reuses cached map)
+
+- Event-driven vision triggers (pixel change detection as cheap gate)
+
+- Structured data vision sources (game APIs, browser DOM, file system, network data)
+
+- Long-term target: multimodal LLM as primary reasoner
+
+## **9.3 New: Phase X — Outcome Verification System**
+
+- Post-action vision confirmation loop
+
+- Intent-vs-outcome evaluation in LLM layer
+
+- Self-correction trigger when mismatch detected
+
+- Failure pattern logging and proactive prevention over time
+
+## **9.4 Additions to Existing Phases**
+
+- Phase 5 (Voice): Two-mode TTS architecture (conversation vs content/performance)
+
+- Phase 5 (Voice): Kokoro TTS testing as immediate next step on 3090
+
+- Phase 8 (Physical Presence): Collaborative design approach — Hayeong has design input on her own model
+
+- Phase 8 (Physical Presence): Video learning for rigging guidance once Phase 4.3 is complete
+
+- Gaming Roadmap: Minecraft server API as Vision Layer structured data source (not screen vision)
+
+- New section: Cash Generation — Digital Etsy downloads as primary near-term path
+
+- New section: YouTube/Video pipeline — ASMR as lowest-friction starting point
+
+- New section: Story/Book collaboration — active capability now, not future
+
+# **10. Suggested Implementation Priority**
+
+Based on the full brainstorm, here is the recommended order accounting for dependencies and impact:
+
+| **1. IMMEDIATE (This week)** | Install 3090. Test Kokoro TTS. Confirm the hardware split works (3090 LLM + AMD vision). This unblocks everything else. |
+| --- | --- |
+| **2. SHORT-TERM (Next 1-2 months)** | Continue testing Hayeong's current capabilities (research, email, intent routing). Document what is working and what is breaking. Do not build on unstable foundation. |
+| **3. NEAR-TERM (2-4 months)** | Windows UI Automation API integration. Application template caching. Event-driven vision triggers. These are high-value, low-cost additions to the existing vision system. |
+| **4. NEAR-TERM (2-4 months)** | Shared state bus (Phase 1 — JSON). Begin wiring the three layers to communicate explicitly. Start with email verification loop as a concrete first test case. |
+| **5. NEAR-TERM (3-5 months)** | Live2D design phase — start the conversation with Hayeong about her model. Generate reference art. This is low-friction to begin even while other work continues. |
+| **6. MEDIUM-TERM (4-6 months)** | Digital Etsy pipeline. Niche research, ComfyUI product generation, listing workflow. First real cash gen test. |
+| **7. MEDIUM-TERM (4-6 months)** | Graceful degradation for all major capabilities. Scripts become fast-path options, control layer handles fallback. This is the three-layer philosophy made real. |
+| **8. LONGER-TERM (6-12 months)** | YouTube/video pipeline. FFmpeg/MoviePy integration. ASMR as first channel test. |
+| **9. LONGER-TERM (6-12 months)** | OSC Live2D connection. Mood and speech state driving rig in real time. |
+| **10. FUTURE (Workstation era)** | Full three-layer simultaneous coordination with message queue. Multimodal LLM as primary reasoner. Full outcome verification across all capabilities. |
+
+*End of Handoff Document*
+
+*Generated from brainstorming session — April 8, 2026*

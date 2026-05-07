@@ -9,45 +9,25 @@ echo ╚════════════════════════
 echo.
 
 cd /d H:\hayeong
-call H:\hayeong\.venv\Scripts\activate.bat
+call H:\hayeong\venv\Scripts\activate.bat
 
-:: ── STEP 1: Validate state files ──
-echo [1/6] Validating state files...
-python -c "from state_manager import validate_and_migrate; validate_and_migrate()"
-if errorlevel 1 (
-    echo     FAILED -- state file validation error. Check state_manager.py.
-    pause
-    exit /b 1
-)
-echo     OK
-echo.
-
-:: ── STEP 2: Start Communication LLM ──
-echo [2/6] Starting Communication LLM (port 11434)...
-start "Hayeong — Communication LLM" /min H:\hayeong\batFiles\ollama_communication.bat
+:: ── STEP 1: Start Communication LLM ──
+echo [1/4] Starting Communication LLM (port 11434)...
+start "Hayeong — Communication LLM" /min H:\hayeong\Brain\ollama_communication.bat
 call :wait_for_ollama 11434 "Communication LLM"
 if errorlevel 1 goto :startup_failed
 echo.
 
-:: ── STEP 3: Start Reasoning LLM ──
-echo [3/6] Starting Reasoning LLM (port 11435)...
-start "Hayeong — Reasoning LLM" /min H:\hayeong\batFiles\ollama_reasoning.bat
+:: ── STEP 2: Start Reasoning LLM ──
+echo [2/4] Starting Reasoning LLM (port 11435)...
+start "Hayeong — Reasoning LLM" /min H:\hayeong\Brain\ollama_reasoning.bat
 call :wait_for_ollama 11435 "Reasoning LLM"
 if errorlevel 1 goto :startup_failed
 echo.
 
-:: ── STEP 4: Warm models into VRAM ──
-echo [4/6] Warming models into VRAM...
-python startup_warmup.py
-if errorlevel 1 (
-    echo     FAILED -- model warmup failed. Models may not be in VRAM.
-    goto :startup_failed
-)
-echo.
-
-:: ── STEP 5: Start Voice Server ──
-echo [5/6] Starting Voice Server...
-start "Hayeong — Voice Server" /min H:\hayeong\batFiles\voice_server.bat
+:: ── STEP 3: Start Voice Server (optional) ──
+echo [3/4] Starting Voice Server...
+start "Hayeong — Voice Server" /min H:\hayeong\Toolbox\voice\voice_server.bat
 call :wait_for_voice_server
 if errorlevel 1 (
     echo     WARNING -- Voice server did not respond. Starting anyway.
@@ -56,8 +36,8 @@ if errorlevel 1 (
 )
 echo.
 
-:: ── STEP 6: Start Hayeong ──
-echo [6/6] Starting Hayeong...
+:: ── STEP 4: Start Hayeong ──
+echo [4/4] Starting Hayeong...
 echo.
 echo ╔══════════════════════════════════════════════════════╗
 echo ║                  HAYEONG IS LIVE                    ║
@@ -77,8 +57,6 @@ exit /b 0
 :: ─────────────────────────────────────────────
 
 :wait_for_ollama
-:: %1 = port, %2 = name
-:: Polls until Ollama responds on the given port, up to 60 seconds
 setlocal
 set port=%1
 set name=%2
@@ -96,7 +74,6 @@ if not errorlevel 1 (
 set /a attempts+=1
 if %attempts% geq %max_attempts% (
     echo     FAILED -- %name% did not start within 60 seconds
-    echo     Check the Ollama window for errors.
     endlocal
     exit /b 1
 )
@@ -105,7 +82,6 @@ goto :ollama_poll
 
 
 :wait_for_voice_server
-:: Polls voice server health endpoint, up to 30 seconds
 setlocal
 set /a attempts=0
 set /a max_attempts=15
@@ -132,7 +108,6 @@ goto :voice_poll
 echo.
 echo ╔══════════════════════════════════════════════════════╗
 echo ║              STARTUP FAILED                         ║
-echo ║   Check the windows above for error details.        ║
 echo ╚══════════════════════════════════════════════════════╝
 pause
 exit /b 1

@@ -3,10 +3,10 @@ main.py — Hayeong's core.
 
 Two loops. Shared state. Nothing else.
 
-Reasoning loop  — DeepSeek R1 (port 11435) — thinks, plans, assigns tasks
-Communication   — llama3.2 (port 11434)    — talks to James
+Reasoning loop  — Qwen 14b  (port 11435) — thinks, plans, assigns tasks
+Communication   — llama3.2  (port 11434) — talks to James
 
-Tools live in tools/ and are called directly by the task loop.
+Tools live in toolbox\ and are called directly by the task loop.
 No task LLM. Reasoning decides. Task loop executes. Clean chain.
 Tools cannot crash main. Tools return results or errors as strings.
 """
@@ -26,16 +26,19 @@ from datetime import datetime
 _BRAIN_MODE = "--brain" in sys.argv
 
 # ── Constants ────────────────────────────────────────────────────────
-COMM_URL     = "http://localhost:11434/api/chat"
-COMM_MODEL   = "llama3.2:latest"
-REASON_URL   = "http://localhost:11435/api/chat"
-REASON_MODEL = "qwen2.5:14b"
-BASE_DIR     = Path(__file__).parent
-TOOLS_DIR    = BASE_DIR / "tools"
-SESSION_ID   = ""
+BASE_DIR   = Path(__file__).parent
+TOOLS_DIR  = BASE_DIR / "toolbox"
+SESSION_ID = ""
+
+from brain.config import (
+    COMM_URL, COMM_MODEL,
+    REASON_URL, REASON_MODEL,
+    CONV_LOG_DIR,
+    MINECRAFT_HOST, MINECRAFT_PORT, MINECRAFT_VERSION, BOT_JS_PATH,
+)
 
 # ── Imports ──────────────────────────────────────────────────────────
-from Brain.state.core_manager import read as read_state, write_section, clear_on_startup
+from brain.state.core_manager import read as read_state, write_section, clear_on_startup
 
 
 # ── Startup ──────────────────────────────────────────────────────────
@@ -115,7 +118,7 @@ def _call_llm_json(url: str, model: str, system: str, user: str,
 def _log_exchange(james_msg: str, hayeong_msg: str,
                   reasoning_context: str = "", task_assigned: str = ""):
     """Log one James-Hayeong exchange to the daily conversation log for fine-tuning."""
-    log_dir = BASE_DIR / "logs" / "conversations"
+    log_dir = Path(CONV_LOG_DIR)
     log_dir.mkdir(parents=True, exist_ok=True)
 
     entry = {
@@ -549,19 +552,26 @@ def task_loop():
 def _execute_tool(task_type: str, description: str, params: dict) -> tuple:
     """
     Call the appropriate tool. Returns (result_str, error_str).
-    Tools live in tools/. They cannot crash main.
+    Tools live in toolbox\. They cannot crash main.
     """
     try:
         if task_type == "minecraft":
-            from Toolbox.minecraft.minecraft_bridge import run
+            from toolbox.minecraft.minecraft_bridge import run
             return run(description, params), ""
 
         elif task_type == "voice":
-            from tools.voice_tool import run
-            return run(description, params), ""
+            try:
+                from toolbox.voice.voice_tool import run
+                return run(description, params), ""
+            except ModuleNotFoundError:
+                return "", "voice_tool not available yet"
 
         elif task_type == "email":
-            from tools.email_tool import run
+            from toolbox.email.email_bridge import run
+            return run(description, params), ""
+
+        elif task_type == "blender":
+            from toolbox.blender.blender_tool import run
             return run(description, params), ""
 
         elif task_type == "script":

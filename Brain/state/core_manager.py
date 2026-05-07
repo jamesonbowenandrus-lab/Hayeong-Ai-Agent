@@ -38,9 +38,10 @@ def write_section(section: str, data: dict):
 def clear_on_startup():
     """Clear volatile sections for a clean session."""
     write_section("what_she_knows", {
+        "current_thinking":  "",
         "context_for_james": "",
         "last_conclusion":   "",
-        "current_thinking":  "",
+        "current_focus":     "",
         "updated_at":        "",
     })
     write_section("what_shes_doing", {
