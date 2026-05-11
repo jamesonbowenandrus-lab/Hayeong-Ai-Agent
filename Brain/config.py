@@ -22,17 +22,16 @@ IDENTITY_FILE   = os.path.join(ROOT_DIR, "Brain", "identity.json")
 CONV_LOG_DIR    = os.path.join(ROOT_DIR, "Logs", "conversations")
 
 # ── Ollama model configuration ─────────────────────────────────────────────
-COMM_URL        = "http://localhost:11434/api/chat"
-COMM_MODEL      = "llama3.2:latest"
-
-REASON_URL      = "http://localhost:11435/api/chat"
-REASON_MODEL    = "qwen2.5:14b"
+PRESENCE_URL   = "http://localhost:11435/api/chat"
+PRESENCE_MODEL = "qwen2.5:32b-instruct-q4_K_M"
 
 # ── Minecraft ──────────────────────────────────────────────────────────────
-MINECRAFT_HOST    = "localhost"
-MINECRAFT_PORT    = 25565
-MINECRAFT_VERSION = "1.21.4"
-BOT_JS_PATH       = os.path.join(ROOT_DIR, "Toolbox", "minecraft", "hayeong_bot.js")
+MINECRAFT_HOST       = "127.0.0.1"
+MINECRAFT_PORT       = 25565
+MINECRAFT_VERSION    = "1.21.4"
+BOT_JS_PATH          = os.path.join(ROOT_DIR, "Toolbox", "minecraft", "hayeong_bot.js")
+MINECRAFT_STATE_PATH   = os.path.join(ROOT_DIR, "Brain", "state", "minecraft_state.json")
+MINECRAFT_COMMAND_PATH = os.path.join(ROOT_DIR, "Brain", "state", "minecraft_command.json")
 
 # ── Blender ────────────────────────────────────────────────────────────────
 BLENDER_PATH    = "H:/blender/blender.exe"

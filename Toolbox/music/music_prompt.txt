@@ -1,0 +1,3 @@
+# Music Domain Prompt
+# Hayeong's reasoning context when working with music generation or analysis.
+# This file is a stub — populate when music integration is active.

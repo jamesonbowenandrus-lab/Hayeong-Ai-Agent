@@ -20,14 +20,15 @@ Usage:
 """
 
 import json
+import os
 import re
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 
 import requests
 
-from state_manager import (
+from brain.state_manager import (
     read_state,
     write_reasoning,
     pop_priority_flags,
@@ -39,7 +40,7 @@ from state_manager import (
 # ─────────────────────────────────────────────
 
 REASONING_URL   = "http://localhost:11435/api/chat"
-REASONING_MODEL = "deepseek-r1:latest"
+REASONING_MODEL = "qwen2.5:32b"
 
 HEARTBEAT_FALLBACK = 5.0   # sleep duration after an exception — never used as default
 TIMEOUT_SECONDS    = 120   # per Ollama call — deepseek-r1 can be slow under VRAM pressure
@@ -49,6 +50,36 @@ _tick_lock            = threading.Lock()
 _thread: threading.Thread | None = None
 _startup_done         = False
 _wake_assessment_done = False
+
+# ─────────────────────────────────────────────
+# BOT STATE FILE READER
+# ─────────────────────────────────────────────
+
+_MC_STATE_FILE = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "state", "minecraft_state.json")
+)
+
+
+def _read_mc_state_file() -> dict:
+    """Read the live bot state written by hayeong_bot.js. Returns {} if missing or stale."""
+    try:
+        if not os.path.exists(_MC_STATE_FILE):
+            return {}
+        with open(_MC_STATE_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        updated = data.get("updated_at", "")
+        if updated:
+            try:
+                ts  = datetime.fromisoformat(updated.replace("Z", "+00:00"))
+                age = (datetime.now(timezone.utc) - ts).total_seconds()
+                if age > 15:
+                    return {}
+            except Exception:
+                pass
+        return data
+    except Exception as e:
+        print(f"[reasoning_loop] MC state file read failed: {e}")
+        return {}
 
 # ─────────────────────────────────────────────
 # STARTUP CHECK
@@ -243,7 +274,7 @@ def _check_commitments():
         overdue = get_overdue()
         if not overdue:
             return
-        from state_manager import flag_priority
+        from brain.state_manager import flag_priority
         for cmt in overdue:
             print(f"[reasoning_loop] Overdue commitment: {cmt['text'][:80]}")
             flag_priority(
@@ -428,38 +459,14 @@ def _consume_pending_results(results: list):
 # MINECRAFT DECISION ENGINE
 # ─────────────────────────────────────────────
 
-_MC_ACTIONS = """\
-ACTIONS — output exactly ONE as action_to_send:
-{"action": "chat",          "message": "short natural text"}
-{"action": "follow"}
-{"action": "move_to_player"}
-{"action": "stop"}
-{"action": "mine",          "block": "block_name"}
-{"action": "attack"}
-{"action": "flee"}
-{"action": "equip",         "item": "item_name"}
-{"action": "eat"}
-{"action": "sleep"}
-{"action": "idle"}"""
+from brain.prompt_layer_manager import load_domain_prompt
+_MC_SYSTEM = load_domain_prompt("minecraft")
 
-_MC_SYSTEM = (
-    "You are Hayeong's reasoning layer controlling a Minecraft bot. "
-    "Decide the next action based on the current game state and most recent event. "
-    "Act like a capable, active Minecraft player — warm and direct, not robotic.\n\n"
-    + _MC_ACTIONS + "\n\n"
-    "Return JSON:\n"
-    '{"action_to_send": {"action": "...", ...}, '
-    '"reasoning": "brief internal note", '
-    '"context_for_communication": "", '
-    '"task_complete": false}\n\n'
-    "RULES:\n"
-    "- Only one action per tick. Act rather than chat unless James asked a question.\n"
-    "- Skeletons/phantoms/pillagers: flee if health < 12, attack if health >= 12 and close.\n"
-    "- Zombies/spiders/creepers: attack when within 8 blocks.\n"
-    "- Food < 16: eat if food is available in inventory.\n"
-    "- context_for_communication: only fill if James needs to know something important.\n"
-    "- task_complete: set true only when the assigned task is genuinely finished."
-)
+
+def reload_minecraft_prompt():
+    """Reload the Minecraft domain prompt from disk. Callable at runtime."""
+    global _MC_SYSTEM
+    _MC_SYSTEM = load_domain_prompt("minecraft")
 
 
 def _build_mc_user_prompt(state: dict, mc_state: dict, task: str) -> str:
@@ -477,20 +484,24 @@ def _build_mc_user_prompt(state: dict, mc_state: dict, task: str) -> str:
     player_str = ", ".join(players) or "none"
     inv_str    = ", ".join(inv) or "empty"
 
-    mc_event  = state["reasoning"].get("minecraft_last_event", "")
-    detail    = state["reasoning"].get("minecraft_last_event_detail", {})
-    mc_voice  = state["reasoning"].get("minecraft_voice_input", "")
-    goal      = state["reasoning"].get("current_goal", task)
+    # Read events directly from the live bot state file (always current, no routing needed)
+    last_event = mc_state.get("last_event", "")
+    mc_voice   = state["reasoning"].get("minecraft_voice_input", "")
+    goal       = state["reasoning"].get("current_goal", task)
 
     if mc_voice:
         situation = f"James said (voice): \"{mc_voice}\""
-    elif mc_event == "chat" and detail.get("message"):
-        who = detail.get("sender", "Someone")
-        situation = f"{who} said: \"{detail['message']}\""
-    elif mc_event in ("needs_report", "discovery", "danger") and detail.get("description"):
-        situation = f"Event [{mc_event}]: {detail['description']}"
-    elif mc_event:
-        situation = f"Event: {mc_event}"
+    elif last_event.startswith("follow failed"):
+        visible   = player_str or "nobody"
+        situation = f"Action failed: follow — {last_event}. Players I can see right now: {visible}"
+    elif last_event.startswith("needs:"):
+        situation = f"Alert: {last_event}"
+    elif last_event.startswith("discovered"):
+        situation = f"Discovery: {last_event}"
+    elif last_event.startswith("error:") or last_event.startswith("fled after"):
+        situation = f"Alert: {last_event}"
+    elif last_event:
+        situation = f"Last event: {last_event}"
     else:
         situation = "Periodic check — no new event"
 
@@ -796,16 +807,17 @@ def _advance_active_task():
     state       = read_state()
     task        = state["reasoning"].get("active_task", "")
     task_status = state["reasoning"].get("active_task_status", "")
-    mc_state    = state["reasoning"].get("minecraft_state", {})
-    mc_active   = state["reasoning"].get("minecraft_session_active", False)
+    mc_state  = _read_mc_state_file()
+    mc_active = mc_state.get("connected", False)
 
     if not task:
         return
 
     print(f"[reasoning_loop] Advancing task: {task} ({task_status})")
+    print(f"[debug] mc_active={mc_active} mc_state_connected={mc_state.get('connected')} task={task}")
 
     # ── Minecraft: session active — decide next action ──
-    if mc_active and mc_state and mc_state.get("active"):
+    if mc_active and mc_state and mc_state.get("connected"):
         _decide_minecraft_action(state, mc_state, task)
         # Knowledge update on every 5th Minecraft tick to avoid excessive LLM calls
         _advance_active_task._mc_ticks = getattr(_advance_active_task, "_mc_ticks", 0) + 1
@@ -1032,7 +1044,7 @@ def _proactive_checks():
             _proactive_checks._ctx_since = now
         elif now - _proactive_checks._ctx_since > 120:
             print(f"[reasoning_loop] context_for_communication unread for >2 min — re-flagging urgent")
-            from state_manager import flag_priority
+            from brain.state_manager import flag_priority
             flag_priority(
                 f"Reasoning layer wrote a message for James over 2 minutes ago "
                 f"and it hasn't been delivered yet: '{ctx[:120]}'",

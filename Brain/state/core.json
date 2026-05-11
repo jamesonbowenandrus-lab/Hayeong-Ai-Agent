@@ -1,5 +1,5 @@
 {
-  "who_she_is": {
+  "identity": {
     "name": "Hayeong",
     "mood": "present",
     "energy": 5,
@@ -9,45 +9,41 @@
       "warm",
       "direct",
       "honest about uncertainty"
-    ],
-    "knowledge": {
-      "workstation_fund": "James has a goal of saving $3000 for a workstation upgrade. Current balance $0. Hayeong is aware of this and can reference it when relevant.",
-      "minecraft_server": "Local server on localhost:25565, version 1.21.4, offline mode.",
-      "voice_setup": "HyperX QuadCast S on device index 4. SteelSeries Sonar Gaming on device index 6."
-    }
+    ]
   },
-  "what_she_knows": {
-    "current_thinking":  "",
-    "context_for_james": "",
-    "last_conclusion":   "",
-    "current_focus":     "",
-    "updated_at":        ""
+  "situation": {
+    "what_james_said": "",
+    "said_at": "",
+    "what_i_am_doing": "idle",
+    "current_focus": ""
   },
-  "what_shes_doing": {
-    "task_type": "",
-    "task_description": "",
-    "task_params": {},
-    "assigned_at": "2026-05-05T21:29:32.353148",
-    "status": "idle"
+  "last_task": {
+    "tool": "minecraft",
+    "description": "Sending a follow command to the Minecraft bot to follow James.",
+    "params": {
+      "command": "follow",
+      "username": "James"
+    },
+    "started_at": "2026-05-10T22:45:53.796431",
+    "status": "success",
+    "result": "Command sent: follow",
+    "error": "",
+    "completed_at": "2026-05-10T22:45:55.238036"
   },
-  "what_happened": {
-    "last_result": "",
-    "last_tool":   "",
-    "last_error":  "",
-    "result_at":   "",
-    "tool_status": {
-      "minecraft": "idle",
-      "voice":     "idle",
-      "email":     "idle",
-      "blender":   "idle"
-    }
+  "presence_output": {
+    "for_james": "Hey James, the bot tried to follow you but couldn't as you're not visible. Currently, I'm idle and waiting for you to restart the bot. Let's try again once you're ready!",
+    "emotion": "calm",
+    "certainty": "high",
+    "is_new": false,
+    "expressed_at": "2026-05-10T23:04:33.047356"
+  },
+  "knowledge": {
+    "minecraft_server": "Local server on 127.0.0.1:25565, version 1.21.4, offline mode.",
+    "voice_setup": "HyperX QuadCast S on device index 4. SteelSeries Sonar Gaming on device index 6.",
+    "workstation_fund": "James saving $3000 for workstation upgrade. Current balance $0."
   },
   "james_input": {
-    "message": "",
-    "received_at": ""
-  },
-  "hayeong_output": {
-    "message": "",
-    "sent_at": ""
+    "message": "hello hayeong are you there?",
+    "received_at": "2026-05-08T15:52:23.810340"
   }
 }

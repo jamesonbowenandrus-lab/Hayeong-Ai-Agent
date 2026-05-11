@@ -11,9 +11,10 @@ She thinks, plans, communicates, and acts — using tools like Minecraft bots,
 Blender, image generation, and more — all running on local hardware with no
 cloud dependency.
 
-She is built around three layers:
+She is built around four layers:
 - **Brain** — the reasoning LLM that thinks, decides, and directs
 - **Vision** — how she receives awareness of her situation
+- **Voice** — how she expresses herself to the world
 - **Toolbox** — the tools she uses to act in the world
 
 ---
@@ -84,7 +85,8 @@ hayeong\
 │   ├── config.py        ← All paths, ports, model names. Change things here.
 │   ├── identity.json    ← Who she is. Personality, values, relationship with James.
 │   ├── state\           ← Shared state bus. How her loops talk to each other.
-│   └── vision\          ← Abstract vision layer. How she understands her own state.
+│   ├── vision\          ← How she receives awareness of the world.
+│   └── voice\           ← How she expresses herself to the world.
 │
 ├── Toolbox\             ← Every tool she can use to act in the world.
 │   ├── minecraft\       ← Minecraft bot control (Python bridge + Node.js bot)

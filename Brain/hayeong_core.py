@@ -134,46 +134,59 @@ def is_worth_remembering(text: str) -> bool:
 # ─────────────────────────────────────────────
 
 def build_prompt(identity: dict, memory: list, user_input: str,
-                 dynamic_traits: dict = None, mood_state: dict = None) -> list:
+                 dynamic_traits: dict = None, mood_state: dict = None,
+                 domain: str = None) -> list:
     """
     Returns a messages list ready for Ollama /api/chat.
     Safe to call from Discord — no audio dependencies.
+    Pass domain="minecraft" (or any Toolbox folder name) to inject the
+    domain prompt as the outermost layer of the system prompt.
     """
 
-    # ── Try full system_prompt_builder ──
-    system_prompt = None
-    try:
-        from system_prompt_builder import build_system_prompt, detect_state_of_mind
-        from long_term_memory import recall_for_prompt
+    # ── Domain path: use prompt_layer_manager when domain is specified ──
+    if domain:
+        try:
+            from brain.prompt_layer_manager import build_layered_system_prompt
+            system_prompt = build_layered_system_prompt(
+                identity=identity, domain=domain, mood=mood_state,
+            )
+        except Exception:
+            domain = None  # fall through to standard path
 
-        mood = mood_state or {}
-        state_of_mind = detect_state_of_mind("casual", "home", mood)
-        system_prompt = build_system_prompt(
-            who="james", situation="casual",
-            environment="home", state_of_mind=state_of_mind
-        )
+    # ── Standard path: system_prompt_builder + identity fallback ──
+    if not domain:
+        system_prompt = None
+        try:
+            from system_prompt_builder import build_system_prompt, detect_state_of_mind
+            from long_term_memory import recall_for_prompt
 
-        long_term_context = recall_for_prompt(user_input, n_results=4)
-        if long_term_context:
-            system_prompt = long_term_context + "\n\n" + system_prompt
+            mood          = mood_state or {}
+            state_of_mind = detect_state_of_mind("casual", "home", mood)
+            system_prompt = build_system_prompt(
+                who="james", situation="casual",
+                environment="home", state_of_mind=state_of_mind,
+            )
 
-    except Exception:
-        # Fallback: build a simple prompt from identity.json directly
-        name        = identity.get("name", "Hayeong")
-        personality = identity.get("personality", "")
-        mood        = mood_state or {}
-        mood_str    = ", ".join(f"{k}: {v}" for k, v in mood.items()) if mood else ""
-        traits_str  = ""
-        if dynamic_traits:
-            traits_str = "\n".join(f"  {k}: {v}" for k, v in dynamic_traits.items())
+            long_term_context = recall_for_prompt(user_input, n_results=4)
+            if long_term_context:
+                system_prompt = long_term_context + "\n\n" + system_prompt
 
-        system_prompt = f"You are {name}."
-        if personality:
-            system_prompt += f"\n\n{personality}"
-        if mood_str:
-            system_prompt += f"\n\nCurrent mood — {mood_str}."
-        if traits_str:
-            system_prompt += f"\n\nPersonality traits:\n{traits_str}"
+        except Exception:
+            name        = identity.get("name", "Hayeong")
+            personality = identity.get("personality", "")
+            mood        = mood_state or {}
+            mood_str    = ", ".join(f"{k}: {v}" for k, v in mood.items()) if mood else ""
+            traits_str  = ""
+            if dynamic_traits:
+                traits_str = "\n".join(f"  {k}: {v}" for k, v in dynamic_traits.items())
+
+            system_prompt = f"You are {name}."
+            if personality:
+                system_prompt += f"\n\n{personality}"
+            if mood_str:
+                system_prompt += f"\n\nCurrent mood — {mood_str}."
+            if traits_str:
+                system_prompt += f"\n\nPersonality traits:\n{traits_str}"
 
     # ── Assemble messages ──
     messages = [{"role": "system", "content": system_prompt}]

@@ -37,26 +37,26 @@ def write_section(section: str, data: dict):
 
 def clear_on_startup():
     """Clear volatile sections for a clean session."""
-    write_section("what_she_knows", {
-        "current_thinking":  "",
-        "context_for_james": "",
-        "last_conclusion":   "",
-        "current_focus":     "",
-        "updated_at":        "",
+    write_section("situation", {
+        "what_james_said": "",
+        "said_at":         "",
+        "what_i_am_doing": "idle",
+        "current_focus":   "",
     })
-    write_section("what_shes_doing", {
-        "task_type": "",
-        "task_description": "",
-        "task_params": {},
-        "assigned_at": "",
-        "status": "idle",
+    write_section("last_task", {
+        "tool":         "",
+        "description":  "",
+        "params":       {},
+        "started_at":   "",
+        "status":       "none",
+        "result":       "",
+        "error":        "",
+        "completed_at": "",
     })
-    write_section("what_happened", {
-        "last_result": "",
-        "last_tool":   "",
-        "last_error":  "",
-        "result_at":   "",
-        "tool_status": {"minecraft": "idle", "voice": "idle", "email": "idle", "blender": "idle"},
+    write_section("presence_output", {
+        "for_james":    "",
+        "emotion":      "calm",
+        "certainty":    "",
+        "is_new":       False,
+        "expressed_at": "",
     })
-    write_section("james_input", {"message": "", "received_at": ""})
-    write_section("hayeong_output", {"message": "", "sent_at": ""})

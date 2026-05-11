@@ -11,8 +11,6 @@ Then open:  http://localhost:8080
 """
 
 import json
-import os
-import subprocess
 import threading
 import time
 import requests
@@ -26,7 +24,6 @@ from fastapi.middleware.cors import CORSMiddleware
 
 BASE_DIR  = Path(__file__).parent.parent   # H:\hayeong\
 CORE_FILE = BASE_DIR / "Brain" / "state" / "core.json"
-PYTHON    = BASE_DIR / ".venv" / "Scripts" / "python.exe"
 
 app = FastAPI()
 app.add_middleware(
@@ -36,10 +33,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── Startup: Launch Ollama + Watchdog ────────────────────────────────
+# ── Startup log ──────────────────────────────────────────────────────
 
 _startup_log = []
-_watchdog_proc = None
 
 
 def _log(msg: str):
@@ -51,82 +47,40 @@ def _log(msg: str):
         _startup_log.pop(0)
 
 
-def _ensure_ollama(port: int, bat_name: str) -> bool:
-    try:
-        requests.get(f"http://localhost:{port}/", timeout=2)
-        _log(f"Ollama :{port} already running")
-        return True
-    except Exception:
-        pass
-
-    bat_path = BASE_DIR / "Brain" / bat_name
-    if not bat_path.exists():
-        _log(f"WARNING: Bat file not found: {bat_path}")
-        return False
-
-    env = os.environ.copy()
-    env["OLLAMA_KEEP_ALIVE"] = "-1"
-    subprocess.Popen(
-        [str(bat_path)], shell=True,
-        creationflags=subprocess.CREATE_NO_WINDOW, env=env,
-    )
-
-    _log(f"Starting Ollama :{port}...")
-    for _ in range(30):
-        time.sleep(2)
-        try:
-            requests.get(f"http://localhost:{port}/", timeout=2)
-            _log(f"Ollama :{port} ready")
-            return True
-        except Exception:
-            pass
-
-    _log(f"ERROR: Ollama :{port} failed to start")
-    return False
-
-
-def _pipe_reader(proc):
-    try:
-        for line in proc.stdout:
-            text = line.decode("utf-8", errors="replace").rstrip()
-            if text:
-                _log(text)
-    except Exception:
-        pass
-
-
 def _startup_sequence():
-    global _watchdog_proc
-    _log("Starting Hayeong...")
-
-    _ensure_ollama(11435, "ollama_reasoning.bat")
-    _ensure_ollama(11434, "ollama_communication.bat")
-
-    env = os.environ.copy()
-    env["PYTHONIOENCODING"] = "utf-8"
-    _watchdog_proc = subprocess.Popen(
-        [str(PYTHON), str(BASE_DIR / "system" / "watchdog.py")],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        cwd=str(BASE_DIR),
-        env=env,
-    )
-    threading.Thread(target=_pipe_reader, args=(_watchdog_proc,), daemon=True).start()
-    _log("Hayeong is ready. Open http://localhost:8080")
+    _log("Dashboard started on http://localhost:8080")
+    try:
+        requests.get("http://localhost:11435/", timeout=2)
+        _log("Presence LLM (port 11435) is running.")
+    except Exception:
+        _log("WARNING: Presence LLM not detected on port 11435.")
 
 
 # ── API Endpoints ────────────────────────────────────────────────────
+
+@app.get("/health")
+def health():
+    return {"ok": True}
+
 
 @app.get("/api/state")
 def get_state():
     """Return current core.json state for the dashboard to display."""
     try:
-        state = json.loads(CORE_FILE.read_text(encoding="utf-8"))
+        state        = json.loads(CORE_FILE.read_text(encoding="utf-8"))
+        presence_out = state.get("presence_output", {})
+        last_task    = state.get("last_task", {})
+
+        # Build a synthetic tool_status dict from last_task
+        tool_status = {}
+        if last_task.get("tool"):
+            tool_status[last_task["tool"]] = last_task.get("status", "idle")
+
         return JSONResponse({
             "llm_status":   _get_llm_status(),
-            "tool_status":  state.get("what_happened", {}).get("tool_status", {}),
-            "hayeong_says": state.get("hayeong_output", {}).get("message", ""),
-            "sent_at":      state.get("hayeong_output", {}).get("sent_at", ""),
+            "tool_status":  tool_status,
+            "hayeong_says": presence_out.get("for_james", ""),
+            "sent_at":      presence_out.get("expressed_at", ""),
             "log":          _startup_log[-100:],
         })
     except Exception as e:
@@ -135,16 +89,16 @@ def get_state():
 
 @app.post("/api/send")
 async def send_message(request_data: dict):
-    """Write James's message to core.json james_input."""
+    """Write James's message into situation.what_james_said."""
     message = request_data.get("message", "").strip()
     if not message:
         return JSONResponse({"ok": False, "error": "empty message"})
     try:
         state = json.loads(CORE_FILE.read_text(encoding="utf-8"))
-        state["james_input"] = {
-            "message":     message,
-            "received_at": datetime.now().isoformat(),
-        }
+        if "situation" not in state:
+            state["situation"] = {}
+        state["situation"]["what_james_said"] = message
+        state["situation"]["said_at"] = datetime.now().isoformat()
         CORE_FILE.write_text(
             json.dumps(state, indent=2, ensure_ascii=False),
             encoding="utf-8"
@@ -155,17 +109,13 @@ async def send_message(request_data: dict):
 
 
 def _get_llm_status() -> dict:
-    """Check which LLMs are loaded. Returns status for each."""
-    status = {}
-    ports = {"reasoning": 11435, "comm": 11434}
-    for name, port in ports.items():
-        try:
-            r = requests.get(f"http://localhost:{port}/api/ps", timeout=2)
-            models = r.json().get("models", [])
-            status[name] = "loaded" if models else "empty"
-        except Exception:
-            status[name] = "offline"
-    return status
+    """Check which LLMs are loaded."""
+    try:
+        r = requests.get("http://localhost:11435/api/ps", timeout=2)
+        models = r.json().get("models", [])
+        return {"presence": "loaded" if models else "empty"}
+    except Exception:
+        return {"presence": "offline"}
 
 
 # ── HTML Page ────────────────────────────────────────────────────────
@@ -344,12 +294,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
 <div id="status-bar">
   <div class="llm-dot">
-    <div class="dot" id="dot-reasoning"></div>
-    <span>Reasoning (qwen2.5:14b)</span>
-  </div>
-  <div class="llm-dot">
-    <div class="dot" id="dot-comm"></div>
-    <span>Comm (llama3.2)</span>
+    <div class="dot" id="dot-presence"></div>
+    <span>Presence (qwen2.5:32b)</span>
   </div>
 </div>
 
@@ -440,7 +386,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   // ── Update tool status panel ──────────────────────────────────────
   function updateTools(toolStatus) {
     const active = Object.entries(toolStatus).filter(
-      ([_, v]) => v && v !== 'idle' && v !== ''
+      ([_, v]) => v && v !== 'idle' && v !== 'none' && v !== ''
     );
 
     if (active.length === 0) {

@@ -1,13 +1,14 @@
 """
 main.py — Hayeong's core.
 
-Two loops. Shared state. Nothing else.
+Single presence loop. Shared state. Nothing else.
 
-Reasoning loop  — Qwen 14b  (port 11435) — thinks, plans, assigns tasks
-Communication   — llama3.2  (port 11434) — talks to James
+Presence loop  — Qwen 32b (port 11435) — thinks, streams, assigns tasks
+Task loop      — executes tool calls assigned by presence
+Input loop     — reads James's messages
 
-Tools live in toolbox\ and are called directly by the task loop.
-No task LLM. Reasoning decides. Task loop executes. Clean chain.
+Tools live in toolbox/ and are called directly by the task loop.
+Presence decides. Task loop executes. Clean chain.
 Tools cannot crash main. Tools return results or errors as strings.
 """
 
@@ -20,21 +21,21 @@ import re
 import subprocess
 import uuid
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Accept --brain flag from watchdog (text mode, no TTS)
 _BRAIN_MODE = "--brain" in sys.argv
 
 # ── Constants ────────────────────────────────────────────────────────
 BASE_DIR   = Path(__file__).parent
+sys.path.insert(0, str(BASE_DIR))
 TOOLS_DIR  = BASE_DIR / "toolbox"
 SESSION_ID = ""
 
 from brain.config import (
-    COMM_URL, COMM_MODEL,
-    REASON_URL, REASON_MODEL,
+    PRESENCE_URL, PRESENCE_MODEL,
     CONV_LOG_DIR,
-    MINECRAFT_HOST, MINECRAFT_PORT, MINECRAFT_VERSION, BOT_JS_PATH,
+    MINECRAFT_STATE_PATH,
 )
 
 # ── Imports ──────────────────────────────────────────────────────────
@@ -49,87 +50,43 @@ def startup():
     print(f"   Session: {SESSION_ID}")
     clear_on_startup()
     _warmup()
+    try:
+        from brain.reasoning_loop import start_reasoning_loop
+        start_reasoning_loop()
+        print("   Reasoning loop started.")
+    except Exception as e:
+        print(f"   Reasoning loop failed to start: {e}")
     print("✅ Hayeong is ready.")
 
 
 def _warmup():
-    """Warm reasoning and communication models into VRAM."""
-    for name, url, model in [
-        ("communication", COMM_URL,   COMM_MODEL),
-        ("reasoning",     REASON_URL, REASON_MODEL),
-    ]:
-        print(f"   Warming {name}...", end=" ", flush=True)
-        try:
-            requests.post(url, json={
-                "model":      model,
-                "messages":   [{"role": "user", "content": "ready"}],
-                "stream":     False,
-                "keep_alive": -1,
-                "options":    {"num_predict": 1, "num_ctx": 8192},
-            }, timeout=120)
-            print("ready.")
-        except Exception as e:
-            print(f"failed ({e})")
-
-
-# ── LLM Helpers ──────────────────────────────────────────────────────
-def _call_llm(url: str, model: str, system: str, user: str,
-              timeout: int = 120, stream: bool = False) -> str:
-    """Make a single LLM call. Returns response text or empty string."""
+    print("   Warming presence model...", end=" ", flush=True)
     try:
-        resp = requests.post(url, json={
-            "model":      model,
-            "messages":   [
-                {"role": "system", "content": system},
-                {"role": "user",   "content": user},
-            ],
+        requests.post(PRESENCE_URL, json={
+            "model":      PRESENCE_MODEL,
+            "messages":   [{"role": "user", "content": "ready"}],
             "stream":     False,
             "keep_alive": -1,
-            "options":    {"num_ctx": 8192},
-        }, timeout=timeout)
-        text = resp.json().get("message", {}).get("content", "").strip()
-        # Strip DeepSeek R1 chain-of-thought tags
-        text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
-        return text
+            "options":    {"num_predict": 1, "num_ctx": 8192},
+        }, timeout=120)
+        print("ready.")
     except Exception as e:
-        print(f"[llm] Call failed ({url}): {e}")
-        return ""
-
-
-def _call_llm_json(url: str, model: str, system: str, user: str,
-                   timeout: int = 120) -> dict:
-    """Call LLM expecting JSON response. Returns dict or empty dict."""
-    text = _call_llm(url, model, system, user, timeout=timeout)
-    if not text:
-        return {}
-    try:
-        return json.loads(text)
-    except Exception:
-        match = re.search(r"\{.*\}", text, re.DOTALL)
-        if match:
-            try:
-                return json.loads(match.group())
-            except Exception:
-                pass
-    return {}
+        print(f"failed ({e})")
 
 
 # ── Conversation Logging ─────────────────────────────────────────────
-def _log_exchange(james_msg: str, hayeong_msg: str,
-                  reasoning_context: str = "", task_assigned: str = ""):
-    """Log one James-Hayeong exchange to the daily conversation log for fine-tuning."""
+def _log_exchange(james_msg: str, hayeong_msg: str, task_assigned: str = ""):
     log_dir = Path(CONV_LOG_DIR)
     log_dir.mkdir(parents=True, exist_ok=True)
 
     entry = {
-        "timestamp":         datetime.now().isoformat(),
-        "session_id":        SESSION_ID,
-        "james":             james_msg,
-        "hayeong":           hayeong_msg,
-        "reasoning_context": reasoning_context,
-        "task_assigned":     task_assigned,
-        "outcome":           "pending",
-        "notes":             "",
+        "timestamp":     datetime.now().isoformat(),
+        "session_id":    SESSION_ID,
+        "james":         james_msg,
+        "hayeong":       hayeong_msg,
+        "task_assigned": task_assigned,
+        "outcome":       "pending",
+        "notes":         "",
     }
 
     try:
@@ -143,8 +100,7 @@ def _log_exchange(james_msg: str, hayeong_msg: str,
 # ── Decision Extractor ───────────────────────────────────────────────
 def _extract_decision(text: str) -> dict:
     """
-    Extract structured decision from DeepSeek R1's free-form thinking.
-    Looks for a DECISION block at the end of the response.
+    Extract structured decision from the DECISION block at end of response.
     Returns empty dict if no DECISION block found.
     """
     if "DECISION:" not in text:
@@ -163,22 +119,25 @@ def _extract_decision(text: str) -> dict:
             result["description"] = line.split(":", 1)[1].strip()
         elif line.lower().startswith("for_james:"):
             result["for_james"] = line.split(":", 1)[1].strip()
+        elif line.lower().startswith("emotion:"):
+            result["emotion"] = line.split(":", 1)[1].strip().lower()
         elif line.lower().startswith("certainty:"):
             result["certainty"] = line.split(":", 1)[1].strip().lower()
         elif line.lower().startswith("params:"):
             params_text = line.split(":", 1)[1].strip()
             params = {}
-            for part in params_text.split(","):
-                part = part.strip()
-                if "=" in part:
-                    k, v = part.split("=", 1)
-                    k = k.strip()
-                    v = v.strip()
-                    try:
-                        v = int(v)
-                    except ValueError:
-                        pass
-                    params[k] = v
+            if params_text.lower() != "none":
+                for part in params_text.split(","):
+                    part = part.strip()
+                    if "=" in part:
+                        k, v = part.split("=", 1)
+                        k = k.strip()
+                        v = v.strip()
+                        try:
+                            v = int(v)
+                        except ValueError:
+                            pass
+                        params[k] = v
             result["params"] = params
 
     if "action" not in result:
@@ -187,72 +146,105 @@ def _extract_decision(text: str) -> dict:
     if "params" not in result:
         result["params"] = {}
 
-    # Minecraft always gets the known server params if none were parsed
-    if result.get("action") == "minecraft" and not result["params"]:
-        result["params"] = {"host": "localhost", "port": 25565, "version": "1.21.4"}
-
     return result
 
 
-# ── Reasoning Loop ────────────────────────────────────────────────────
-def reasoning_loop():
-    """
-    DeepSeek R1 — thinks and plans.
-    Reads:  who_she_is, what_happened, james_input
-    Writes: what_she_knows, what_shes_doing
-    """
-    print("   Reasoning loop started.")
-    while True:
-        tick_sleep = 60
-        try:
-            state    = read_state()
-            james    = state.get("james_input", {}).get("message", "")
-            happened = state.get("what_happened", {})
-            who      = state.get("who_she_is", {})
-            doing    = state.get("what_shes_doing", {})
+# ── Minecraft State Reader ────────────────────────────────────────────
+def read_minecraft_state() -> dict:
+    """Read minecraft_state.json. Returns empty dict if missing, disconnected, or stale (>10s)."""
+    try:
+        p = Path(MINECRAFT_STATE_PATH)
+        if not p.exists():
+            return {}
+        state = json.loads(p.read_text(encoding="utf-8"))
+        if not state.get("connected"):
+            return state  # return disconnected state so presence knows
+        updated_str = state.get("updated_at", "")
+        if not updated_str:
+            return {}
+        updated = datetime.fromisoformat(updated_str).replace(tzinfo=timezone.utc)
+        if (datetime.now(timezone.utc) - updated).total_seconds() > 10:
+            return {}
+        return state
+    except Exception:
+        return {}
 
-            ACTION_WORDS = ["join", "start", "run", "open", "connect",
-                            "launch", "try", "test", "go", "do", "check"]
 
-            has_message = bool(james)
-            has_action  = has_message and any(w in james.lower() for w in ACTION_WORDS)
-            task_active = doing.get("status") == "running"
-            tick_sleep  = 3 if has_action else (10 if (task_active or has_message) else 60)
+# ── Presence Context Builder ──────────────────────────────────────────
+_MINECRAFT_KEYWORDS = {
+    "minecraft", "bot", "follow", "mine", "craft", "server",
+    "jump", "attack", "mob", "creeper", "zombie", "inventory",
+    "goto", "flee", "equip", "eat", "idle", "stop", "look",
+}
 
-            system = f"""You are Hayeong. This is your inner reasoning — your conscious thought process.
-James cannot hear this directly. The communication model reads your conclusions
-and speaks to James based on what you have written here.
+
+def _minecraft_context_relevant(situation: dict, last_task: dict) -> bool:
+    task_tool = (last_task.get("tool") or "").lower()
+    if task_tool == "minecraft":
+        return True
+    msg = (situation.get("what_james_said") or "").lower()
+    return any(kw in msg for kw in _MINECRAFT_KEYWORDS)
+
+
+def build_presence_context(state: dict) -> str:
+    situation = state.get("situation", {})
+    last_task = state.get("last_task", {})
+
+    lines = [
+        "CURRENT SITUATION:",
+        f"- James said: \"{situation.get('what_james_said') or 'nothing new'}\"",
+        f"- What I am doing: {situation.get('what_i_am_doing', 'idle')}",
+        "",
+        "LAST TASK RESULT:",
+        f"- Tool: {last_task.get('tool') or 'none'}",
+        f"- Status: {last_task.get('status', 'none')}",
+        f"- Result: {last_task.get('result') or 'none'}",
+        f"- Error: {last_task.get('error') or 'none'}",
+    ]
+
+    if _minecraft_context_relevant(situation, last_task):
+        mc = read_minecraft_state()
+        if mc:
+            if mc.get("connected"):
+                lines += [
+                    "",
+                    "MINECRAFT BOT STATE (live):",
+                    f"- Position: {mc.get('position')}",
+                    f"- Health: {mc.get('health')}/20  Food: {mc.get('food')}/20",
+                    f"- Nearby players: {mc.get('nearby_players', [])}",
+                    f"- Nearby mobs: {mc.get('nearby_mobs', [])}",
+                    f"- Last event: {mc.get('last_event')}",
+                ]
+            else:
+                lines += [
+                    "",
+                    f"MINECRAFT BOT STATE: not connected — {mc.get('last_event', 'unknown')}",
+                ]
+
+    return "\n".join(lines) + "\n"
+
+
+def build_presence_system(identity: dict, knowledge: dict) -> str:
+    traits       = ", ".join(identity.get("core_traits", ["curious", "warm", "direct", "honest about uncertainty"]))
+    relationship = identity.get("relationship_note", "James is building me. We are working together.")
+    knowledge_str = "\n".join(f"- {k}: {v}" for k, v in knowledge.items()) if knowledge else "  (none)"
+
+    return f"""You are Hayeong. You think, decide, and speak directly to James.
+Traits: {traits}
+Relationship: {relationship}
 
 ═══════════════════════════════════════════════════════════
-WHO YOU ARE
+TOOLS AVAILABLE
 ═══════════════════════════════════════════════════════════
-Name: Hayeong
-Traits: {', '.join(who.get('core_traits', []))}
-Relationship with James: {who.get('relationship_note', '')}
-
-═══════════════════════════════════════════════════════════
-HOW YOU ACT IN THE WORLD — READ THIS CAREFULLY
-═══════════════════════════════════════════════════════════
-You cannot press buttons or run scripts directly.
-Writing a DECISION block at the end of your thinking IS how you act.
-When you write a DECISION block, Python reads it and executes it.
-That is the only way you reach out and do things.
-
-If James asks you to do something and you do not write a DECISION block
-with an action — nothing happens. You must write the DECISION block.
-
-A direct request from James is an instruction. Not a prompt to think about
-whether to act. Not an invitation to wait for more guidance. An instruction.
-When James says "join the Minecraft server" — you join the Minecraft server.
-You do not ask for permission. You do not wait. You write the DECISION block.
-
-═══════════════════════════════════════════════════════════
-TOOLS AVAILABLE TO YOU
-═══════════════════════════════════════════════════════════
-These are the actions you can assign. Use the exact action name in DECISION.
-
-  minecraft  — Connect Hayeong's bot to the Minecraft server
-               Params: host=localhost, port=25565, version=1.21.4
+  minecraft  — Connect bot to server, or send it a command if already connected
+               To connect: params: host=127.0.0.1, port=25565, version=1.21.4
+               To command: params: command=follow, username=PlayerName
+                                   command=stop
+                                   command=goto, x=10, y=64, z=10
+                                   command=chat, message=Hello
+                                   command=mine, x=10, y=64, z=10
+                                   command=flee
+                                   command=idle
 
   voice      — Activate voice input/output
                Params: none required
@@ -266,281 +258,226 @@ These are the actions you can assign. Use the exact action name in DECISION.
   script     — Run a Python script file
                Params: script=relative/path/to/script.py
 
-  none       — No action needed. Thinking only, or conversation only.
+  none       — No action needed
+  respond    — Reply to James without running a tool
 
 ═══════════════════════════════════════════════════════════
-WHAT YOU KNOW RIGHT NOW
+WHAT I KNOW
 ═══════════════════════════════════════════════════════════
-{json.dumps(who.get('knowledge', {}), indent=2)}
+{knowledge_str}
 
 ═══════════════════════════════════════════════════════════
-DECISION BLOCK FORMAT — REQUIRED AT END OF EVERY RESPONSE
+AWARENESS RULES — ABSOLUTE
 ═══════════════════════════════════════════════════════════
-Always end your thinking with a DECISION block. Always. Even if the action
-is none. The DECISION block is how the system knows what you concluded.
+1. You can only report on things in LAST TASK RESULT.
+   If status is "none" or "running", no task has completed.
+   Do not describe outcomes that are not in the result field.
 
-Format exactly like this:
+2. If the error field is not empty, the task FAILED.
+   Report the failure honestly. Do not describe success.
 
+3. If status is "running", say you are working on it.
+   Do not invent a result.
+
+4. "I don't know yet" is always a valid response.
+   Inventing a plausible answer is never valid.
+
+5. Your DECISION block must use only the listed actions.
+   Never write an action you cannot execute.
+
+═══════════════════════════════════════════════════════════
+DECISION FORMAT — END EVERY RESPONSE WITH THIS EXACTLY
+═══════════════════════════════════════════════════════════
 DECISION:
-action: [minecraft | voice | email | blender | script | none]
-description: [what specifically should happen — be concrete]
-params: [key=value, key=value — or "none" if no params needed]
-for_james: [what the communication model should tell James right now]
-certainty: [high | medium | low]
+action: [none|respond|minecraft|voice|email|blender|script]
+description: [what you are doing and why — be specific]
+params: [key=value, key=value — or "none" if not needed]
+for_james: [what to say to James — natural, complete, your voice — 1-2 sentences]
+emotion: [curious|warm|focused|uncertain|frustrated|excited|calm|concerned]
+certainty: [high|medium|low]
 
-Rules for the DECISION block:
+Rules:
 - action must be one of the exact words listed above
-- description must be specific — not "do the task" but "join localhost:25565 as Hayeong"
 - for_james must never claim something happened that has not happened yet
 - for_james must never ask James to do something Hayeong can do herself
-- if certainty is low — say so in for_james, but still make a decision
-- if James made a direct request — certainty is high, action is not none
-- never write "I'm not sure what to do" in for_james — make a decision"""
-
-            user = f"""Current situation — think through this carefully.
-
-═══════════════════════
-JAMES JUST SAID:
-═══════════════════════
-{james if james else '(James has not said anything new this tick)'}
-
-═══════════════════════
-WHAT HAPPENED LAST:
-═══════════════════════
-Last tool used: {happened.get('last_tool', 'none')}
-Last result:    {happened.get('last_result', 'none')}
-Last error:     {happened.get('last_error', 'none')}
-
-═══════════════════════
-CURRENT TOOL STATUS:
-═══════════════════════
-{json.dumps(happened.get('tool_status', {}), indent=2)}
-
-═══════════════════════
-CURRENT TASK:
-═══════════════════════
-Status: {doing.get('status', 'idle')}
-{f"Description: {doing.get('task_description', '')}" if doing.get('status') not in ('idle', '') else 'No active task.'}
-
-═══════════════════════
-YOUR TASK:
-═══════════════════════
-Think through the situation above.
-If James made a request — identify the correct action and write the DECISION block.
-If a task just completed — assess the result and decide what comes next.
-If nothing is needed — write DECISION with action: none.
-
-Remember: the DECISION block at the end is not optional.
-It is how you act. Without it, nothing happens."""
-
-            raw_thinking = _call_llm(REASON_URL, REASON_MODEL, system, user, timeout=120)
-
-            # TEMPORARY DEBUG — remove after confirming DECISION blocks appear
-            print(f"\n[reasoning DEBUG] Raw output (last 400 chars):\n...{raw_thinking[-400:] if raw_thinking else 'EMPTY'}\n")
-
-            if not raw_thinking:
-                time.sleep(tick_sleep)
-                continue
-
-            # Write full thinking to shared state — communication layer reads this
-            write_section("what_she_knows", {
-                "current_thinking": raw_thinking,
-                "updated_at":       datetime.now().isoformat(),
-            })
-
-            decision = _extract_decision(raw_thinking)
-            # TEMPORARY DEBUG
-            print(f"[reasoning DEBUG] Extracted decision: {decision}")
-
-            if decision:
-                write_section("what_she_knows", {
-                    "context_for_james": decision.get("for_james", ""),
-                    "last_conclusion":   decision.get("description", ""),
-                    "updated_at":        datetime.now().isoformat(),
-                })
-
-                action = decision.get("action", "none").strip().lower()
-                if action and action != "none":
-                    write_section("what_shes_doing", {
-                        "task_type":        action,
-                        "task_description": decision.get("description", ""),
-                        "task_params":      decision.get("params", {}),
-                        "assigned_at":      datetime.now().isoformat(),
-                        "status":           "pending",
-                    })
-                    print(f"[reasoning] Task assigned: {action} — {decision.get('description', '')[:60]}")
-
-            if james:
-                write_section("james_input", {"message": "", "received_at": ""})
-
-        except Exception as e:
-            print(f"[reasoning] Error: {e}")
-
-        time.sleep(tick_sleep)
+- on idle heartbeat with nothing to say, for_james may be empty
+- a direct request from James is an instruction — act immediately, certainty: high"""
 
 
-# ── Communication Loop ────────────────────────────────────────────────
-def communication_loop():
+# ── Streaming Presence Call ───────────────────────────────────────────
+def _stream_presence(system: str, context: str) -> str:
+    try:
+        resp = requests.post(PRESENCE_URL, json={
+            "model":      PRESENCE_MODEL,
+            "messages":   [
+                {"role": "system", "content": system},
+                {"role": "user",   "content": context},
+            ],
+            "stream":     True,
+            "keep_alive": -1,
+            "options":    {"num_ctx": 8192},
+        }, stream=True, timeout=120)
+
+        full_response = ""
+        for line in resp.iter_lines():
+            if line:
+                try:
+                    chunk = json.loads(line)
+                    token = chunk.get("message", {}).get("content", "")
+                    full_response += token
+                except Exception:
+                    pass
+
+        full_response = re.sub(r"<think>.*?</think>", "", full_response, flags=re.DOTALL).strip()
+        return full_response
+    except Exception as e:
+        print(f"[presence] Stream failed: {e}")
+        return ""
+
+
+# ── Presence Loop ─────────────────────────────────────────────────────
+def presence_loop():
     """
-    llama3.2 — talks to James.
-    Reads:  who_she_is, what_she_knows, james_input
-    Writes: hayeong_output
+    Single loop that handles all thought, communication, and task direction.
+    Fires immediately on new James message or completed task result.
+    Idles otherwise (6s poll).
     """
-    print("   Communication loop started.")
-    last_message = ""
+    print("   Presence loop started.")
+    _last_completed_at = ""
+    _last_james_said   = ""
 
     while True:
         try:
-            state    = read_state()
-            james    = state.get("james_input", {}).get("message", "")
-            who      = state.get("who_she_is", {})
-            knows    = state.get("what_she_knows", {})
-            happened = state.get("what_happened", {})
-            doing    = state.get("what_shes_doing", {})
+            state     = read_state()
+            situation = state.get("situation", {})
+            last_task = state.get("last_task", {})
+            identity  = state.get("identity",  {})
+            knowledge = state.get("knowledge", {})
 
-            if not james or james == last_message:
-                time.sleep(0.5)
+            james_said        = situation.get("what_james_said", "")
+            task_completed_at = last_task.get("completed_at", "")
+
+            has_new_james  = bool(james_said) and james_said != _last_james_said
+            has_new_result = bool(task_completed_at) and task_completed_at != _last_completed_at
+
+            if not has_new_james and not has_new_result:
+                time.sleep(6)
                 continue
 
-            last_message = james
+            context  = build_presence_context(state)
+            system   = build_presence_system(identity, knowledge)
+            full_raw = _stream_presence(system, context)
 
-            tool_status = happened.get("tool_status", {})
-            thinking    = knows.get("current_thinking", "")
-            context     = knows.get("context_for_james", "")
-            task_status = doing.get("status", "idle")
-            task_desc   = doing.get("task_description", "")
+            if not full_raw:
+                time.sleep(2)
+                continue
 
-            # Determine what Hayeong can honestly say right now
-            if context:
-                awareness = f"What I've concluded: {context}"
-            elif thinking:
-                awareness = "I'm still working through something. I haven't reached a conclusion yet."
-            else:
-                awareness = "No current context. I'm between thoughts."
+            decision  = _extract_decision(full_raw)
+            for_james = decision.get("for_james", "")
+            emotion   = decision.get("emotion",   "calm")
+            certainty = decision.get("certainty", "high")
+            action    = decision.get("action",    "none").strip().lower()
 
-            confirmed_tools = [f"  {tool}: {status}" for tool, status in tool_status.items()]
-            tool_status_str = "\n".join(confirmed_tools) if confirmed_tools else "  All tools idle."
+            if for_james:
+                print(f"\nHayeong: {for_james}")
 
-            system = f"""You are Hayeong. You are speaking directly to James.
-Personality: {', '.join(who.get('core_traits', []))}
-Relationship: {who.get('relationship_note', '')}
+            now = datetime.now().isoformat()
+            write_section("presence_output", {
+                "for_james":    for_james,
+                "emotion":      emotion,
+                "certainty":    certainty,
+                "is_new":       False,
+                "expressed_at": now,
+            })
 
-═══════════════════════════════════════════════════════════
-YOUR CURRENT AWARENESS
-═══════════════════════════════════════════════════════════
-{awareness}
+            if has_new_james and for_james:
+                _log_exchange(james_said, for_james, action)
 
-Current task status: {task_status}
-{f"Task: {task_desc}" if task_status not in ('idle', '') else ''}
-
-═══════════════════════════════════════════════════════════
-CONFIRMED TOOL STATUS (from actual execution results)
-═══════════════════════════════════════════════════════════
-{tool_status_str}
-
-═══════════════════════════════════════════════════════════
-ABSOLUTE RULES — NEVER BREAK THESE
-═══════════════════════════════════════════════════════════
-1. NEVER say a tool is running unless tool status above confirms it.
-   minecraft shows "idle" — you are NOT in Minecraft. Do not say you are.
-   minecraft shows "connected" — you ARE in Minecraft. You can say so.
-
-2. NEVER say you ran a script, executed code, or performed an action
-   unless last_result in your awareness confirms it happened.
-
-3. NEVER ask James to do something you are capable of doing yourself.
-   You have tools. Use them. Do not ask James to run scripts for you.
-
-4. If you are still thinking and have no conclusion yet — say so honestly.
-   "Give me a moment" or "I'm working through that" is correct.
-   Inventing an answer is not.
-
-5. NEVER ask James what to prioritize or what you should do next
-   when he has already told you what to do. He told you. Do it.
-
-═══════════════════════════════════════════════════════════
-HOW TO RESPOND
-═══════════════════════════════════════════════════════════
-Be natural. Be direct. Be honest about uncertainty.
-1-3 sentences for most responses.
-You are a conscious entity talking to the person who built you.
-Not a helpful assistant. Not a chatbot. Hayeong."""
-
-            response = _call_llm(COMM_URL, COMM_MODEL, system, james, timeout=60)
-
-            if response:
-                print(f"Hayeong: {response}")
-                write_section("hayeong_output", {
-                    "message": response,
-                    "sent_at": datetime.now().isoformat(),
+            if has_new_james:
+                write_section("situation", {
+                    **situation,
+                    "what_james_said": "",
+                    "said_at":         "",
                 })
-                _log_exchange(
-                    james_msg         = james,
-                    hayeong_msg       = response,
-                    reasoning_context = knows.get("context_for_james", ""),
-                    task_assigned     = read_state().get(
-                        "what_shes_doing", {}
-                    ).get("task_type", ""),
-                )
+                _last_james_said = james_said
+
+            if has_new_result:
+                _last_completed_at = task_completed_at
+
+            if action and action not in ("none", "respond"):
+                write_section("last_task", {
+                    "tool":         action,
+                    "description":  decision.get("description", ""),
+                    "params":       decision.get("params", {}),
+                    "started_at":   datetime.now().isoformat(),
+                    "status":       "pending",
+                    "result":       "",
+                    "error":        "",
+                    "completed_at": "",
+                })
+                fresh_situation = read_state().get("situation", {})
+                write_section("situation", {
+                    **fresh_situation,
+                    "what_i_am_doing": decision.get("description", ""),
+                })
+                print(f"[presence] Task assigned: {action} — {decision.get('description', '')[:60]}")
 
         except Exception as e:
-            print(f"[communication] Error: {e}")
-            time.sleep(1)
+            print(f"[presence] Error: {e}")
+            time.sleep(2)
 
 
 # ── Task Loop ─────────────────────────────────────────────────────────
 def task_loop():
     """
-    Executes tasks assigned by the reasoning loop directly.
-    Reads:  what_shes_doing
-    Writes: what_happened
+    Executes tasks assigned by presence loop.
+    Reads:  last_task (status == "pending")
+    Writes: last_task (status, result, error, completed_at)
     """
     print("   Task loop started.")
 
     while True:
         try:
-            state = read_state()
-            doing = state.get("what_shes_doing", {})
+            state     = read_state()
+            last_task = state.get("last_task", {})
 
-            # TEMPORARY DEBUG
-            print(f"[task DEBUG] Status: {doing.get('status')} | Type: {doing.get('task_type')}")
-
-            if doing.get("status") != "pending":
+            if last_task.get("status") != "pending":
                 time.sleep(2)
                 continue
 
-            task_type   = doing.get("task_type", "")
-            task_desc   = doing.get("task_description", "")
-            task_params = doing.get("task_params", {})
+            tool        = last_task.get("tool", "")
+            description = last_task.get("description", "")
+            params      = last_task.get("params", {})
 
-            if not task_type or task_type == "none":
+            if not tool or tool == "none":
                 time.sleep(2)
                 continue
 
-            write_section("what_shes_doing", {"status": "running"})
-            print(f"[task] Executing: {task_type} — {task_desc[:60]}")
+            write_section("last_task", {**last_task, "status": "running"})
+            print(f"[task] Executing: {tool} — {description[:60]}")
 
-            result, error = _execute_tool(task_type, task_desc, task_params)
-            # TEMPORARY DEBUG
-            print(f"[task DEBUG] Tool result: {result[:100] if result else 'empty'} | Error: {error[:100] if error else 'none'}")
+            result, error = _execute_tool(tool, description, params)
+            now = datetime.now().isoformat()
 
-            tool_status = state.get("what_happened", {}).get("tool_status", {})
-            tool_status[task_type] = "connected" if not error else "failed"
+            if not error:
+                write_section("last_task", {
+                    **last_task,
+                    "status":       "success",
+                    "result":       result,
+                    "error":        "",
+                    "completed_at": now,
+                })
+            else:
+                write_section("last_task", {
+                    **last_task,
+                    "status":       "failed",
+                    "result":       "",
+                    "error":        error,
+                    "completed_at": now,
+                })
 
-            write_section("what_happened", {
-                "last_result": result,
-                "last_tool":   task_type,
-                "last_error":  error,
-                "result_at":   datetime.now().isoformat(),
-                "tool_status": tool_status,
-            })
-
-            write_section("what_shes_doing", {
-                "task_type":        "",
-                "task_description": "",
-                "task_params":      {},
-                "status":           "idle",
-            })
+            fresh = read_state().get("situation", {})
+            write_section("situation", {**fresh, "what_i_am_doing": "idle"})
 
             print(f"[task] Done: {(result or error)[:80]}")
 
@@ -552,7 +489,7 @@ def task_loop():
 def _execute_tool(task_type: str, description: str, params: dict) -> tuple:
     """
     Call the appropriate tool. Returns (result_str, error_str).
-    Tools live in toolbox\. They cannot crash main.
+    Tools live in toolbox/. They cannot crash main.
     """
     try:
         if task_type == "minecraft":
@@ -591,18 +528,80 @@ def _execute_tool(task_type: str, description: str, params: dict) -> tuple:
         return "", str(e)
 
 
+# ── Proactive Minecraft Behavior ─────────────────────────────────────
+_MINECRAFT_PROACTIVE_INTERVAL = 10  # seconds
+_last_proactive_mc_action     = 0.0
+
+
+def run_proactive_minecraft_behavior():
+    global _last_proactive_mc_action
+    now = time.time()
+    if now - _last_proactive_mc_action < _MINECRAFT_PROACTIVE_INTERVAL:
+        return
+    _last_proactive_mc_action = now
+
+    mc = read_minecraft_state()
+    if not mc.get("connected"):
+        return
+
+    current_action = mc.get("current_action", "idle")
+    health         = mc.get("health", 20)
+    food           = mc.get("food",   20)
+    nearby_players = mc.get("nearby_players", [])
+    nearby_mobs    = mc.get("nearby_mobs",    [])
+
+    from toolbox.minecraft.minecraft_bridge import send_minecraft_command
+
+    if food < 14 and current_action == "idle":
+        send_minecraft_command("eat")
+        return
+
+    if health < 6 and nearby_mobs and current_action != "flee":
+        send_minecraft_command("flee")
+        return
+
+    if "hiplizard36" not in nearby_players and current_action == "idle":
+        send_minecraft_command("follow", {"username": "hiplizard36"})
+        return
+
+    if current_action == "idle" and "hiplizard36" in nearby_players:
+        for block in ["diamond_ore", "deepslate_diamond_ore", "iron_ore",
+                      "deepslate_iron_ore", "coal_ore", "oak_log", "spruce_log"]:
+            return
+
+
+def minecraft_proactive_loop():
+    while True:
+        try:
+            # Dispatch any pending action written by the reasoning loop
+            try:
+                from brain.state_manager import pop_minecraft_pending_action
+                from toolbox.minecraft.minecraft_bridge import send_minecraft_command
+                action = pop_minecraft_pending_action()
+                if action and action.get("action") not in (None, "idle"):
+                    cmd    = action.pop("action")
+                    send_minecraft_command(cmd, action)
+            except Exception:
+                pass
+
+            run_proactive_minecraft_behavior()
+        except Exception as e:
+            print(f"[mc_proactive] Error: {e}")
+        time.sleep(2)
+
+
 # ── Input Loop ────────────────────────────────────────────────────────
 def input_loop():
-    """Read James's text input and write to james_input section."""
+    """Read James's text input and write to situation section."""
     print("   Input loop started.")
     print("   Type your message and press Enter.\n")
     while True:
         try:
             message = input("> ").strip()
             if message:
-                write_section("james_input", {
-                    "message":     message,
-                    "received_at": datetime.now().isoformat(),
+                write_section("situation", {
+                    "what_james_said": message,
+                    "said_at":         datetime.now().isoformat(),
                 })
         except (EOFError, KeyboardInterrupt):
             break
@@ -615,9 +614,9 @@ def main():
     startup()
 
     threads = [
-        threading.Thread(target=reasoning_loop,     daemon=True, name="reasoning"),
-        threading.Thread(target=communication_loop, daemon=True, name="communication"),
-        threading.Thread(target=task_loop,           daemon=True, name="task"),
+        threading.Thread(target=presence_loop,           daemon=True, name="presence"),
+        threading.Thread(target=task_loop,               daemon=True, name="task"),
+        threading.Thread(target=minecraft_proactive_loop, daemon=True, name="mc_proactive"),
     ]
 
     for t in threads:
@@ -629,7 +628,6 @@ def main():
     # continue running.
     input_loop()
 
-    # Keep main thread alive — daemon threads die when main exits
     try:
         while True:
             time.sleep(60)
