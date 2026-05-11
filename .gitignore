@@ -3,6 +3,8 @@
 __pycache__/
 node_modules/
 venv/
+identity.json
+core.json
 
 voice_prep/downloads/
 
