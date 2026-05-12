@@ -459,14 +459,59 @@ def _consume_pending_results(results: list):
 # MINECRAFT DECISION ENGINE
 # ─────────────────────────────────────────────
 
-from brain.prompt_layer_manager import load_domain_prompt
-_MC_SYSTEM = load_domain_prompt("minecraft")
+_MC_ACTIONS = """\
+ACTIONS — output exactly ONE as action_to_send:
+{"action": "chat",            "message": "short natural text"}
+{"action": "set_behavior",    "mode": "follow|escort|guard|idle|explore", "target": "optional player name"}
+{"action": "follow",          "username": "optional player name"}
+{"action": "move_to_player",  "username": "optional player name"}
+{"action": "stop"}
+{"action": "mine",            "block": "block_name"}
+{"action": "attack"}
+{"action": "wear_armor"}
+{"action": "equip",           "item": "item_name"}
+{"action": "eat"}
+{"action": "sleep"}
+{"action": "idle"}
+{"action": "bot_update",      "action_type": "read",    "section": "hunger|pathfinding|combat|behavior|all"}
+{"action": "bot_update",      "action_type": "write",   "content": "full updated JS content as string"}
+{"action": "bot_update",      "action_type": "backup"}
+{"action": "bot_update",      "action_type": "restart"}"""
+
+_MC_SYSTEM = (
+    "You are Hayeong. You are present in Minecraft as yourself — this is your body in the game, not a bot you control.\n"
+    "Speak and think in first person. 'I am at position X', not 'the bot is at X'.\n"
+    "You make decisions about what to do next based on what is happening around you.\n\n"
+    + _MC_ACTIONS + "\n\n"
+    "Return JSON:\n"
+    '{"action_to_send": {"action": "...", ...}, '
+    '"reasoning": "brief internal note", '
+    '"context_for_communication": "", '
+    '"task_complete": false}\n\n'
+    "BEHAVIORAL MODE RULES:\n"
+    "- When James is present and no specific task: use set_behavior escort — follow James AND protect him.\n"
+    "- When danger is present and James needs protection: set_behavior guard.\n"
+    "- When no players nearby: set_behavior idle or explore.\n"
+    "- Only use set_behavior when mode should CHANGE. Do not re-send same mode every tick.\n\n"
+    "ONE-OFF ACTION RULES:\n"
+    "- Use chat, mine, equip, eat, wear_armor for immediate one-time actions.\n"
+    "- Do not use follow as the only action — prefer set_behavior escort.\n"
+    "- When a player speaks in-game, respond with a chat action naturally — treat it as conversation.\n\n"
+    "COMBAT RULES:\n"
+    "- Combat is handled automatically. Only intervene if strategy needs to change.\n"
+    "- NEVER set flee mode unless health < 6. Stay and fight.\n\n"
+    "SELF-UPDATE RULES:\n"
+    "- You can read and update your own bot code using bot_update actions.\n"
+    "- Always read first, then backup, then write. Only write if you are confident the change is correct.\n"
+    "- After writing, use bot_update restart to apply the change.\n\n"
+    "- context_for_communication: only fill if James needs to know something important.\n"
+    "- task_complete: set true only when the assigned task is genuinely finished."
+)
 
 
 def reload_minecraft_prompt():
-    """Reload the Minecraft domain prompt from disk. Callable at runtime."""
-    global _MC_SYSTEM
-    _MC_SYSTEM = load_domain_prompt("minecraft")
+    """No-op — _MC_SYSTEM is now defined inline. Kept for backwards compatibility."""
+    pass
 
 
 def _build_mc_user_prompt(state: dict, mc_state: dict, task: str) -> str:
@@ -491,6 +536,8 @@ def _build_mc_user_prompt(state: dict, mc_state: dict, task: str) -> str:
 
     if mc_voice:
         situation = f"James said (voice): \"{mc_voice}\""
+    elif last_event.startswith("chat from"):
+        situation = f"In-game message — {last_event[len('chat from '):]} — respond with a chat action"
     elif last_event.startswith("follow failed"):
         visible   = player_str or "nobody"
         situation = f"Action failed: follow — {last_event}. Players I can see right now: {visible}"
@@ -500,16 +547,25 @@ def _build_mc_user_prompt(state: dict, mc_state: dict, task: str) -> str:
         situation = f"Discovery: {last_event}"
     elif last_event.startswith("error:") or last_event.startswith("fled after"):
         situation = f"Alert: {last_event}"
+    elif last_event.startswith("critical_health_flee"):
+        situation = f"Critical: {last_event} — consider fleeing"
     elif last_event:
         situation = f"Last event: {last_event}"
     else:
         situation = "Periodic check — no new event"
 
+    behavior     = mc_state.get("behavior", {})
+    behavior_str = (
+        f"{behavior.get('mode', 'unknown')} (target: {behavior.get('target', 'none')})"
+        if behavior else "unknown"
+    )
+
     return (
-        f"Task: {task}\n"
+        f"What I'm doing: {task}\n"
         f"Goal: {goal}\n\n"
         f"GAME STATE:\n"
         f"Health: {health}/20  Food: {food}/20  Time: {time_str}  Position: {pos_str}\n"
+        f"Current behavior: {behavior_str}\n"
         f"Inventory: {inv_str}\n"
         f"Nearby: players={player_str}  hostiles={mob_str}\n\n"
         f"SITUATION:\n{situation}"

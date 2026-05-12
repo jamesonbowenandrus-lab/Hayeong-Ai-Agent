@@ -34,6 +34,28 @@ let currentAction = "idle";
 let lastEvent     = "starting";
 
 // -------------------------
+// Behavior state
+// -------------------------
+let currentBehavior = {
+    mode:     "idle",
+    target:   null,
+    position: null,
+    since:    Date.now(),
+};
+
+function setBehavior(mode, params = {}) {
+    const prev = currentBehavior.mode;
+    currentBehavior = {
+        mode,
+        target:   params.target   || null,
+        position: params.position || null,
+        since:    Date.now(),
+    };
+    console.log(`[behavior] ${prev} → ${mode}${params.target ? ` (${params.target})` : ''}`);
+    lastEvent = `behavior: ${mode}`;
+}
+
+// -------------------------
 // Mob lists
 // -------------------------
 const HOSTILE_MOBS = new Set([
@@ -44,6 +66,17 @@ const HOSTILE_MOBS = new Set([
 ]);
 const RANGED_MOBS = new Set([
     'skeleton','stray','bogged','phantom','ghast','pillager','witch','blaze'
+]);
+
+// -------------------------
+// Food lists
+// -------------------------
+const KNOWN_FOOD_NAMES = new Set([
+    'bread','apple','cooked_beef','cooked_porkchop','cooked_mutton','cooked_chicken',
+    'cooked_salmon','cooked_cod','cooked_rabbit','golden_carrot','carrot','potato',
+    'baked_potato','beetroot','melon_slice','sweet_berries','dried_kelp','pumpkin_pie',
+    'mushroom_stew','rabbit_stew','beef','porkchop','mutton','chicken','salmon','cod',
+    'rabbit','rotten_flesh','spider_eye','cookie',
 ]);
 
 // -------------------------
@@ -70,6 +103,7 @@ function writeState(extra = {}) {
                              e.position?.distanceTo(bot.entity?.position) < 20)
                 .slice(0, 8)
                 .map(e => ({ name: e.name, dist: Math.round(e.position.distanceTo(bot.entity.position)) })),
+            behavior:       currentBehavior,
             current_action: currentAction,
             last_event:     lastEvent,
             updated_at:     new Date().toISOString(),
@@ -123,6 +157,42 @@ function weaponScore(item) {
     return 0;
 }
 
+let isEating = false;
+
+function foodScore(itemName) {
+    const high = [
+        'cooked_beef','cooked_porkchop','cooked_mutton','cooked_chicken',
+        'cooked_salmon','cooked_cod','cooked_rabbit','golden_carrot',
+        'bread','baked_potato','pumpkin_pie',
+    ];
+    const mid = [
+        'carrot','potato','beetroot','apple','melon_slice','sweet_berries','dried_kelp',
+    ];
+    if (high.includes(itemName)) return 2;
+    if (mid.includes(itemName))  return 1;
+    return 0;
+}
+
+function autoEquipBestArmor() {
+    const matScore = { netherite: 5, diamond: 4, iron: 3, chainmail: 2, gold: 1, leather: 0 };
+    const slots = [
+        { slot: "head",  keywords: ["helmet"] },
+        { slot: "torso", keywords: ["chestplate"] },
+        { slot: "legs",  keywords: ["leggings"] },
+        { slot: "feet",  keywords: ["boots"] },
+    ];
+    for (const { slot, keywords } of slots) {
+        const best = bot.inventory.items()
+            .filter(i => keywords.some(k => i.name.includes(k)))
+            .sort((a, b) => {
+                const sa = Object.entries(matScore).find(([m]) => a.name.includes(m))?.[1] ?? -1;
+                const sb = Object.entries(matScore).find(([m]) => b.name.includes(m))?.[1] ?? -1;
+                return sb - sa;
+            })[0];
+        if (best) bot.equip(best, slot).catch(() => {});
+    }
+}
+
 // -------------------------
 // Command executor
 // Accepts: { command: "...", params: {...}, issued_at: "..." }
@@ -138,25 +208,34 @@ function executeCommand(cmd) {
         switch (type) {
 
             case "follow": {
-                const targetName = p.username;
-                if (targetName) {
-                    const player = bot.players[targetName];
-                    if (player?.entity) {
-                        bot.pathfinder.setGoal(new goals.GoalFollow(player.entity, 2), true);
-                        lastEvent = `following ${targetName}`;
-                    } else {
-                        lastEvent     = `follow failed: ${targetName} not visible`;
-                        currentAction = "idle";
-                    }
+                const targetName = (p.username || "").toLowerCase();
+                const player = targetName
+                    ? Object.values(bot.players).find(pl => pl.username.toLowerCase() === targetName)
+                    : null;
+                const followTarget = (player?.entity ? player : null) || getNearestPlayer();
+                if (followTarget?.entity) {
+                    bot.pathfinder.setGoal(new goals.GoalFollow(followTarget.entity, 2), true);
+                    lastEvent = `following ${followTarget.username}`;
                 } else {
-                    const nearest = getNearestPlayer();
-                    if (nearest?.entity) {
-                        bot.pathfinder.setGoal(new goals.GoalFollow(nearest.entity, 2), true);
-                        lastEvent = `following ${nearest.username}`;
-                    } else {
-                        lastEvent     = "follow failed: no players visible";
-                        currentAction = "idle";
-                    }
+                    lastEvent     = "follow failed: no players visible";
+                    currentAction = "idle";
+                }
+                break;
+            }
+
+            case "move_to_player": {
+                const targetName = (p.username || "").toLowerCase();
+                const player = targetName
+                    ? Object.values(bot.players).find(pl => pl.username.toLowerCase() === targetName)
+                    : null;
+                const moveTarget = (player?.entity ? player : null) || getNearestPlayer();
+                if (moveTarget?.entity) {
+                    const ep = moveTarget.entity.position;
+                    bot.pathfinder.setGoal(new goals.GoalNear(ep.x, ep.y, ep.z, 2), true);
+                    lastEvent = `moving to ${moveTarget.username}`;
+                } else {
+                    lastEvent     = "move_to_player failed: no players visible";
+                    currentAction = "idle";
                 }
                 break;
             }
@@ -310,17 +389,43 @@ function executeCommand(cmd) {
                 break;
             }
 
+            case "wear_armor": {
+                const armorMap = { helmet: "head", chestplate: "torso", leggings: "legs", boots: "feet" };
+                const tierScore = i => {
+                    const order = ["leather","golden","chainmail","iron","diamond","netherite"];
+                    for (let idx = order.length - 1; idx >= 0; idx--) {
+                        if (i.name.includes(order[idx])) return idx;
+                    }
+                    return -1;
+                };
+                for (const [suffix, slot] of Object.entries(armorMap)) {
+                    const best = bot.inventory.items()
+                        .filter(i => i.name.includes(suffix))
+                        .sort((a, b) => tierScore(b) - tierScore(a))[0];
+                    if (best) bot.equip(best, slot).catch(() => {});
+                }
+                lastEvent     = "equipping best armor";
+                currentAction = "idle";
+                break;
+            }
+
             case "eat": {
-                if (bot.food >= 18) { currentAction = "idle"; break; }
+                if (isEating)      { console.log("   Already eating"); break; }
+                if (bot.food >= 18){ console.log("   Not hungry, skipping eat"); currentAction = "idle"; break; }
                 const searchTerm = p.item ? p.item.replace(/_/g, " ").toLowerCase() : null;
                 const foodItem = searchTerm
                     ? bot.inventory.items().find(i => i.name.replace(/_/g, " ").toLowerCase().includes(searchTerm))
-                    : bot.inventory.items().find(i => bot.registry.itemsByName[i.name]?.food);
+                    : bot.inventory.items()
+                        .filter(i => bot.registry.itemsByName[i.name]?.food || KNOWN_FOOD_NAMES.has(i.name))
+                        .sort((a, b) => foodScore(b.name) - foodScore(a.name))[0];
                 if (foodItem) {
+                    isEating  = true;
+                    lastEvent = `eating ${foodItem.name}`;
                     bot.equip(foodItem, "hand")
                         .then(() => bot.consume())
-                        .catch(e => console.error("Eat error:", e.message));
-                    lastEvent = `eating ${foodItem.name}`;
+                        .then(() => new Promise(r => setTimeout(r, 1500)))
+                        .catch(e => console.error("Eat error:", e.message))
+                        .finally(() => { isEating = false; });
                 } else {
                     bot.chat("I don't have any food.");
                     currentAction = "idle";
@@ -355,6 +460,13 @@ function executeCommand(cmd) {
                     lastEvent = `looking at ${nearest.username}`;
                 }
                 currentAction = "idle";
+                break;
+            }
+
+            case "set_behavior": {
+                const mode   = p.mode   || "idle";
+                const target = p.target || null;
+                setBehavior(mode, { target });
                 break;
             }
 
@@ -393,100 +505,165 @@ function startCommandPolling() {
 }
 
 // -------------------------
-// Combat loop — 500ms, bypasses AI
+// Behavior loop — 500ms, unified movement + combat
 // -------------------------
-function startCombatLoop() {
+function startBehaviorLoop() {
     setInterval(() => {
         try {
             if (!bot.entity) return;
 
-            const hasWeapon  = bot.inventory.items()
-                .some(i => i.name.includes('sword') || i.name.includes('axe'));
-            const engageRange = hasWeapon ? 5 : 2.5;
+            const bm = currentBehavior;
 
-            const closeMelee = Object.values(bot.entities)
-                .filter(e => HOSTILE_MOBS.has(e.name) &&
-                             !RANGED_MOBS.has(e.name) &&
-                             e.position?.distanceTo(bot.entity.position) < engageRange)
-                .sort((a, b) =>
-                    a.position.distanceTo(bot.entity.position) -
-                    b.position.distanceTo(bot.entity.position)
-                )[0];
+            // ── Combat reactivity (always active regardless of mode) ──
+            const meleeThreat = Object.values(bot.entities)
+                .filter(e => HOSTILE_MOBS.has(e.name) && !RANGED_MOBS.has(e.name) &&
+                             e.position?.distanceTo(bot.entity.position) < 5)
+                .sort((a, b) => a.position.distanceTo(bot.entity.position) -
+                                b.position.distanceTo(bot.entity.position))[0];
 
-            const closeRanged = Object.values(bot.entities)
-                .filter(e => RANGED_MOBS.has(e.name) &&
-                             e.position?.distanceTo(bot.entity.position) < 16)
-                .sort((a, b) =>
-                    a.position.distanceTo(bot.entity.position) -
-                    b.position.distanceTo(bot.entity.position)
-                )[0];
-
-            // Without weapon and outnumbered — flee instead of fight
-            if (!hasWeapon) {
-                const threatCount = Object.values(bot.entities)
-                    .filter(e => HOSTILE_MOBS.has(e.name) &&
-                                 e.position?.distanceTo(bot.entity.position) < 8).length;
-                if (threatCount > 1) {
-                    const threat = getNearestHostile(8);
-                    if (threat) {
-                        const pos  = bot.entity.position;
-                        const tpos = threat.position;
-                        bot.pathfinder.setGoal(new goals.GoalXZ(
-                            Math.round(pos.x + (pos.x - tpos.x) * 3),
-                            Math.round(pos.z + (pos.z - tpos.z) * 3)
-                        ));
-                    }
-                    return;
-                }
-            }
-
-            if (closeMelee) {
+            if (meleeThreat) {
                 const weapon = bot.inventory.items()
                     .filter(i => i.name.includes("sword") || i.name.includes("axe"))
                     .sort((a, b) => weaponScore(b) - weaponScore(a))[0];
                 if (weapon) bot.equip(weapon, "hand").catch(() => {});
 
-                if (closeMelee.position.distanceTo(bot.entity.position) <= 2.5) {
-                    bot.attack(closeMelee);
+                if (meleeThreat.position.distanceTo(bot.entity.position) <= 2.5) {
+                    bot.attack(meleeThreat);
                 } else {
-                    const { x, y, z } = closeMelee.position;
+                    const { x, y, z } = meleeThreat.position;
                     bot.pathfinder.setGoal(new goals.GoalNear(x, y, z, 2), true);
-                }
-            } else if (closeRanged) {
-                if (closeRanged.position.distanceTo(bot.entity.position) <= 3) {
-                    bot.attack(closeRanged);
-                } else if (bot.health > 10) {
-                    const { x, y, z } = closeRanged.position;
-                    bot.pathfinder.setGoal(new goals.GoalNear(x, y, z, 2), true);
-                } else {
-                    const pos  = bot.entity.position;
-                    const tpos = closeRanged.position;
-                    bot.pathfinder.setGoal(new goals.GoalXZ(
-                        Math.round(pos.x + (pos.x - tpos.x) * 3),
-                        Math.round(pos.z + (pos.z - tpos.z) * 3)
-                    ));
                 }
             }
-        } catch(e) {}
+
+            const rangedThreat = Object.values(bot.entities)
+                .filter(e => RANGED_MOBS.has(e.name) &&
+                             e.position?.distanceTo(bot.entity.position) < 16)
+                .sort((a, b) => a.position.distanceTo(bot.entity.position) -
+                                b.position.distanceTo(bot.entity.position))[0];
+
+            if (rangedThreat && !meleeThreat) {
+                if (bot.health > 6) {
+                    const dist = rangedThreat.position.distanceTo(bot.entity.position);
+                    if (dist <= 3) {
+                        bot.attack(rangedThreat);
+                    } else {
+                        const { x, y, z } = rangedThreat.position;
+                        bot.pathfinder.setGoal(new goals.GoalNear(x, y, z, 2), true);
+                    }
+                } else {
+                    const pos  = bot.entity.position;
+                    const tpos = rangedThreat.position;
+                    bot.pathfinder.setGoal(new goals.GoalXZ(
+                        pos.x + (pos.x - tpos.x) * 2,
+                        pos.z + (pos.z - tpos.z) * 2
+                    ));
+                    lastEvent = `critical_health_flee: hp ${Math.round(bot.health)}`;
+                    writeState();
+                }
+            }
+
+            // ── Behavior mode execution ──
+            switch (bm.mode) {
+
+                case "idle":
+                    break;
+
+                case "follow":
+                case "escort": {
+                    const targetName = bm.target;
+                    const targetPlayer = targetName
+                        ? Object.values(bot.players).find(p => p.username?.toLowerCase() === targetName.toLowerCase() && p.entity)
+                        : getNearestPlayer();
+
+                    if (targetPlayer?.entity) {
+                        const dist = targetPlayer.entity.position.distanceTo(bot.entity.position);
+                        if (dist > 3) {
+                            bot.pathfinder.setGoal(new goals.GoalFollow(targetPlayer.entity, 2), true);
+                        }
+                        if (bm.mode === "escort") {
+                            const nearPlayerMob = Object.values(bot.entities)
+                                .filter(e => HOSTILE_MOBS.has(e.name) &&
+                                             e.position?.distanceTo(targetPlayer.entity.position) < 6)
+                                .sort((a, b) => a.position.distanceTo(targetPlayer.entity.position) -
+                                                b.position.distanceTo(targetPlayer.entity.position))[0];
+                            if (nearPlayerMob) {
+                                const w = bot.inventory.items()
+                                    .filter(i => i.name.includes("sword") || i.name.includes("axe"))
+                                    .sort((a, b) => weaponScore(b) - weaponScore(a))[0];
+                                if (w) bot.equip(w, "hand").catch(() => {});
+                                bot.attack(nearPlayerMob);
+                            }
+                        }
+                    }
+                    break;
+                }
+
+                case "guard": {
+                    const threat = Object.values(bot.entities)
+                        .filter(e => HOSTILE_MOBS.has(e.name) &&
+                                     e.position?.distanceTo(bot.entity.position) < 12)
+                        .sort((a, b) => a.position.distanceTo(bot.entity.position) -
+                                        b.position.distanceTo(bot.entity.position))[0];
+                    if (threat) {
+                        const w = bot.inventory.items()
+                            .filter(i => i.name.includes("sword") || i.name.includes("axe"))
+                            .sort((a, b) => weaponScore(b) - weaponScore(a))[0];
+                        if (w) bot.equip(w, "hand").catch(() => {});
+                        const dist = threat.position.distanceTo(bot.entity.position);
+                        if (dist <= 2.5) {
+                            bot.attack(threat);
+                        } else {
+                            const { x, y, z } = threat.position;
+                            bot.pathfinder.setGoal(new goals.GoalNear(x, y, z, 2), true);
+                        }
+                    } else if (bm.position) {
+                        const dist = bot.entity.position.distanceTo(bm.position);
+                        if (dist > 3) {
+                            bot.pathfinder.setGoal(new goals.GoalNear(
+                                bm.position.x, bm.position.y, bm.position.z, 2
+                            ));
+                        }
+                    }
+                    break;
+                }
+
+                case "explore":
+                    // Wander handled by LLM goto commands
+                    break;
+            }
+
+        } catch(e) {
+            console.error("[behavior] Error:", e.message);
+        }
     }, 500);
 }
 
 // -------------------------
-// Hunger loop — 10s
+// Hunger loop — 3s with isEating guard
 // -------------------------
 function startHungerLoop() {
-    setInterval(() => {
+    setInterval(async () => {
         try {
-            if (bot.food > 16) return;
-            const food = bot.inventory.items()
-                .find(i => bot.registry.itemsByName[i.name]?.food);
-            if (food) {
-                bot.equip(food, "hand")
-                    .then(() => bot.consume())
-                    .catch(() => {});
-            }
-        } catch(e) {}
-    }, 10000);
+            if (isEating)        return;
+            if (bot.food >= 18)  return;
+            if (bot.health <= 0) return;
+
+            const foodItems = bot.inventory.items()
+                .filter(i => bot.registry.itemsByName[i.name]?.food || KNOWN_FOOD_NAMES.has(i.name))
+                .sort((a, b) => foodScore(b.name) - foodScore(a.name));
+
+            if (foodItems.length === 0) return;
+
+            isEating = true;
+            await bot.equip(foodItems[0], "hand");
+            await bot.consume();
+            await new Promise(r => setTimeout(r, 1500));
+        } catch(e) {
+            // consume() can fail if interrupted — that's fine
+        } finally {
+            isEating = false;
+        }
+    }, 3000);
 }
 
 // -------------------------
@@ -502,7 +679,7 @@ function startSafetyLoop() {
     safetyInterval = setInterval(() => {
         try {
             const hasFood = bot.inventory.items()
-                .some(i => bot.registry.itemsByName[i.name]?.food);
+                .some(i => bot.registry.itemsByName[i.name]?.food || KNOWN_FOOD_NAMES.has(i.name));
             if (!hasFood && bot.food < 12 && !reported.noFood) {
                 reported.noFood = true;
                 lastEvent = "needs: hungry and out of food";
@@ -531,6 +708,26 @@ function startSafetyLoop() {
                     if (stuckCounter >= 6 && !reported.stuck) {
                         reported.stuck = true;
                         lastEvent = "needs: stuck, cannot move";
+                        console.log("[stuck] Hard behavior reset — re-applying current mode");
+                        bot.pathfinder.stop();
+                        bot.clearControlStates();
+                        bot.setControlState("jump", true);
+                        setTimeout(() => {
+                            try {
+                                bot.setControlState("jump", false);
+                                const bm = currentBehavior;
+                                if (bm.mode === "follow" || bm.mode === "escort") {
+                                    const tp = bm.target
+                                        ? Object.values(bot.players).find(p => p.username?.toLowerCase() === bm.target?.toLowerCase() && p.entity)
+                                        : getNearestPlayer();
+                                    if (tp?.entity) {
+                                        bot.pathfinder.setGoal(new goals.GoalFollow(tp.entity, 2), true);
+                                    }
+                                }
+                                stuckCounter   = 0;
+                                reported.stuck = false;
+                            } catch(e) {}
+                        }, 600);
                         writeState();
                     }
                 } else {
@@ -616,13 +813,49 @@ function startDiscoveryLoop() {
 }
 
 // -------------------------
+// Default spawn behavior — auto-follow nearest player after 3s
+// -------------------------
+function defaultSpawnBehavior() {
+    setTimeout(() => {
+        try {
+            const target = getNearestPlayer();
+            if (target?.entity) {
+                console.log(`[spawn] Auto-escorting ${target.username}`);
+                setBehavior("escort", { target: target.username });
+                writeState();
+            } else {
+                console.log("[spawn] No players visible — staying idle");
+            }
+        } catch(e) {}
+    }, 3000);
+    setTimeout(() => autoEquipBestArmor(), 5000);
+}
+
+// -------------------------
 // Bot events
 // -------------------------
 bot.on("spawn", () => {
     console.log("✅ Hayeong spawned in Minecraft!");
     const movements = new Movements(bot);
-    movements.canDig = false;
+    movements.canDig         = false;
+    movements.canJump        = true;
+    movements.allowSprinting = true;
+    movements.allowParkour   = true;
+    movements.maxDropDown    = 4;
+    movements.canOpenDoors   = true;
 
+    // Leaf blocks — mark as cant-break so canDig doesn't apply; pathfinder routes through them
+    const leafBlocks = [
+        'oak_leaves','spruce_leaves','birch_leaves','jungle_leaves',
+        'acacia_leaves','dark_oak_leaves','mangrove_leaves','cherry_leaves',
+        'azalea_leaves','flowering_azalea_leaves',
+    ];
+    for (const name of leafBlocks) {
+        const b = bot.registry.blocksByName[name];
+        if (b) movements.blocksCantBreak.add(b.id);
+    }
+
+    // Doors/gates — protect but allow pathing through (canOpenDoors handles single doors)
     const dontBreak = [
         'oak_door','spruce_door','birch_door','jungle_door','acacia_door',
         'dark_oak_door','mangrove_door','cherry_door','bamboo_door','iron_door',
@@ -641,17 +874,24 @@ bot.on("spawn", () => {
 
     startCommandPolling();
     startSafetyLoop();
-    startCombatLoop();
+    startBehaviorLoop();
     startHungerLoop();
     startDiscoveryLoop();
     setInterval(writeState, 2000);
+    defaultSpawnBehavior();
 });
 
 bot.on("chat", (username, message) => {
     if (username === bot.username) return;
     console.log(`💬 [${username}]: ${message}`);
-    // Chat is logged to terminal only — does not update state file.
-    // Dashboard is the only communication channel with Hayeong.
+    // Route in-game player chat to last_event so reasoning loop can respond
+    lastEvent = `chat from ${username}: ${message}`;
+    writeState();
+});
+
+bot.on("playerCollect", (collector, _itemDrop) => {
+    if (collector.username !== bot.username) return;
+    setTimeout(() => autoEquipBestArmor(), 500);
 });
 
 bot.on("health", () => {

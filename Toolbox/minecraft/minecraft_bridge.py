@@ -40,6 +40,19 @@ def send_minecraft_command(command: str, params: dict = None) -> str:
 
 
 def run(description: str, params: dict) -> str:
+    # bot_update — read/write/restart the bot JS file
+    if params.get("action_type") in ("read", "write", "backup", "restart"):
+        try:
+            import importlib.util
+            _spec = importlib.util.spec_from_file_location(
+                "bot_update_tool", Path(__file__).parent / "bot_update_tool.py"
+            )
+            _mod = importlib.util.module_from_spec(_spec)
+            _spec.loader.exec_module(_mod)
+            return _mod.run(description, params)
+        except Exception as e:
+            return f"bot_update failed: {e}"
+
     # If a "command" key is present, send a command to the already-running bot
     if "command" in params:
         command = params["command"]

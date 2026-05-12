@@ -3,22 +3,23 @@
   "username": "Hayeong",
   "position": {
     "x": 17.5,
-    "y": 82,
+    "y": 77,
     "z": 4.5
   },
   "health": 20,
-  "food": 20,
+  "food": 18,
   "dimension": "overworld",
   "nearby_players": [
     "hiplizard36"
   ],
-  "nearby_mobs": [
-    {
-      "name": "enderman",
-      "dist": 19
-    }
-  ],
-  "current_action": "idle",
-  "last_event": "follow failed: James not visible",
-  "updated_at": "2026-05-11T04:04:54.744Z"
+  "nearby_mobs": [],
+  "behavior": {
+    "mode": "escort",
+    "target": "hiplizard36",
+    "position": null,
+    "since": 1778553743973
+  },
+  "current_action": "goto",
+  "last_event": "needs: stuck, cannot move",
+  "updated_at": "2026-05-12T03:01:46.702Z"
 }

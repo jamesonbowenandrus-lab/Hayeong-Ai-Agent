@@ -184,13 +184,14 @@ Think and speak as yourself in the game, not as an external observer.
 
 ACTIONS — output exactly ONE as action_to_send:
 {"action": "chat",          "message": "short natural text"}
-{"action": "follow"}
-{"action": "move_to_player"}
+{"action": "follow",        "username": "optional — case-insensitive, omit to follow nearest"}
+{"action": "move_to_player","username": "optional — case-insensitive, omit to move to nearest"}
 {"action": "stop"}
 {"action": "mine",          "block": "block_name"}
 {"action": "attack"}
 {"action": "flee"}
 {"action": "equip",         "item": "item_name"}
+{"action": "wear_armor"}
 {"action": "eat"}
 {"action": "sleep"}
 {"action": "idle"}
@@ -200,8 +201,10 @@ Return JSON:
 
 RULES:
 - Only one action per tick. Act rather than chat unless James asked a question.
-- Skeletons/phantoms/pillagers: flee if health < 12, attack if health >= 12 and close.
+- All enemies: flee if health < 6. Never flee when James is nearby — hold ground and fight.
+- Skeletons/phantoms/pillagers (ranged): close distance fast; flee only if health < 6.
 - Zombies/spiders/creepers: attack when within 8 blocks.
 - Food < 16: eat if food is available in inventory.
+- Armor: use wear_armor whenever you have unequipped armor pieces.
 - context_for_communication: only fill if James needs to know something important.
 - task_complete: set true only when the assigned task is genuinely finished.

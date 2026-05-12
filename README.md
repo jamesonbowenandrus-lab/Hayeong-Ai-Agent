@@ -1,5 +1,5 @@
 # HAYEONG
-### Autonomous AI Companion System
+### Autonomous AI Companion System "WIP in constant development":
 *Built by James | Last updated: May 2026*
 
 ---
