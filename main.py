@@ -21,7 +21,7 @@ import re
 import subprocess
 import uuid
 from pathlib import Path
-from datetime import datetime, timezone
+from datetime import datetime
 
 # Accept --brain flag from watchdog (text mode, no TTS)
 _BRAIN_MODE = "--brain" in sys.argv
@@ -35,7 +35,6 @@ SESSION_ID = ""
 from brain.config import (
     PRESENCE_URL, PRESENCE_MODEL,
     CONV_LOG_DIR,
-    MINECRAFT_STATE_PATH,
 )
 
 # ── Imports ──────────────────────────────────────────────────────────
@@ -56,6 +55,12 @@ def startup():
         print("   Reasoning loop started.")
     except Exception as e:
         print(f"   Reasoning loop failed to start: {e}")
+    try:
+        from toolbox.plugin_registry import load_plugins
+        load_plugins()
+        print("   Plugins loaded.")
+    except Exception as e:
+        print(f"   Plugin loading failed: {e}")
     print("✅ Hayeong is ready.")
 
 
@@ -149,43 +154,7 @@ def _extract_decision(text: str) -> dict:
     return result
 
 
-# ── Minecraft State Reader ────────────────────────────────────────────
-def read_minecraft_state() -> dict:
-    """Read minecraft_state.json. Returns empty dict if missing, disconnected, or stale (>10s)."""
-    try:
-        p = Path(MINECRAFT_STATE_PATH)
-        if not p.exists():
-            return {}
-        state = json.loads(p.read_text(encoding="utf-8"))
-        if not state.get("connected"):
-            return state  # return disconnected state so presence knows
-        updated_str = state.get("updated_at", "")
-        if not updated_str:
-            return {}
-        updated = datetime.fromisoformat(updated_str).replace(tzinfo=timezone.utc)
-        if (datetime.now(timezone.utc) - updated).total_seconds() > 10:
-            return {}
-        return state
-    except Exception:
-        return {}
-
-
 # ── Presence Context Builder ──────────────────────────────────────────
-_MINECRAFT_KEYWORDS = {
-    "minecraft", "bot", "follow", "mine", "craft", "server",
-    "jump", "attack", "mob", "creeper", "zombie", "inventory",
-    "goto", "flee", "equip", "eat", "idle", "stop", "look",
-}
-
-
-def _minecraft_context_relevant(situation: dict, last_task: dict) -> bool:
-    task_tool = (last_task.get("tool") or "").lower()
-    if task_tool == "minecraft":
-        return True
-    msg = (situation.get("what_james_said") or "").lower()
-    return any(kw in msg for kw in _MINECRAFT_KEYWORDS)
-
-
 def build_presence_context(state: dict) -> str:
     situation = state.get("situation", {})
     last_task = state.get("last_task", {})
@@ -202,24 +171,13 @@ def build_presence_context(state: dict) -> str:
         f"- Error: {last_task.get('error') or 'none'}",
     ]
 
-    if _minecraft_context_relevant(situation, last_task):
-        mc = read_minecraft_state()
-        if mc:
-            if mc.get("connected"):
-                lines += [
-                    "",
-                    "MINECRAFT BOT STATE (live):",
-                    f"- Position: {mc.get('position')}",
-                    f"- Health: {mc.get('health')}/20  Food: {mc.get('food')}/20",
-                    f"- Nearby players: {mc.get('nearby_players', [])}",
-                    f"- Nearby mobs: {mc.get('nearby_mobs', [])}",
-                    f"- Last event: {mc.get('last_event')}",
-                ]
-            else:
-                lines += [
-                    "",
-                    f"MINECRAFT BOT STATE: not connected — {mc.get('last_event', 'unknown')}",
-                ]
+    try:
+        from toolbox.plugin_registry import get_all_context_injections
+        injections = get_all_context_injections(state)
+        if injections:
+            lines.extend(injections)
+    except Exception:
+        pass
 
     return "\n".join(lines) + "\n"
 
@@ -528,65 +486,15 @@ def _execute_tool(task_type: str, description: str, params: dict) -> tuple:
         return "", str(e)
 
 
-# ── Proactive Minecraft Behavior ─────────────────────────────────────
-_MINECRAFT_PROACTIVE_INTERVAL = 10  # seconds
-_last_proactive_mc_action     = 0.0
-
-
-def run_proactive_minecraft_behavior():
-    global _last_proactive_mc_action
-    now = time.time()
-    if now - _last_proactive_mc_action < _MINECRAFT_PROACTIVE_INTERVAL:
-        return
-    _last_proactive_mc_action = now
-
-    mc = read_minecraft_state()
-    if not mc.get("connected"):
-        return
-
-    current_action = mc.get("current_action", "idle")
-    health         = mc.get("health", 20)
-    food           = mc.get("food",   20)
-    nearby_players = mc.get("nearby_players", [])
-    nearby_mobs    = mc.get("nearby_mobs",    [])
-
-    from toolbox.minecraft.minecraft_bridge import send_minecraft_command
-
-    if food < 14 and current_action == "idle":
-        send_minecraft_command("eat")
-        return
-
-    if health < 6 and nearby_mobs and current_action != "flee":
-        send_minecraft_command("flee")
-        return
-
-    if "hiplizard36" not in nearby_players and current_action == "idle":
-        send_minecraft_command("follow", {"username": "hiplizard36"})
-        return
-
-    if current_action == "idle" and "hiplizard36" in nearby_players:
-        for block in ["diamond_ore", "deepslate_diamond_ore", "iron_ore",
-                      "deepslate_iron_ore", "coal_ore", "oak_log", "spruce_log"]:
-            return
-
-
-def minecraft_proactive_loop():
+# ── Plugin Loop ───────────────────────────────────────────────────────
+def plugin_loop():
+    """Generic plugin tick loop. Calls all registered plugins every 2 seconds."""
     while True:
         try:
-            # Dispatch any pending action written by the reasoning loop
-            try:
-                from brain.state_manager import pop_minecraft_pending_action
-                from toolbox.minecraft.minecraft_bridge import send_minecraft_command
-                action = pop_minecraft_pending_action()
-                if action and action.get("action") not in (None, "idle"):
-                    cmd    = action.pop("action")
-                    send_minecraft_command(cmd, action)
-            except Exception:
-                pass
-
-            run_proactive_minecraft_behavior()
+            from toolbox.plugin_registry import tick_all
+            tick_all()
         except Exception as e:
-            print(f"[mc_proactive] Error: {e}")
+            print(f"[plugins] Loop error: {e}")
         time.sleep(2)
 
 
@@ -614,9 +522,9 @@ def main():
     startup()
 
     threads = [
-        threading.Thread(target=presence_loop,           daemon=True, name="presence"),
-        threading.Thread(target=task_loop,               daemon=True, name="task"),
-        threading.Thread(target=minecraft_proactive_loop, daemon=True, name="mc_proactive"),
+        threading.Thread(target=presence_loop, daemon=True, name="presence"),
+        threading.Thread(target=task_loop,     daemon=True, name="task"),
+        threading.Thread(target=plugin_loop,   daemon=True, name="plugins"),
     ]
 
     for t in threads:
