@@ -26,6 +26,7 @@ const bot = mineflayer.createBot({
     username: MC_USERNAME, version: MC_VERSION,
 });
 bot.loadPlugin(pathfinder);
+bot.setMaxListeners(20);
 
 // -------------------------
 // Tracked state
@@ -197,7 +198,7 @@ function autoEquipBestArmor() {
 // Command executor
 // Accepts: { command: "...", params: {...}, issued_at: "..." }
 // -------------------------
-function executeCommand(cmd) {
+async function executeCommand(cmd) {
     const type = cmd.command;
     const p    = cmd.params || {};
     console.log(`[cmd] ${type}`, Object.keys(p).length ? JSON.stringify(p).slice(0, 80) : "");
@@ -301,7 +302,7 @@ function executeCommand(cmd) {
                 let blockId      = bot.registry.blocksByName[blockName]?.id;
                 let resolvedName = blockName;
 
-                // If block unknown or none nearby, try log type alternatives
+                // Fallback to any available log type when given a generic log/wood name
                 if (!blockId || !bot.findBlock({ matching: blockId, maxDistance: 48 })) {
                     if (blockName.includes('log') || blockName.includes('wood')) {
                         const logTypes = ['oak_log','spruce_log','birch_log','jungle_log',
@@ -309,8 +310,9 @@ function executeCommand(cmd) {
                         for (const logType of logTypes) {
                             const altId = bot.registry.blocksByName[logType]?.id;
                             if (!altId) continue;
-                            const altBlock = bot.findBlock({ matching: altId, maxDistance: 48 });
-                            if (altBlock) { blockId = altId; resolvedName = logType; break; }
+                            if (bot.findBlock({ matching: altId, maxDistance: 48 })) {
+                                blockId = altId; resolvedName = logType; break;
+                            }
                         }
                     }
                 }
@@ -319,29 +321,35 @@ function executeCommand(cmd) {
                 const b = bot.findBlock({ matching: blockId, maxDistance: 48 });
                 if (!b) { currentAction = "idle"; break; }
 
+                // Equip best tool for this block type
+                const toolHint = blockName.includes('log') || blockName.includes('wood') ? 'axe'
+                    : blockName.includes('ore') || blockName.includes('stone') || blockName.includes('rock') ? 'pickaxe'
+                    : blockName.includes('dirt') || blockName.includes('sand') || blockName.includes('gravel') ? 'shovel'
+                    : null;
+                if (toolHint) {
+                    const tool = bot.inventory.items()
+                        .filter(i => i.name.includes(toolHint))
+                        .sort((a, b) => weaponScore(b) - weaponScore(a))[0];
+                    if (tool) await bot.equip(tool, "hand").catch(() => {});
+                }
+
                 lastEvent = `mining ${resolvedName}`;
-                bot.pathfinder.setGoal(new goals.GoalNear(b.position.x, b.position.y, b.position.z, 3));
-                let attempts = 0;
-                const digInterval = setInterval(async () => {
-                    attempts++;
-                    if (attempts > 20) { clearInterval(digInterval); currentAction = "idle"; return; }
-                    if (bot.entity.position.distanceTo(b.position) <= 4) {
-                        clearInterval(digInterval);
-                        bot.pathfinder.stop();
-                        try {
-                            const fresh = bot.findBlock({ matching: blockId, maxDistance: 6 });
-                            if (fresh) {
-                                await bot.dig(fresh);
-                                lastEvent     = `mined ${blockName}`;
-                                currentAction = "idle";
-                                writeState();
-                            }
-                        } catch(e) {
-                            console.error("Dig error:", e.message);
-                            currentAction = "idle";
-                        }
+                // Move close enough to interact, then dig
+                await bot.pathfinder.goto(new goals.GoalNear(b.position.x, b.position.y, b.position.z, 3));
+                try {
+                    const fresh = bot.findBlock({ matching: blockId, maxDistance: 6 });
+                    if (fresh) {
+                        await bot.dig(fresh);
+                        lastEvent     = `mined ${resolvedName}`;
+                        currentAction = "idle";
+                        writeState();
+                    } else {
+                        currentAction = "idle";
                     }
-                }, 500);
+                } catch(e) {
+                    console.error("Dig error:", e.message);
+                    currentAction = "idle";
+                }
                 break;
             }
 
@@ -470,6 +478,26 @@ function executeCommand(cmd) {
                 break;
             }
 
+            case "pickup_nearby_items": {
+                const items = Object.values(bot.entities)
+                    .filter(e => e.name === "item" && e.position?.distanceTo(bot.entity.position) < 10)
+                    .sort((a, b) =>
+                        a.position.distanceTo(bot.entity.position) -
+                        b.position.distanceTo(bot.entity.position)
+                    );
+                if (items.length === 0) {
+                    console.log("[pickup] No items nearby");
+                    currentAction = "idle";
+                } else {
+                    const closest = items[0];
+                    bot.pathfinder.setGoal(new goals.GoalNear(
+                        closest.position.x, closest.position.y, closest.position.z, 1
+                    ));
+                    lastEvent = `picking up item`;
+                }
+                break;
+            }
+
             case "idle":
                 currentAction = "idle";
                 lastEvent     = "idle";
@@ -497,7 +525,7 @@ function startCommandPolling() {
             const raw = fs.readFileSync(COMMAND_FILE, "utf8");
             const cmd = JSON.parse(raw);
             fs.unlinkSync(COMMAND_FILE);
-            executeCommand(cmd);
+            executeCommand(cmd).catch(e => console.error("[cmd] Unhandled error:", e.message));
         } catch(e) {
             // Silently ignore malformed or already-deleted command files
         }
@@ -836,6 +864,7 @@ function defaultSpawnBehavior() {
 // -------------------------
 bot.on("spawn", () => {
     console.log("✅ Hayeong spawned in Minecraft!");
+    require("events").defaultMaxListeners = 20;
     const movements = new Movements(bot);
     movements.canDig         = false;
     movements.canJump        = true;
@@ -892,6 +921,27 @@ bot.on("chat", (username, message) => {
 bot.on("playerCollect", (collector, _itemDrop) => {
     if (collector.username !== bot.username) return;
     setTimeout(() => autoEquipBestArmor(), 500);
+});
+
+bot.on("entitySpawn", (entity) => {
+    if (entity.name !== "item") return;
+    if (!bot.entity) return;
+    const dist = entity.position?.distanceTo(bot.entity.position);
+    if (!dist || dist > 6) return;
+
+    setTimeout(() => {
+        try {
+            if (!entity.isValid) return;
+            const itemDist = entity.position?.distanceTo(bot.entity?.position);
+            if (!itemDist || itemDist > 8) return;
+            console.log(`[pickup] Item nearby at dist ${itemDist.toFixed(1)}`);
+            bot.pathfinder.setGoal(new goals.GoalNear(
+                entity.position.x, entity.position.y, entity.position.z, 1
+            ));
+            lastEvent = `item_nearby`;
+            writeState();
+        } catch(e) {}
+    }, 500);
 });
 
 bot.on("health", () => {
