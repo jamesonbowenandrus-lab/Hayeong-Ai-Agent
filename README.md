@@ -54,20 +54,24 @@ for gaming or other use.
 
 ## What main.py Does
 
-main.py is the core loop. It runs three threads continuously:
+main.py is the core loop. It runs four loops continuously:
 
-- **Reasoning loop** — calls the reasoning LLM (Qwen 14b, port 11435)
-  on a heartbeat. Reads shared state, thinks about the situation, writes
-  conclusions and task assignments.
+- **Presence loop** — calls the reasoning LLM (Qwen 2.5 32b, port 11435)
+  on a heartbeat. Reads shared state, thinks about the situation, decides
+  what to say or do, and writes results back to state.
 
-- **Communication loop** — calls the communication LLM (llama3.2, port 11434)
-  when James sends a message. Reads what reasoning concluded and responds naturally.
+- **Task loop** — watches for task assignments written by the presence loop.
+  Calls the appropriate tool via the registry and writes the result back to state.
 
-- **Task loop** — watches for task assignments written by reasoning.
-  Calls the appropriate tool directly and writes the result back to shared state.
+- **Plugin loop** — ticks all registered plugins every ~2 seconds.
+  Plugins inject context (e.g. Minecraft bot state) and fire proactive behavior.
 
-The shared state (`Brain\state\core.json`) is how these three loops
-coordinate without blocking each other.
+- **Input loop** — handles messages from James. Feeds input into the
+  presence loop as situational context.
+
+The shared state (`brain\state\core.json`) is how these loops
+coordinate without blocking each other. A single LLM (Qwen 2.5 32b) handles
+both presence and reasoning — no separate communication model.
 
 ---
 
@@ -96,7 +100,9 @@ hayeong\
 │   ├── vision_tools\    ← Vision model, screen observer, visual awareness
 │   ├── voice\           ← TTS, STT, voice I/O
 │   ├── email\           ← Email reading and sending
-│   └── web\             ← Web search and text I/O
+│   ├── web\             ← Web search and text I/O
+│   ├── dev\             ← Self-modification and code authoring tool
+│   └── script\          ← Run arbitrary Python scripts
 │
 ├── Dashboard\           ← The web dashboard for monitoring Hayeong.
 │                          Run launch_dashboard.bat inside this folder.
@@ -140,8 +146,8 @@ Two Ollama instances must be running before starting Hayeong:
 
 | Instance | Port | Model | Role |
 |----------|------|-------|------|
-| Communication | 11434 | llama3.2:latest | Talks to James |
-| Reasoning | 11435 | qwen2.5:14b | Thinks and plans |
+| Legacy / Discord | 11434 | llama3.2:latest | Discord bridge, legacy use |
+| Presence & Reasoning | 11435 | qwen2.5:32b-instruct-q4_K_M | All thinking, planning, and responses |
 
 Startup scripts for both are in `Brain\`.
 

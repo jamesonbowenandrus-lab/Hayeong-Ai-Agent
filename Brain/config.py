@@ -38,6 +38,13 @@ BLENDER_PATH    = "H:/blender/blender.exe"
 BLENDER_OUTPUT  = os.path.join(OUTPUTS_DIR, "blender")
 BLENDER_SCRIPTS = os.path.join(TOOLBOX_DIR, "blender", "scripts")
 
+# ── ComfyUI ────────────────────────────────────────────────────────────────
+COMFYUI_URL           = "http://127.0.0.1:8188"
+COMFYUI_TIMEOUT       = 120
+COMFYUI_POLL_INTERVAL = 2
+COMFYUI_OUTPUT_DIR    = os.path.join(OUTPUTS_DIR, "comfyui")
+COMFYUI_WORKFLOW_DIR  = os.path.join(TOOLBOX_DIR, "comfyui", "workflows")
+
 # ── API keys ───────────────────────────────────────────────────────────────
 DISCORD_TOKEN   = ""
 EMAIL_ADDRESS   = ""

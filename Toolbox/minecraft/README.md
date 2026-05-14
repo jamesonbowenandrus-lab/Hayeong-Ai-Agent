@@ -10,6 +10,20 @@ Two components work together:
 - **Node.js bot** (`hayeong_bot.js`) — connects to the Minecraft server via mineflayer,
   executes movement, interaction, and observation in-game
 
+## Files
+
+- `minecraft_bridge.py` — main tool, `run()` function, registered in `registry.json`;
+  also exposes `send_minecraft_command()` for plugin use
+- `hayeong_bot.js` — Node.js bot; mineflayer-based; writes live state to
+  `minecraft_state.json`
+- `plugin.py` — presence plugin; injects bot state into context; runs proactive
+  behavior (auto-eat, flee, follow); discovered by `toolbox/plugin_registry.py`
+- `bot_update_tool.py` — lets Hayeong read, modify, and restart her own bot code;
+  called via `minecraft_bridge.run()` with `action_type=read/write/backup/restart`
+- `minecraft_context.md` — Hayeong's in-Minecraft identity and behavioral guide;
+  injected into the presence prompt when the bot is connected
+- `minecraft_prompt.txt` — additional domain prompt context for the reasoning LLM
+
 ## Server Requirements
 
 ### online-mode must be false
@@ -27,7 +41,7 @@ Restart the server after changing this.
 
 ### Server version must match
 
-The bot connects with the version in `Brain/config.py`:
+The bot connects with the version in `brain/config.py`:
 ```python
 MINECRAFT_VERSION = "1.21.4"
 ```
@@ -43,7 +57,7 @@ unreachable rather than launching the bot into a guaranteed error.
 
 ## Configuration
 
-All connection settings live in `Brain/config.py`:
+All connection settings live in `brain/config.py`:
 
 ```python
 MINECRAFT_HOST    = "127.0.0.1"   # Use IPv4 — "localhost" resolves to IPv6 on some systems
@@ -55,31 +69,58 @@ BOT_JS_PATH       = ...           # auto-resolved
 To connect to a different server, change `MINECRAFT_HOST`. Hayeong's presence
 loop can also pass a custom host dynamically via task params.
 
-## Instance Profiles
+## Bot Commands
 
-Hayeong can connect to different Minecraft servers using instance profiles.
-Each profile defines:
-- Server address and port
-- Vanilla or modded (and which mod pack)
-- Mineflayer plugins to load for that instance
-- Reference to the knowledge file for that instance
+Commands are written to `minecraft_command.json` and picked up by the bot.
+The bridge dispatches commands directly; the plugin also fires them proactively.
 
-Profiles live in: `minecraft/profiles/`
-Active profile is set in: `Brain/config.py`
+| Command | Params | What it does |
+|---------|--------|--------------|
+| `follow` | `{ "username": "hiplizard36" }` | Walk with James |
+| `stop` | `{}` | Cancel current movement |
+| `goto` | `{ "x": 0, "y": 64, "z": 0 }` | Go to coordinates |
+| `mine` | `{ "block": "oak_log" }` | Find and mine nearest block (within 48 blocks) |
+| `attack` | `{}` | Fight nearest hostile mob |
+| `flee` | `{}` | Run from nearest threat |
+| `equip` | `{ "item": "sword" }` | Hold an item |
+| `eat` | `{}` | Eat food from inventory |
+| `jump` | `{}` | Jump once |
+| `look_at_player` | `{}` | Face nearest player |
+| `idle` | `{}` | Cancel current action |
 
-## Mod Knowledge
+## Bot Behavior States
 
-When connecting to a modded server, Hayeong loads the mod-specific
-knowledge file from `Memory/knowledge/minecraft/[profile_name].json`
+The bot is always in one of these states (defined in `minecraft_context.md`):
 
-This file contains:
-- Items she has encountered and what she inferred about them
-- Creatures she has encountered and whether they are hostile
-- Environmental mechanics she has learned (temperature, status effects, etc.)
-- Things James has told her directly about the mod
+1. **Following & Nearby** — default state; stays within range of James (hiplizard36)
+2. **Mining** — most common active state; seeks nearby ores and wood
+3. **Managing Inventory** — deposits excess items, keeps tools/food/armor
+4. **Staying Alive** — eats when food < 14, flees when health < 6 with mobs nearby
+5. **Water Safety** — actively swims to avoid drowning
 
-This knowledge is hers — built through experience and inference.
-It is not a pre-loaded database.
+**Proactive triggers (from `plugin.py`):**
+- Food < 14 and idle → auto-eat
+- Health < 6 and mobs nearby → flee
+- James (hiplizard36) not in nearby_players and idle → follow
+
+## Bot Self-Modification
+
+`bot_update_tool.py` lets Hayeong read and modify her own bot code:
+
+```
+action: minecraft
+params: action_type=read, section=behavior
+
+action: minecraft
+params: action_type=write, content=[full new bot.js content]
+
+action: minecraft
+params: action_type=restart
+```
+
+**Safety check on write:** content must contain `mineflayer`, `pathfinder`,
+`executeCommand`, `writeState`, and `startBehaviorLoop` — write is refused if
+any are missing. A timestamped backup is created before every write.
 
 ## What To Know
 

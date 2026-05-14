@@ -5,5 +5,6 @@
   "blender":   { "module": "toolbox.blender.blender_tool",       "function": "run" },
   "script":    { "module": "toolbox.script.script_tool",         "function": "run" },
   "music":     { "module": "toolbox.music.music_tool",           "function": "run" },
-  "dev":       { "module": "toolbox.dev.hayeong_dev_tool",      "function": "run" }
+  "dev":       { "module": "toolbox.dev.hayeong_dev_tool",      "function": "run" },
+  "comfyui":   { "module": "toolbox.comfyui.comfyui_tool",      "function": "run" }
 }

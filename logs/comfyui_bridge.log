@@ -48,3 +48,4 @@
 [2026-04-18 16:30:21] Analyzing image with moondream:latest (fast mode): /nonexistent/path.png
 [2026-04-18 16:30:21] Vision analysis error (moondream:latest): [Errno 2] No such file or directory: '/nonexistent/path.png'
 [2026-04-18 16:32:33] ComfyUI bridge initialized — ComfyUI is NOT running
+[2026-05-14 16:08:16] Generation skipped — ComfyUI is not running | Prompt: blue sky

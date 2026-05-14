@@ -310,6 +310,12 @@ def presence_loop():
 
             if for_james:
                 print(f"\nHayeong: {for_james}")
+                if not _BRAIN_MODE:
+                    try:
+                        from toolbox.voice.voice_output import speak_streamed
+                        speak_streamed(for_james, emotion=emotion)
+                    except Exception as e:
+                        print(f"[voice] TTS unavailable: {e}")
 
             now = datetime.now().isoformat()
             write_section("presence_output", {
