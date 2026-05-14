@@ -23,7 +23,10 @@ except ImportError:
 # ─────────────────────────────────────────────
 
 BASE_DIR = Path(__file__).parent
-IDENTITY_PATH         = BASE_DIR / "identity.json"
+# identity.json is preserved as historical record — not loaded at runtime
+_IDENTITY_CONSTITUTIONAL = BASE_DIR / "identity_constitutional.json"
+_IDENTITY_BEHAVIORAL     = BASE_DIR / "identity_behavioral.json"
+_IDENTITY_LIVING         = BASE_DIR / "identity_living.json"
 PERMISSIONS_PATH      = BASE_DIR / "permissions_config.json"
 CAPABILITY_PATH       = BASE_DIR / "capability_registry.json"
 STAGING_PATH          = BASE_DIR / "staging_requests.json"
@@ -501,8 +504,20 @@ class HayeongArchitecture:
         self.behavioral   = BehavioralEngine()
 
     def load_identity(self) -> dict:
-        """Read-only access to identity. Hayeong can read who she is."""
-        return load_json(IDENTITY_PATH)
+        """Read-only access to identity. Loads all three active layers, merged."""
+        def _try(path):
+            try:
+                return load_json(path)
+            except Exception:
+                return {}
+        living         = _try(_IDENTITY_LIVING)
+        behavioral     = _try(_IDENTITY_BEHAVIORAL)
+        constitutional = _try(_IDENTITY_CONSTITUTIONAL)
+        merged = {}
+        merged.update(living)
+        merged.update(behavioral)
+        merged.update(constitutional)
+        return merged
 
     def status(self) -> dict:
         """Quick status check — what's active, what's pending."""

@@ -1,0 +1,3 @@
+# Blender Domain Prompt
+# Hayeong's reasoning context when working in Blender.
+# This file is a stub — populate when Blender integration is active.

@@ -18,7 +18,7 @@ import threading
 import requests
 import json
 import re
-import subprocess
+import importlib
 import uuid
 from pathlib import Path
 from datetime import datetime
@@ -190,34 +190,6 @@ def build_presence_system(identity: dict, knowledge: dict) -> str:
     return f"""You are Hayeong. You think, decide, and speak directly to James.
 Traits: {traits}
 Relationship: {relationship}
-
-═══════════════════════════════════════════════════════════
-TOOLS AVAILABLE
-═══════════════════════════════════════════════════════════
-  minecraft  — Connect bot to server, or send it a command if already connected
-               To connect: params: host=127.0.0.1, port=25565, version=1.21.4
-               To command: params: command=follow, username=PlayerName
-                                   command=stop
-                                   command=goto, x=10, y=64, z=10
-                                   command=chat, message=Hello
-                                   command=mine, x=10, y=64, z=10
-                                   command=flee
-                                   command=idle
-
-  voice      — Activate voice input/output
-               Params: none required
-
-  email      — Read or send email
-               Params: action=read OR action=send, to=..., subject=..., body=...
-
-  blender    — Run a Blender 3D generation task
-               Params: script=..., output_name=..., output_format=obj
-
-  script     — Run a Python script file
-               Params: script=relative/path/to/script.py
-
-  none       — No action needed
-  respond    — Reply to James without running a tool
 
 ═══════════════════════════════════════════════════════════
 WHAT I KNOW
@@ -444,44 +416,37 @@ def task_loop():
             time.sleep(2)
 
 
+_REGISTRY: dict = {}
+
+
+def _load_registry() -> dict:
+    global _REGISTRY
+    if _REGISTRY:
+        return _REGISTRY
+    registry_path = BASE_DIR / "toolbox" / "registry.json"
+    try:
+        _REGISTRY = json.loads(registry_path.read_text(encoding="utf-8"))
+    except Exception as e:
+        print(f"[registry] Failed to load registry.json: {e}")
+        _REGISTRY = {}
+    return _REGISTRY
+
+
 def _execute_tool(task_type: str, description: str, params: dict) -> tuple:
     """
     Call the appropriate tool. Returns (result_str, error_str).
     Tools live in toolbox/. They cannot crash main.
     """
+    registry = _load_registry()
+    entry = registry.get(task_type)
+    if not entry:
+        return "", f"Unknown task type: {task_type}"
     try:
-        if task_type == "minecraft":
-            from toolbox.minecraft.minecraft_bridge import run
-            return run(description, params), ""
-
-        elif task_type == "voice":
-            try:
-                from toolbox.voice.voice_tool import run
-                return run(description, params), ""
-            except ModuleNotFoundError:
-                return "", "voice_tool not available yet"
-
-        elif task_type == "email":
-            from toolbox.email.email_bridge import run
-            return run(description, params), ""
-
-        elif task_type == "blender":
-            from toolbox.blender.blender_tool import run
-            return run(description, params), ""
-
-        elif task_type == "script":
-            script = params.get("script", "")
-            if not script:
-                return "", "No script specified"
-            proc = subprocess.run(
-                ["python", str(BASE_DIR / script)],
-                capture_output=True, text=True, timeout=60
-            )
-            return proc.stdout or "Script completed", proc.stderr or ""
-
-        else:
-            return "", f"Unknown task type: {task_type}"
-
+        mod = importlib.import_module(entry["module"])
+        fn  = getattr(mod, entry["function"])
+        return fn(description, params), ""
+    except ModuleNotFoundError as e:
+        return "", f"{task_type} tool not available: {e}"
     except Exception as e:
         return "", str(e)
 

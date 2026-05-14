@@ -31,7 +31,11 @@ from filelock import FileLock
 
 BASE_DIR       = Path(__file__).parent
 MEMORY_FILE    = BASE_DIR / "memory.json"
-IDENTITY_FILE  = BASE_DIR / "identity.json"
+# identity.json is preserved as historical record — not loaded at runtime
+_IDENTITY_FILE_HISTORICAL = BASE_DIR / "identity.json"
+_IDENTITY_CONSTITUTIONAL  = BASE_DIR / "identity_constitutional.json"
+_IDENTITY_BEHAVIORAL      = BASE_DIR / "identity_behavioral.json"
+_IDENTITY_LIVING          = BASE_DIR / "identity_living.json"
 MOOD_FILE      = BASE_DIR / "mood.json"
 
 # ── Three-model architecture ──
@@ -82,8 +86,24 @@ def load_memory():
 def save_memory(m):
     save_json(MEMORY_FILE, m)
 
-def load_identity():
-    return load_json(IDENTITY_FILE, {})
+def load_identity_layers() -> dict:
+    """
+    Load all three identity layers and merge them.
+    Constitutional (highest authority) is applied last so its keys win on conflict.
+    Living layer (lowest authority) is applied first.
+    """
+    living         = load_json(_IDENTITY_LIVING,         {})
+    behavioral     = load_json(_IDENTITY_BEHAVIORAL,     {})
+    constitutional = load_json(_IDENTITY_CONSTITUTIONAL, {})
+    merged = {}
+    merged.update(living)
+    merged.update(behavioral)
+    merged.update(constitutional)
+    return merged
+
+def load_identity() -> dict:
+    """Runtime identity — loads from the three active layers."""
+    return load_identity_layers()
 
 def load_mood():
     return load_json(MOOD_FILE, {"focus": 0, "playfulness": 0, "motivation": 0})
