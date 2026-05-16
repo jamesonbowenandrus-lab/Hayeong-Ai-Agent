@@ -3,16 +3,16 @@ reasoning_loop.py
 The Reasoning LLM heartbeat — runs on its own thread alongside the main brain.
 
 Responsibilities:
-  - Process priority flags from the communication LLM
+  - Process priority flags from the presence loop
   - Advance the active task (e.g. Minecraft planning, long-running research)
   - Consume pending results from capability scripts
   - Write conclusions and context back to shared state
 
 Architecture rule:
   This loop NEVER speaks directly to James.
-  All James-facing output goes through the communication LLM (7b, port 11434).
-  This loop writes to shared_state["reasoning"]["context_for_communication"]
-  and the communication LLM picks it up on the next response turn.
+  It writes to shared_state["reasoning"]["context_for_communication"]
+  and the presence loop (main.py) picks it up on the next response turn.
+  Both this loop and main.py call the same single model: Qwen 32b on port 11435.
 
 Usage:
   from reasoning_loop import start_reasoning_loop, stop_reasoning_loop
@@ -40,7 +40,7 @@ from brain.state_manager import (
 # ─────────────────────────────────────────────
 
 REASONING_URL   = "http://localhost:11435/api/chat"
-REASONING_MODEL = "qwen2.5:32b"
+REASONING_MODEL = "qwen2.5:32b-instruct-q4_K_M"
 
 HEARTBEAT_FALLBACK = 5.0   # sleep duration after an exception — never used as default
 TIMEOUT_SECONDS    = 120   # per Ollama call — deepseek-r1 can be slow under VRAM pressure
@@ -87,20 +87,20 @@ def _read_mc_state_file() -> dict:
 # ─────────────────────────────────────────────
 
 def _do_startup_check():
-    """On first wake, verify the communication LLM (Ollama port 11434) is reachable.
+    """On first wake, verify the presence LLM (Ollama port 11435) is reachable.
     Ollama is started by the bat files — this is a health check only, not a start."""
     global _startup_done
     if _startup_done:
         return
     _startup_done = True
     try:
-        resp = requests.get("http://localhost:11434/", timeout=3)
+        resp = requests.get("http://localhost:11435/", timeout=3)
         if resp.ok:
-            print("[reasoning_loop] Communication LLM: reachable on port 11434.")
+            print("[reasoning_loop] Presence LLM: reachable on port 11435.")
         else:
-            print(f"[reasoning_loop] Communication LLM: port 11434 returned {resp.status_code}.")
+            print(f"[reasoning_loop] Presence LLM: port 11435 returned {resp.status_code}.")
     except Exception:
-        print("[reasoning_loop] Communication LLM: not reachable on port 11434 — check Ollama.")
+        print("[reasoning_loop] Presence LLM: not reachable on port 11435 — check Ollama.")
 
 
 def _do_wake_assessment():

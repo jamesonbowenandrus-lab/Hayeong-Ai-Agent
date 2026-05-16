@@ -25,6 +25,15 @@ CONV_LOG_DIR    = os.path.join(ROOT_DIR, "Logs", "conversations")
 PRESENCE_URL   = "http://localhost:11435/api/chat"
 PRESENCE_MODEL = "qwen2.5:32b-instruct-q4_K_M"
 
+# DeepSeek — specialist model, on-demand for code tasks (port 11436)
+# Not active by default — spun up by api_caller tool when needed.
+DEEPSEEK_URL   = "http://localhost:11436/api/chat"
+DEEPSEEK_MODEL = "deepseek-r1:latest"
+
+# Discord bridge (optional — only needed when Discord bot is in use)
+DISCORD_BOT_URL   = PRESENCE_URL
+DISCORD_BOT_MODEL = PRESENCE_MODEL
+
 # ── Minecraft ──────────────────────────────────────────────────────────────
 MINECRAFT_HOST       = "127.0.0.1"
 MINECRAFT_PORT       = 25565
@@ -44,6 +53,11 @@ COMFYUI_TIMEOUT       = 120
 COMFYUI_POLL_INTERVAL = 2
 COMFYUI_OUTPUT_DIR    = os.path.join(OUTPUTS_DIR, "comfyui")
 COMFYUI_WORKFLOW_DIR  = os.path.join(TOOLBOX_DIR, "comfyui", "workflows")
+
+# ── FFmpeg ─────────────────────────────────────────────────────────────────
+FFMPEG_PATH    = "ffmpeg"                           # assumes ffmpeg is on system PATH
+# FFMPEG_PATH  = "H:/ffmpeg/bin/ffmpeg.exe"         # uncomment if not on PATH
+FFMPEG_OUTPUT  = os.path.join(OUTPUTS_DIR, "video")
 
 # ── API keys ───────────────────────────────────────────────────────────────
 DISCORD_TOKEN   = ""

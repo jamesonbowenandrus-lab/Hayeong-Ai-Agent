@@ -38,19 +38,11 @@ _IDENTITY_BEHAVIORAL      = BASE_DIR / "identity_behavioral.json"
 _IDENTITY_LIVING          = BASE_DIR / "identity_living.json"
 MOOD_FILE      = BASE_DIR / "mood.json"
 
-# ── Three-model architecture ──
-# Communication LLM (llama3.2) — everything James hears, port 11434
-# Reasoning LLM (deepseek-r1)  — all decisions and planning, port 11435
-# Task Agent (phi3:mini)        — execution, scripts, Minecraft, port 11436
-COMMUNICATION_URL   = "http://localhost:11434/api/chat"
-REASONING_URL       = "http://localhost:11435/api/chat"
-COMMUNICATION_MODEL = "llama3.2:latest"
-REASONING_MODEL     = "deepseek-r1:latest"
-FALLBACK_MODEL      = "llama3.2:latest"
-
-# Backwards-compat aliases — imported by other modules
-OLLAMA_URL    = COMMUNICATION_URL
-PRIMARY_MODEL = COMMUNICATION_MODEL
+# ── Single-model architecture ──
+# All LLM calls go through Qwen 2.5 32b on port 11435.
+# main.py (presence loop) and reasoning_loop.py both use this model.
+OLLAMA_URL    = "http://localhost:11435/api/chat"
+PRIMARY_MODEL = "qwen2.5:32b-instruct-q4_K_M"
 
 # ─────────────────────────────────────────────
 # JSON HELPERS
@@ -226,23 +218,16 @@ def chat_with_ai(messages: list) -> str:
     Blocking Ollama call. Safe to run in a thread executor.
     Returns the AI response string.
     """
-    def _call(model: str) -> str:
+    try:
         resp = requests.post(
             OLLAMA_URL,
-            json={"model": model, "messages": messages, "stream": False},
+            json={"model": PRIMARY_MODEL, "messages": messages, "stream": False},
             timeout=90
         )
         resp.raise_for_status()
         return resp.json()["message"]["content"].strip()
-
-    try:
-        return _call(PRIMARY_MODEL)
     except Exception as e:
-        print(f"⚠️  Primary model failed ({e}), trying fallback...")
-        try:
-            return _call(FALLBACK_MODEL)
-        except Exception as e2:
-            return f"[Ollama unreachable: {e2}]"
+        return f"[Ollama unreachable: {e}]"
 
 
 # ─────────────────────────────────────────────

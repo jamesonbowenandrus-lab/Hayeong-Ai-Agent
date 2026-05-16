@@ -1,3 +1,3 @@
 git add .
-git commit -m "major push adding a identity breack down, add blender basic tool, add music basic tool, addedbasic developing skill"
+git commit -m ”update to most of the readme files in the sub and tool folders, update to comfyui and voice pipeline”
 git push

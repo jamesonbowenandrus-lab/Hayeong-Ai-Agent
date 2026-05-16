@@ -142,14 +142,15 @@ change it in `Brain\config.py`. Everything else imports from there.
 
 ## Ollama Models Required
 
-Two Ollama instances must be running before starting Hayeong:
+| Instance | Port | Model | Role | Required? |
+|----------|------|-------|------|-----------|
+| Presence & Reasoning | 11435 | qwen2.5:32b-instruct-q4_K_M | All thinking, planning, and responses | **Yes** |
+| DeepSeek Specialist | 11436 | deepseek-r1:latest | On-demand code tasks only — not auto-started | No (on-demand) |
+| Discord Bridge | 11434 | llama3.2:latest | Discord bot responses only | No (Discord only) |
 
-| Instance | Port | Model | Role |
-|----------|------|-------|------|
-| Legacy / Discord | 11434 | llama3.2:latest | Discord bridge, legacy use |
-| Presence & Reasoning | 11435 | qwen2.5:32b-instruct-q4_K_M | All thinking, planning, and responses |
-
-Startup scripts for both are in `Brain\`.
+Start the presence LLM with `Brain\ollama_reasoning.bat` before running `main.py`.
+The DeepSeek specialist (`Brain\ollama_deepseek.bat`) and Discord bridge are optional
+and only needed when those features are in use.
 
 ---
 

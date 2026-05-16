@@ -32,9 +32,7 @@ if str(BASE_DIR) not in sys.path:
 
 # ── Model config ─────────────────────────────────────────────────────
 MODELS = {
-    "reasoning": {"port": 11435, "label": "DeepSeek R1", "bat": "ollama_reasoning.bat"},
-    "comm":      {"port": 11434, "label": "llama3.2",    "bat": "ollama_communication.bat"},
-    "task":      {"port": 11436, "label": "phi3:mini",   "bat": "ollama_task.bat"},
+    "reasoning": {"port": 11435, "label": "Qwen 2.5 32b"},
 }
 
 # ── Shared queues — background threads write, Textual reads ──────────
@@ -42,7 +40,7 @@ _log_queue  = queue.Queue()   # system log lines
 _conv_queue = queue.Queue()   # conversation updates (Hayeong responses)
 
 # ── Status state (written by background threads, read by UI) ─────────
-_llm_status  = {"reasoning": "🟡", "comm": "🟡", "task": "🟡"}
+_llm_status  = {"reasoning": "🟡"}
 _tool_status = {}
 
 # ── Subprocess tracking ──────────────────────────────────────────────
@@ -159,10 +157,13 @@ def _start_watchdog():
 
 
 def _startup_sequence():
-    """Run in a background thread — starts Ollama then watchdog."""
+    """Run in a background thread — starts Ollama (if bat configured) then watchdog."""
     _log_queue.put("[startup] Starting Hayeong...")
     for key, cfg in MODELS.items():
-        _ensure_ollama(cfg["port"], cfg["bat"])
+        if "bat" in cfg:
+            _ensure_ollama(cfg["port"], cfg["bat"])
+        else:
+            _log_queue.put(f"[startup] Skipping Ollama startup for :{cfg['port']} — use bat file to start manually")
     _start_watchdog()
     _log_queue.put("[startup] ✅ Hayeong is ready.")
 
@@ -263,16 +264,12 @@ class HayeongDashboard(App):
                 break
 
     def _update_status_bar(self):
-        """Update three LLM status dots. Called every 5s."""
+        """Update LLM status dot. Called every 5s."""
         bar = self.query_one("#status_bar", Static)
         def dot(key):
             s = _llm_status.get(key, "..")
             return {"🟢": "[OK]", "🟡": "[..]", "🔴": "[!!]"}.get(s, "[..]")
-        bar.update(
-            f"{dot('reasoning')} Reasoning (DeepSeek R1)   "
-            f"{dot('comm')} Comm (llama3.2)   "
-            f"{dot('task')} Task (phi3:mini)"
-        )
+        bar.update(f"{dot('reasoning')} Presence LLM (Qwen 2.5 32b — port 11435)")
 
     def _update_tool_panel(self):
         """Update tool status panel. Called every 5s."""
