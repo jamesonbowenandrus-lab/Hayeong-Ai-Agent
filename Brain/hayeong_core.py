@@ -21,6 +21,7 @@ Provides:
 import re
 import json
 import os
+import datetime
 import requests
 from pathlib import Path
 from filelock import FileLock
@@ -29,7 +30,11 @@ from filelock import FileLock
 # PATHS
 # ─────────────────────────────────────────────
 
-BASE_DIR       = Path(__file__).parent
+BASE_DIR    = Path(__file__).parent          # Brain/
+ROOT_DIR    = BASE_DIR.parent                # hayeong/
+STATE_DIR   = BASE_DIR / "state"             # Brain/state/
+MEMORY_DIR  = ROOT_DIR / "Memory"           # hayeong/Memory/
+
 MEMORY_FILE    = BASE_DIR / "memory.json"
 # identity.json is preserved as historical record — not loaded at runtime
 _IDENTITY_FILE_HISTORICAL = BASE_DIR / "identity.json"
@@ -102,6 +107,111 @@ def load_mood():
 
 def save_mood(m):
     save_json(MOOD_FILE, m)
+
+
+# ─────────────────────────────────────────────
+# TOOL REGISTRY
+# ─────────────────────────────────────────────
+
+def load_tool_registry() -> dict:
+    """
+    Loads the tool registry. Brain uses this to know what tools exist
+    and where their states live. Never hardcodes tool names.
+    Fails gracefully.
+    """
+    registry_path = STATE_DIR / "tool_registry.json"
+    if not registry_path.exists():
+        return {"active_tools": []}
+    try:
+        with open(registry_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"[ToolRegistry] Failed to load: {e}")
+        return {"active_tools": []}
+
+
+def get_tool_state(tool_id: str) -> dict:
+    """
+    Given a tool ID, reads its current state from the path in the registry.
+    Returns empty dict if tool not found, disabled, or state unreadable.
+    """
+    registry = load_tool_registry()
+    for tool in registry.get("active_tools", []):
+        if tool["id"] == tool_id and tool.get("enabled"):
+            state_path = ROOT_DIR / tool["state_path"]
+            if state_path.exists():
+                try:
+                    with open(state_path, "r", encoding="utf-8") as f:
+                        return json.load(f)
+                except Exception:
+                    return {}
+    return {}
+
+
+# ─────────────────────────────────────────────
+# RELATIONSHIP CONTEXT
+# ─────────────────────────────────────────────
+
+def load_relationship_context(who: str = "james") -> dict:
+    """
+    Loads Hayeong's relationship context for a given person.
+    Returns a dict for injection into reasoning context.
+    Fails gracefully — missing file returns empty dict, never crashes.
+    """
+    rel_path = MEMORY_DIR / "relationships" / f"{who}.json"
+    if not rel_path.exists():
+        return {}
+    try:
+        with open(rel_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return {k: v for k, v in data.items() if not k.startswith("_") and k != "meta"}
+    except Exception as e:
+        print(f"[RelationshipContext] Failed to load {who}.json: {e}")
+        return {}
+
+
+def update_relationship_context(who: str, section: str, key: str, value) -> bool:
+    """
+    Allows Hayeong to update her own relationship record.
+    Foundational sections are protected. Only additive updates — never full replacement.
+    """
+    PROTECTED_SECTIONS = {"who_james_is_to_me", "relationship_with_others_through_james"}
+
+    if section in PROTECTED_SECTIONS:
+        print(f"[RelationshipContext] Section '{section}' is foundational and cannot be modified.")
+        return False
+
+    rel_path = MEMORY_DIR / "relationships" / f"{who}.json"
+    if not rel_path.exists():
+        return False
+
+    try:
+        with open(rel_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        if section not in data:
+            data[section] = {}
+
+        # For list fields — append, never replace
+        if isinstance(data[section].get(key), list):
+            if isinstance(value, list):
+                data[section][key].extend(value)
+            else:
+                data[section][key].append(value)
+        else:
+            data[section][key] = value
+
+        data["meta"]["last_updated_by"] = "hayeong"
+        data["meta"]["last_updated"]    = datetime.datetime.now().isoformat()
+
+        with open(rel_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+
+        return True
+
+    except Exception as e:
+        print(f"[RelationshipContext] Update failed: {e}")
+        return False
 
 
 # ─────────────────────────────────────────────

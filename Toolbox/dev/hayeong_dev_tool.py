@@ -32,7 +32,7 @@ REVIEW_DIR   = ROOT_DIR / "pending_james_review"
 LOG_FILE     = ROOT_DIR / "logs" / "dev_tool_log.json"
 PROMPT_HIST  = ROOT_DIR / "logs" / "prompt_history"
 
-MAX_DIRECT_EDIT_LINES = 50
+MAX_DIRECT_EDIT_LINES = 500
 
 # ── Scope tables ──────────────────────────────────────────────────────
 
@@ -297,14 +297,25 @@ def hayeong_dev_tool(
         _write_state(rel, "blocked", msg)
         return {"status": "blocked", "message": msg, "log_path": str(LOG_FILE)}
 
-    # New file or structural → always handoff
-    if change_type in ("new_file", "structural") or scope == "out_of_scope":
-        priority   = "high" if scope == "out_of_scope" else "normal"
-        handoff    = _write_handoff(rel, change_description, change_type, proposed_content, priority)
+    # Structural changes always route to handoff
+    if change_type == "structural" or scope == "out_of_scope":
+        priority = "high" if scope == "out_of_scope" else "normal"
+        handoff  = _write_handoff(rel, change_description, change_type, proposed_content, priority)
         _log(rel, change_type, change_description, "handoff", None, f"handoff: {handoff}")
         msg = f"Handoff written for James pickup: {handoff}"
         _write_state(rel, "handoff", msg)
         return {"status": "handoff", "message": msg, "log_path": str(LOG_FILE)}
+
+    # New files inside Toolbox — allowed directly; outside Toolbox — handoff
+    if change_type == "new_file":
+        if rel.startswith("toolbox/"):
+            pass  # fall through to apply
+        else:
+            handoff = _write_handoff(rel, change_description, change_type, proposed_content, "normal")
+            _log(rel, change_type, change_description, "handoff", None, f"handoff: {handoff}")
+            msg = f"New file outside Toolbox — handoff written: {handoff}"
+            _write_state(rel, "handoff", msg)
+            return {"status": "handoff", "message": msg, "log_path": str(LOG_FILE)}
 
     # Line count guard for plain edits
     line_count = len(proposed_content.splitlines())

@@ -1,0 +1,36 @@
+[
+  {
+    "timestamp": "2026-05-16T20:07:07.673631",
+    "handoff_name": "06_09_curator_calendar_data_sensor.md",
+    "tool_name": "finetune_curator",
+    "succeeded": 0,
+    "failed": 1,
+    "details": [
+      "  --> README.md — routed to handoff (needs James)"
+    ]
+  },
+  {
+    "timestamp": "2026-05-16T21:36:03.804986",
+    "handoff_name": "sensor_tool_handoff.md",
+    "tool_name": "sensor_tool",
+    "succeeded": 3,
+    "failed": 0,
+    "details": [
+      "  OK  Toolbox/sensor_tool/sensor_tool.py",
+      "  OK  Toolbox/sensor_tool/plugin.py",
+      "  OK  Toolbox/sensor_tool/README.md"
+    ]
+  },
+  {
+    "timestamp": "2026-05-16T21:42:31.993655",
+    "handoff_name": "calendar_manager_handoff.md",
+    "tool_name": "calendar_manager",
+    "succeeded": 3,
+    "failed": 0,
+    "details": [
+      "  OK  Toolbox/calendar_manager/calendar_manager.py",
+      "  OK  Toolbox/calendar_manager/plugin.py",
+      "  OK  Toolbox/calendar_manager/README.md"
+    ]
+  }
+]

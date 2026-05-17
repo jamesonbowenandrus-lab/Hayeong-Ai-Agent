@@ -15,8 +15,8 @@ const MC_PORT      = parseInt(process.argv[3]) || 25565;
 const MC_USERNAME  = process.argv[4] || "Hayeong";
 const MC_VERSION   = process.argv[5] || false;
 
-const STATE_FILE   = path.join(__dirname, "..", "..", "Brain", "state", "minecraft_state.json");
-const COMMAND_FILE = path.join(__dirname, "..", "..", "Brain", "state", "minecraft_command.json");
+const STATE_FILE   = path.join(__dirname, "state", "minecraft_state.json");
+const COMMAND_FILE = path.join(__dirname, "state", "minecraft_command.json");
 
 // -------------------------
 // Bot

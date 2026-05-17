@@ -1,0 +1,14 @@
+{
+  "connected": false,
+  "username": "Hayeong",
+  "position": {"x": null, "y": null, "z": null},
+  "health": 20,
+  "food": 20,
+  "dimension": "overworld",
+  "nearby_players": [],
+  "nearby_mobs": [],
+  "behavior": {"mode": "idle", "target": null, "position": null, "since": null},
+  "current_action": "idle",
+  "last_event": "",
+  "updated_at": ""
+}

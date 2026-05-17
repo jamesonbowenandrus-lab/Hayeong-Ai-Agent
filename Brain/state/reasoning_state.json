@@ -4,7 +4,7 @@
     "active_task_status": "",
     "current_goal": "",
     "last_conclusion": "",
-    "context_for_communication": "Voice client status is unknown — unable to confirm if mic and audio are working. Do not claim voice is working.",
+    "context_for_communication": "",
     "minecraft_session_active": false,
     "minecraft_last_event": "",
     "minecraft_last_event_detail": {},

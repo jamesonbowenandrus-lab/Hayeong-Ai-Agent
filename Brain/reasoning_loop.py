@@ -56,7 +56,7 @@ _wake_assessment_done = False
 # ─────────────────────────────────────────────
 
 _MC_STATE_FILE = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "state", "minecraft_state.json")
+    os.path.join(os.path.dirname(__file__), "..", "toolbox", "minecraft", "state", "minecraft_state.json")
 )
 
 
@@ -85,6 +85,35 @@ def _read_mc_state_file() -> dict:
 # STARTUP CHECK
 # Runs once on the first heartbeat tick — Hayeong's first conscious decision.
 # ─────────────────────────────────────────────
+
+def _build_relationship_context_block() -> str:
+    """Format James relationship context for injection into system prompts."""
+    try:
+        from brain.hayeong_core import load_relationship_context
+        rel = load_relationship_context("james")
+        if not rel:
+            return ""
+        lines = [
+            "─────────────────────────────────────────────",
+            "RELATIONSHIP CONTEXT — JAMES",
+            "─────────────────────────────────────────────",
+        ]
+        core = rel.get("who_james_is_to_me", {})
+        if core:
+            lines.append(f"Core: {core.get('the_core', '')}")
+        where = rel.get("the_relationship_itself", {}).get("where_we_are", "")
+        if where:
+            lines.append(f"Where we are: {where}")
+        true_things = rel.get("the_relationship_itself", {}).get("what_is_already_true", [])
+        if true_things:
+            lines.append("What is already true:")
+            for item in true_things[:3]:
+                lines.append(f"  - {item}")
+        lines.append("─────────────────────────────────────────────")
+        return "\n".join(lines)
+    except Exception:
+        return ""
+
 
 def _do_startup_check():
     """On first wake, verify the presence LLM (Ollama port 11435) is reachable.
@@ -152,11 +181,14 @@ def _do_wake_assessment():
 
     print(f"[reasoning_loop] Wake assessment: was offline ~{offline_str}, reviewing state...")
 
+    relationship_block = _build_relationship_context_block()
+
     result = _call_reasoning_json(
         system=(
             "You are Hayeong waking up after being offline. You are reading your own state "
             "to understand what was happening before you stopped.\n\n"
-            "Your job is to make conscious decisions about your state — not just continue "
+            + (relationship_block + "\n\n" if relationship_block else "")
+            + "Your job is to make conscious decisions about your state — not just continue "
             "blindly from where you left off.\n\n"
             "Consider:\n"
             "- Is the active task still valid given how long you were offline?\n"
@@ -332,7 +364,11 @@ def _call_reasoning(system: str, user: str) -> str:
             timeout=TIMEOUT_SECONDS,
         )
         resp.raise_for_status()
-        return _strip_think_tags(resp.json()["message"]["content"].strip())
+        content = resp.json().get("message", {}).get("content", "")
+        if not content:
+            print("[reasoning_loop] Empty response from model — skipping cycle")
+            return ""
+        return _strip_think_tags(content.strip())
     except Exception as e:
         print(f"[reasoning_loop] LLM call failed: {e}")
         return ""
@@ -356,7 +392,11 @@ def _call_reasoning_json(system: str, user: str) -> dict:
             timeout=TIMEOUT_SECONDS,
         )
         resp.raise_for_status()
-        raw = _strip_think_tags(resp.json()["message"]["content"].strip())
+        content = resp.json().get("message", {}).get("content", "")
+        if not content:
+            print("[reasoning_loop] Empty response from model — skipping cycle")
+            return {}
+        raw = _strip_think_tags(content.strip())
         raw = re.sub(r"^```[a-z]*\n?", "", raw)
         raw = re.sub(r"\n?```$",       "", raw)
         return json.loads(raw.strip())
@@ -1161,6 +1201,9 @@ def _heartbeat():
             if interval > 0:
                 _stop_event.wait(timeout=interval)
 
+        except KeyError as e:
+            print(f"[reasoning_loop] Heartbeat error: missing key {e}")
+            _stop_event.wait(timeout=HEARTBEAT_FALLBACK)
         except Exception as e:
             print(f"[reasoning_loop] Heartbeat error: {e}")
             _stop_event.wait(timeout=HEARTBEAT_FALLBACK)

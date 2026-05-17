@@ -1,0 +1,17 @@
+{
+  "registry_version": "1.0",
+  "last_updated": "",
+  "active_tools": [
+    {
+      "id": "minecraft",
+      "name": "Minecraft Bot",
+      "enabled": true,
+      "state_path": "toolbox/minecraft/state/minecraft_state.json",
+      "command_path": "toolbox/minecraft/state/minecraft_command.json",
+      "world_model_path": "toolbox/minecraft/worlds/",
+      "plugin_path": "toolbox/minecraft/plugin.py",
+      "status": "disconnected",
+      "last_active": ""
+    }
+  ]
+}

@@ -39,8 +39,8 @@ MINECRAFT_HOST       = "127.0.0.1"
 MINECRAFT_PORT       = 25565
 MINECRAFT_VERSION    = "1.21.4"
 BOT_JS_PATH          = os.path.join(ROOT_DIR, "Toolbox", "minecraft", "hayeong_bot.js")
-MINECRAFT_STATE_PATH   = os.path.join(ROOT_DIR, "Brain", "state", "minecraft_state.json")
-MINECRAFT_COMMAND_PATH = os.path.join(ROOT_DIR, "Brain", "state", "minecraft_command.json")
+MINECRAFT_STATE_PATH   = os.path.join(ROOT_DIR, "toolbox", "minecraft", "state", "minecraft_state.json")
+MINECRAFT_COMMAND_PATH = os.path.join(ROOT_DIR, "toolbox", "minecraft", "state", "minecraft_command.json")
 
 # ── Blender ────────────────────────────────────────────────────────────────
 BLENDER_PATH    = "H:/blender/blender.exe"

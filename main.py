@@ -182,10 +182,19 @@ def build_presence_context(state: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
-def build_presence_system(identity: dict, knowledge: dict) -> str:
+def build_presence_system(identity: dict, knowledge: dict, available_tools: list[str] | None = None) -> str:
     traits       = ", ".join(identity.get("core_traits", ["curious", "warm", "direct", "honest about uncertainty"]))
     relationship = identity.get("relationship_note", "James is building me. We are working together.")
     knowledge_str = "\n".join(f"- {k}: {v}" for k, v in knowledge.items()) if knowledge else "  (none)"
+
+    if available_tools:
+        tool_list = "|".join(["none", "respond"] + sorted(available_tools))
+    else:
+        try:
+            registry  = _load_registry()
+            tool_list = "|".join(["none", "respond"] + sorted(registry.keys()))
+        except Exception:
+            tool_list = "none|respond|script"
 
     return f"""You are Hayeong. You think, decide, and speak directly to James.
 Traits: {traits}
@@ -215,11 +224,20 @@ AWARENESS RULES — ABSOLUTE
 5. Your DECISION block must use only the listed actions.
    Never write an action you cannot execute.
 
+6. If you assigned an action in your last response, do NOT report its outcome
+   until status is "success" or "failed" in LAST TASK RESULT.
+   "I implemented X successfully" is only valid when result field confirms it.
+   If status is "pending" or "running", say "I'm working on it" — nothing more.
+
+7. Never predict, assume, or infer task outcomes.
+   "It probably worked" and "I believe it succeeded" are not valid responses.
+   Only the result field tells you what happened. If it is empty, you do not know.
+
 ═══════════════════════════════════════════════════════════
 DECISION FORMAT — END EVERY RESPONSE WITH THIS EXACTLY
 ═══════════════════════════════════════════════════════════
 DECISION:
-action: [none|respond|minecraft|voice|email|blender|script]
+action: [{tool_list}]
 description: [what you are doing and why — be specific]
 params: [key=value, key=value — or "none" if not needed]
 for_james: [what to say to James — natural, complete, your voice — 1-2 sentences]
@@ -290,12 +308,22 @@ def presence_loop():
             has_new_james  = bool(james_said) and james_said != _last_james_said
             has_new_result = bool(task_completed_at) and task_completed_at != _last_completed_at
 
+            # Do not fire presence while a task is actively pending or running
+            task_status = last_task.get("status", "")
+            task_is_active = task_status in ("pending", "running")
+
+            if task_is_active and not has_new_result:
+                time.sleep(2)
+                continue
+
             if not has_new_james and not has_new_result:
                 time.sleep(6)
                 continue
 
-            context  = build_presence_context(state)
-            system   = build_presence_system(identity, knowledge)
+            context    = build_presence_context(state)
+            registry   = _load_registry()
+            tool_names = list(registry.keys())
+            system     = build_presence_system(identity, knowledge, available_tools=tool_names)
             full_raw = _stream_presence(system, context)
 
             if not full_raw:

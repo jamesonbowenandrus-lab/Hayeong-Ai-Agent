@@ -127,6 +127,15 @@ hayeong\
 
 ---
 
+## Adding a New Tool
+
+1. Create the tool folder and script in `Toolbox/`
+2. Add the entry to `Toolbox/registry.json`
+3. That's it. `main.py` does not need to change.
+   The action list in Hayeong's system prompt is generated from the registry automatically.
+
+---
+
 ## Configuration
 
 All paths, ports, model names, and API keys live in one place:

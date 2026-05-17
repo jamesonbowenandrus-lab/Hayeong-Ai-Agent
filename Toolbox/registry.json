@@ -7,5 +7,6 @@
   "music":     { "module": "toolbox.music.music_tool",           "function": "run" },
   "dev":       { "module": "toolbox.dev.hayeong_dev_tool",      "function": "run" },
   "comfyui":   { "module": "toolbox.comfyui.comfyui_tool",      "function": "run" },
-  "ffmpeg":    { "module": "toolbox.ffmpeg.ffmpeg_tool",        "function": "run" }
+  "ffmpeg":          { "module": "toolbox.ffmpeg.ffmpeg_tool",                    "function": "run" },
+  "handoff_reader":  { "module": "toolbox.handoff_reader.handoff_reader",         "function": "run" }
 }
