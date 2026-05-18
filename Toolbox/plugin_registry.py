@@ -11,8 +11,9 @@ Interface:
     get_all_context_injections(state)   — collect context lines from all plugins
 """
 
-from pathlib import Path
 import importlib
+import inspect
+from pathlib import Path
 
 _plugins: list = []
 
@@ -41,12 +42,23 @@ def load_plugins():
 
 def tick_all():
     """Call tick() on every loaded plugin. Errors are caught per-plugin."""
+    _state = None
     for plugin in _plugins:
+        name = getattr(plugin, "__name__", "unknown").split(".")[-2]
         try:
-            plugin.tick()
+            sig = inspect.signature(plugin.tick)
+            if len(sig.parameters) > 0:
+                if _state is None:
+                    from brain.state.core_manager import read as _read
+                    _state = _read()
+                plugin.tick(_state)
+            else:
+                plugin.tick()
         except Exception as e:
-            name = getattr(plugin, "__name__", "unknown")
-            print(f"[plugin:{name}] tick error: {e}")
+            error_msg = str(e)
+            if error_msg != getattr(plugin, "_last_error", None):
+                print(f"[plugin:{name}] tick error: {e}")
+                plugin._last_error = error_msg
 
 
 def get_all_context_injections(state: dict = None) -> list:

@@ -32,5 +32,16 @@
       "  OK  Toolbox/calendar_manager/plugin.py",
       "  OK  Toolbox/calendar_manager/README.md"
     ]
+  },
+  {
+    "timestamp": "2026-05-17T19:18:57.440685",
+    "handoff_name": "finetune_curator_handoff.md",
+    "tool_name": "finetune_curator",
+    "succeeded": 2,
+    "failed": 0,
+    "details": [
+      "  OK  Toolbox/finetune_curator/finetune_curator.py",
+      "  OK  Toolbox/finetune_curator/README.md"
+    ]
   }
 ]

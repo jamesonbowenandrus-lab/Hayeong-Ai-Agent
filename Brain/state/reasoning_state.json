@@ -4,13 +4,18 @@
     "active_task_status": "",
     "current_goal": "",
     "last_conclusion": "",
-    "context_for_communication": "",
+    "context_for_communication": "Voice client status is unknown — unable to confirm if mic and audio are working. Do not claim voice is working.",
     "minecraft_session_active": false,
     "minecraft_last_event": "",
     "minecraft_last_event_detail": {},
     "minecraft_pending_action": null,
     "minecraft_voice_input": "",
-    "priority_flags": [],
+    "priority_flags": [
+      {
+        "flag": "Reasoning layer wrote a message for James over 2 minutes ago and it hasn't been delivered yet: 'Voice client status is unknown — unable to confirm if mic and audio are working. Do not claim voice is working.'",
+        "level": "urgent"
+      }
+    ],
     "pending_results": [],
     "commitments": [],
     "self_assessment": "",

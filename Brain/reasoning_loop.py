@@ -1125,32 +1125,19 @@ def _proactive_checks():
         except Exception:
             pass
 
-    # 2. Stale context_for_communication — if non-empty, note it hasn't been consumed
+    # 2. context_for_communication — clear if trivial, leave substantive content for
+    #    the presence loop to pick up on its next cycle. No re-flagging: if the
+    #    presence loop missed it, the next heartbeat will write fresh context.
     ctx = state.get("reasoning", {}).get("context_for_communication", "")
     if ctx:
-        # Track how long this context has been sitting using a module-level timestamp.
-        # If we wrote it and it hasn't been consumed after 2 minutes, escalate urgency.
-        now = time.time()
-        _proactive_checks._ctx_hash  = getattr(_proactive_checks, "_ctx_hash",  "")
-        _proactive_checks._ctx_since = getattr(_proactive_checks, "_ctx_since", 0.0)
-        ctx_id = ctx[:40]   # stable identifier across ticks
-        if ctx_id != _proactive_checks._ctx_hash:
-            # New context written since last tick — record when we first saw it
-            _proactive_checks._ctx_hash  = ctx_id
-            _proactive_checks._ctx_since = now
-        elif now - _proactive_checks._ctx_since > 120:
-            print(f"[reasoning_loop] context_for_communication unread for >2 min — re-flagging urgent")
-            from brain.state_manager import flag_priority
-            flag_priority(
-                f"Reasoning layer wrote a message for James over 2 minutes ago "
-                f"and it hasn't been delivered yet: '{ctx[:120]}'",
-                level="urgent",
-            )
-            _proactive_checks._ctx_since = now   # reset so we don't spam
-    else:
-        # Context was consumed — clear tracking
-        _proactive_checks._ctx_hash  = ""
-        _proactive_checks._ctx_since = 0.0
+        ctx_stripped = ctx.strip().lower()
+        is_substantive = (
+            len(ctx.strip()) > 20
+            and ctx_stripped not in ("none", "nothing to report", "clean state")
+            and not ctx_stripped.startswith("wake assessment: clean")
+        )
+        if not is_substantive:
+            write_reasoning({"context_for_communication": ""})
 
 
 # ─────────────────────────────────────────────

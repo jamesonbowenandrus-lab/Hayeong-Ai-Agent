@@ -302,6 +302,16 @@ def presence_loop():
             identity  = state.get("identity",  {})
             knowledge = state.get("knowledge", {})
 
+            # Clear reasoning context immediately after reading so it cannot be
+            # re-flagged as stale by the reasoning loop on the next tick.
+            _reasoning = state.get("reasoning", {})
+            if _reasoning.get("context_for_communication"):
+                write_section("reasoning", {
+                    **_reasoning,
+                    "context_for_communication":        "",
+                    "context_for_communication_urgent": False,
+                })
+
             james_said        = situation.get("what_james_said", "")
             task_completed_at = last_task.get("completed_at", "")
 
