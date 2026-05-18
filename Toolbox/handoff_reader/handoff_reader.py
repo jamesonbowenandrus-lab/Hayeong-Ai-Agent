@@ -38,12 +38,26 @@ def run(description: str, params: dict) -> str:
         if operation == "list":
             return _list_handoffs()
         elif operation == "read":
-            path = params.get("handoff_path", "")
+            path = (
+                params.get("handoff_path") or
+                params.get("file_path") or
+                params.get("path") or
+                params.get("filename") or
+                params.get("file") or
+                ""
+            ).strip()
             return _read_handoff(path)
         elif operation == "status":
             return _implementation_status()
         elif operation == "implement":
-            path    = params.get("handoff_path", "")
+            path = (
+                params.get("handoff_path") or
+                params.get("file_path") or
+                params.get("path") or
+                params.get("filename") or
+                params.get("file") or
+                ""
+            ).strip()
             dry_run = str(params.get("dry_run", "false")).lower() == "true"
             return _implement(path, dry_run)
         else:

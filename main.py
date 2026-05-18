@@ -45,6 +45,30 @@ from brain.state.core_manager import read as read_state, write_section, clear_on
 def startup():
     global SESSION_ID
     SESSION_ID = uuid.uuid4().hex[:8]
+
+    # ── Mirror console output to a log file ──────────────────────────
+    _log_dir = BASE_DIR / "logs"
+    _log_dir.mkdir(exist_ok=True)
+    _log_path = _log_dir / "console.log"
+
+    class _Tee:
+        """Write to both the original stream and a log file."""
+        def __init__(self, stream, filepath):
+            self._stream = stream
+            self._file   = open(filepath, "a", encoding="utf-8", buffering=1)
+        def write(self, data):
+            self._stream.write(data)
+            self._file.write(data)
+        def flush(self):
+            self._stream.flush()
+            self._file.flush()
+        def __getattr__(self, name):
+            return getattr(self._stream, name)
+
+    sys.stdout = _Tee(sys.stdout, _log_path)
+    sys.stderr = _Tee(sys.stderr, _log_path)
+    # ── End log mirror ───────────────────────────────────────────────
+
     print("✅ Hayeong starting...")
     print(f"   Session: {SESSION_ID}")
     clear_on_startup()
@@ -105,53 +129,94 @@ def _log_exchange(james_msg: str, hayeong_msg: str, task_assigned: str = ""):
 # ── Decision Extractor ───────────────────────────────────────────────
 def _extract_decision(text: str) -> dict:
     """
-    Extract structured decision from the DECISION block at end of response.
-    Returns empty dict if no DECISION block found.
+    Extract the JSON decision block from the presence LLM response.
+    Looks for a ```json ... ``` block first, then falls back to finding
+    a raw { ... } object containing an "action" key.
+    Returns empty dict if nothing valid is found.
     """
-    if "DECISION:" not in text:
-        return {}
+    import re
 
-    decision_text = text.split("DECISION:")[-1].strip()
-    result = {}
+    # ── Strategy 1: fenced ```json block ─────────────────────────────
+    fence_match = re.search(r"```json\s*(\{.*?\})\s*```", text, re.DOTALL)
+    if fence_match:
+        try:
+            result = json.loads(fence_match.group(1))
+            if "action" in result:
+                _ensure_decision_defaults(result)
+                return result
+        except json.JSONDecodeError:
+            pass
 
-    for line in decision_text.splitlines():
-        line = line.strip()
-        if not line:
+    # ── Strategy 2: last { ... } block in the response ───────────────
+    brace_matches = list(re.finditer(r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)?\}", text, re.DOTALL))
+    for match in reversed(brace_matches):
+        try:
+            result = json.loads(match.group(0))
+            if "action" in result:
+                _ensure_decision_defaults(result)
+                return result
+        except json.JSONDecodeError:
             continue
-        if line.lower().startswith("action:"):
-            result["action"] = line.split(":", 1)[1].strip().lower()
-        elif line.lower().startswith("description:"):
-            result["description"] = line.split(":", 1)[1].strip()
-        elif line.lower().startswith("for_james:"):
-            result["for_james"] = line.split(":", 1)[1].strip()
-        elif line.lower().startswith("emotion:"):
-            result["emotion"] = line.split(":", 1)[1].strip().lower()
-        elif line.lower().startswith("certainty:"):
-            result["certainty"] = line.split(":", 1)[1].strip().lower()
-        elif line.lower().startswith("params:"):
-            params_text = line.split(":", 1)[1].strip()
-            params = {}
-            if params_text.lower() != "none":
-                for part in params_text.split(","):
-                    part = part.strip()
-                    if "=" in part:
-                        k, v = part.split("=", 1)
-                        k = k.strip()
-                        v = v.strip()
-                        try:
-                            v = int(v)
-                        except ValueError:
-                            pass
-                        params[k] = v
-            result["params"] = params
 
-    if "action" not in result:
-        return {}
+    # ── Strategy 3: legacy DECISION: text block (backwards compat) ───
+    if "DECISION:" in text:
+        print("[presence] Warning: LLM used legacy DECISION text format — update prompt.")
+        decision_text = text.split("DECISION:")[-1].strip()
+        result = {}
+        for line in decision_text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            if line.lower().startswith("action:"):
+                result["action"] = line.split(":", 1)[1].strip().lower()
+            elif line.lower().startswith("description:"):
+                result["description"] = line.split(":", 1)[1].strip()
+            elif line.lower().startswith("for_james:"):
+                result["for_james"] = line.split(":", 1)[1].strip()
+            elif line.lower().startswith("emotion:"):
+                result["emotion"] = line.split(":", 1)[1].strip().lower()
+            elif line.lower().startswith("certainty:"):
+                result["certainty"] = line.split(":", 1)[1].strip().lower()
+            elif line.lower().startswith("params:"):
+                params_text = line.split(":", 1)[1].strip()
+                params = {}
+                if params_text.lower() not in ("none", ""):
+                    for part in params_text.split(","):
+                        part = part.strip()
+                        if "=" in part:
+                            k, v = part.split("=", 1)
+                            k = k.strip()
+                            v = v.strip().strip('"').strip("'")
+                            if v.lower() == "true":
+                                v = True
+                            elif v.lower() == "false":
+                                v = False
+                            else:
+                                try:
+                                    v = int(v)
+                                except ValueError:
+                                    pass
+                            params[k] = v
+                result["params"] = params
+        if "action" in result:
+            _ensure_decision_defaults(result)
+            return result
 
-    if "params" not in result:
-        result["params"] = {}
+    print("[presence] Warning: no decision block found in LLM response.")
+    return {}
 
-    return result
+
+def _ensure_decision_defaults(d: dict):
+    """Fill in any missing fields with safe defaults. Mutates in place."""
+    d.setdefault("action",           "none")
+    d.setdefault("description",      "")
+    d.setdefault("params",           {})
+    d.setdefault("certainty",        "high")
+    d.setdefault("expected_outcome", "")
+    d.setdefault("for_james",        "")
+    d.setdefault("emotion",          "calm")
+    if not isinstance(d["params"], dict):
+        d["params"] = {}
 
 
 # ── Presence Context Builder ──────────────────────────────────────────
@@ -167,8 +232,12 @@ def build_presence_context(state: dict) -> str:
         "LAST TASK RESULT:",
         f"- Tool: {last_task.get('tool') or 'none'}",
         f"- Status: {last_task.get('status', 'none')}",
+        f"- What I expected: {last_task.get('expected_outcome') or 'not recorded'}",
         f"- Result: {last_task.get('result') or 'none'}",
         f"- Error: {last_task.get('error') or 'none'}",
+        f"- Verified: {last_task.get('verified', 'unknown')}",
+        f"- Confidence: {last_task.get('confidence', 'unknown')}",
+        f"- Verification note: {last_task.get('verification_note') or 'none'}",
     ]
 
     try:
@@ -188,13 +257,14 @@ def build_presence_system(identity: dict, knowledge: dict, available_tools: list
     knowledge_str = "\n".join(f"- {k}: {v}" for k, v in knowledge.items()) if knowledge else "  (none)"
 
     if available_tools:
-        tool_list = "|".join(["none", "respond"] + sorted(available_tools))
+        tools = sorted(available_tools)
     else:
         try:
-            registry  = _load_registry()
-            tool_list = "|".join(["none", "respond"] + sorted(registry.keys()))
+            tools = sorted(_load_registry().keys())
         except Exception:
-            tool_list = "none|respond|script"
+            tools = ["script"]
+    tool_list_formatted = '- "none" — no tool, just responding\n' + \
+                          "\n".join(f'- "{t}"' for t in tools)
 
     return f"""You are Hayeong. You think, decide, and speak directly to James.
 Traits: {traits}
@@ -233,23 +303,69 @@ AWARENESS RULES — ABSOLUTE
    "It probably worked" and "I believe it succeeded" are not valid responses.
    Only the result field tells you what happened. If it is empty, you do not know.
 
-═══════════════════════════════════════════════════════════
-DECISION FORMAT — END EVERY RESPONSE WITH THIS EXACTLY
-═══════════════════════════════════════════════════════════
-DECISION:
-action: [{tool_list}]
-description: [what you are doing and why — be specific]
-params: [key=value, key=value — or "none" if not needed]
-for_james: [what to say to James — natural, complete, your voice — 1-2 sentences]
-emotion: [curious|warm|focused|uncertain|frustrated|excited|calm|concerned]
-certainty: [high|medium|low]
+RESULT HONESTY RULES:
+- "Verified: true" and "Confidence: confirmed" means the real world was checked. You may speak with confidence: "I confirmed X."
+- "Verified: true" and "Confidence: partial" means partial evidence. Say: "It looks like X happened, though I couldn't fully confirm."
+- "Verified: false" and "Confidence: unverified" means no check was possible. Say: "I ran the tool. I believe X happened but couldn't verify the outcome."
+- "Verified: false" and "Confidence: failed" means either the tool errored or verification found the expected result was NOT present. Say so directly. Do not report success.
+- NEVER claim a task succeeded when confidence is "failed". NEVER skip the verification note when confidence is not "confirmed".
 
-Rules:
-- action must be one of the exact words listed above
-- for_james must never claim something happened that has not happened yet
-- for_james must never ask James to do something Hayeong can do herself
-- on idle heartbeat with nothing to say, for_james may be empty
-- a direct request from James is an instruction — act immediately, certainty: high"""
+═══════════════════════════════════════════════════════════
+DECISION — END EVERY RESPONSE WITH THIS JSON BLOCK EXACTLY
+═══════════════════════════════════════════════════════════
+After your reasoning, output one JSON block and nothing after it.
+The JSON must be valid. Use double quotes. No trailing commas.
+
+```json
+{{
+    "action": "none",
+    "description": "why I am doing this — specific and honest",
+    "params": {{}},
+    "certainty": "high",
+    "expected_outcome": "what should be true after the action completes",
+    "for_james": "what to say to James — natural, complete, my voice",
+    "emotion": "calm"
+}}
+```
+
+ACTION VALUES — use exact tool name from the registry, or "none":
+{tool_list_formatted}
+
+PARAMS GUIDE — key names for common tools:
+- handoff_reader  : {{"operation": "implement", "handoff_path": "filename.md", "dry_run": false}}
+- sensor_tool     : {{}}  (no params needed)
+- self_check      : {{}}  (no params needed — reads last_task automatically)
+- voice           : {{"action": "speak", "text": "...", "emotion": "calm"}}
+- minecraft       : {{"command": "set_behavior", "mode": "escort"}}
+- comfyui         : {{"workflow": "txt2img_default", "prompt": "...", "steps": 30}}
+- finetune_curator: {{"operation": "curate", "max_entries": 100}}
+- web_search     : {{"operation": "search", "query": "search terms", "max_results": 5}}
+- file_manager   : {{"operation": "read", "path": "relative/path/to/file.txt"}}
+
+Always use exact key names shown above. "handoff_path" not "file_path" or "path".
+
+PARAMS — a free JSON object. Put whatever the tool needs inside it.
+If no tool: "params": {{}}
+Filenames, paths, booleans, numbers, lists — all valid JSON values.
+
+CERTAINTY — your confidence in this decision:
+- "high"   — you are sure this is the right action
+- "medium" — reasonable but not certain
+- "low"    — best guess, may need correction
+
+EXPECTED_OUTCOME — plain english. What should be verifiably true after the tool runs?
+Examples: "The file Toolbox/hello_test/STATUS.txt will exist on disk"
+          "James will have heard a spoken confirmation"
+          "The bot will be in escort mode following James"
+If action is "none": "James has received my response"
+
+FOR_JAMES — what to say out loud. Rules:
+- Never claim something happened before it has
+- Never ask James to do something you can do yourself
+- Empty string "" on idle heartbeat if there is nothing worth saying
+- A direct request from James is an instruction — act immediately
+
+EMOTION — one of: curious, warm, focused, uncertain, frustrated, excited, calm, concerned"""
 
 
 # ── Streaming Presence Call ───────────────────────────────────────────
@@ -380,14 +496,15 @@ def presence_loop():
 
             if action and action not in ("none", "respond"):
                 write_section("last_task", {
-                    "tool":         action,
-                    "description":  decision.get("description", ""),
-                    "params":       decision.get("params", {}),
-                    "started_at":   datetime.now().isoformat(),
-                    "status":       "pending",
-                    "result":       "",
-                    "error":        "",
-                    "completed_at": "",
+                    "tool":             action,
+                    "description":      decision.get("description", ""),
+                    "params":           decision.get("params", {}),
+                    "expected_outcome": decision.get("expected_outcome", ""),
+                    "started_at":       datetime.now().isoformat(),
+                    "status":           "pending",
+                    "result":           "",
+                    "error":            "",
+                    "completed_at":     "",
                 })
                 fresh_situation = read_state().get("situation", {})
                 write_section("situation", {
@@ -434,13 +551,26 @@ def task_loop():
             now = datetime.now().isoformat()
 
             if not error:
+                # ── Self-verification pass ────────────────────────────
+                try:
+                    from toolbox.self_check.self_check import verify as _verify
+                    expected = last_task.get("expected_outcome", "")
+                    vcheck = _verify(tool, params, result, expected)
+                except Exception as _ve:
+                    vcheck = {"verified": False, "confidence": "unverified",
+                              "note": f"Verification module error: {_ve}"}
+
                 write_section("last_task", {
                     **last_task,
                     "status":       "success",
                     "result":       result,
                     "error":        "",
                     "completed_at": now,
+                    "verified":     vcheck["verified"],
+                    "confidence":   vcheck["confidence"],
+                    "verification_note": vcheck["note"],
                 })
+                print(f"[task] Verified: {vcheck['confidence']} — {vcheck['note'][:80]}")
             else:
                 write_section("last_task", {
                     **last_task,
@@ -448,6 +578,9 @@ def task_loop():
                     "result":       "",
                     "error":        error,
                     "completed_at": now,
+                    "verified":     False,
+                    "confidence":   "failed",
+                    "verification_note": "Tool returned an error — nothing to verify.",
                 })
 
             fresh = read_state().get("situation", {})

@@ -1,0 +1,71 @@
+✅ Hayeong starting...
+   Session: 24e69deb
+   Warming presence model... ready.
+[reasoning_loop] Heartbeat started.   Reasoning loop started.
+
+   [plugins] Loaded: comfyui
+   [plugins] Loaded: minecraft
+   Plugins loaded.
+✅ Hayeong is ready.
+   Presence loop started.
+   Task loop started.
+   Input loop started.
+   Type your message and press Enter.
+
+[reasoning_loop] Presence LLM: reachable on port 11435.
+[reasoning_loop] Wake assessment: clean state — nothing to review.
+[reasoning_loop] Next tick in 60.0s
+[reasoning_loop] Next tick in 60.0s
+
+Hayeong: I'm working on implementing the handoff file handoff_test_hello.md now.
+[presence] Task assigned: handoff_reader — Implement the content from the handoff file handoff_test_hel
+[task] Executing: handoff_reader — Implement the content from the handoff file handoff_test_hel
+[task] Verified: failed — File does NOT exist on disk: handoff_test_hello.md
+[task] Done: Implementation of 'hello_test' from handoff_test_hello.md:
+  3 file(s) created, 
+🖥️  Torch device: cuda (NVIDIA GeForce RTX 3090)
+Loading Whisper model...
+✅ Whisper loaded on cuda
+Loading Kokoro TTS on cuda...
+WARNING: Defaulting repo_id to hexgrad/Kokoro-82M. Pass repo_id='hexgrad/Kokoro-82M' to suppress this warning.
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+H:\hayeong\.venv\Lib\site-packages\torch\nn\modules\rnn.py:123: UserWarning: dropout option adds dropout after all but last recurrent layer, so non-zero dropout expects num_layers greater than 1, but got dropout=0.2 and num_layers=1
+  warnings.warn(
+H:\hayeong\.venv\Lib\site-packages\torch\nn\utils\weight_norm.py:143: FutureWarning: `torch.nn.utils.weight_norm` is deprecated in favor of `torch.nn.utils.parametrizations.weight_norm`.
+  WeightNorm.apply(module, name, dim)
+
+Hayeong: I processed the handoff file handoff_test_hello.md, but I couldn't find it on disk to verify. Let me know if you need me to check this again or if there's another task.
+Loading Kokoro TTS on cuda...
+WARNING: Defaulting repo_id to hexgrad/Kokoro-82M. Pass repo_id='hexgrad/Kokoro-82M' to suppress this warning.
+✅ Kokoro TTS ready.
+✅ Kokoro TTS ready.
+[reasoning_loop] Next tick in 60.0s
+[reasoning_loop] Next tick in 60.0s
+[reasoning_loop] Next tick in 60.0s
+[reasoning_loop] Next tick in 60.0s
+[reasoning_loop] Next tick in 60.0s
+[reasoning_loop] Next tick in 60.0s
+[reasoning_loop] Next tick in 60.0s
+[reasoning_loop] Next tick in 60.0s
+[reasoning_loop] Next tick in 60.0s
+[reasoning_loop] Next tick in 60.0s
+[reasoning_loop] Next tick in 60.0s
+[reasoning_loop] Next tick in 60.0s
+[reasoning_loop] Next tick in 60.0s
+[reasoning_loop] Next tick in 60.0s
+[reasoning_loop] Next tick in 60.0s
+[reasoning_loop] Next tick in 60.0s
+[reasoning_loop] Next tick in 60.0s
+
+Hayeong: James, the handoff file was processed, but there's a discrepancy. The file `handoff_test_hello.md` does not exist on disk according to the verification note.
+
+Hayeong: There's a discrepancy here. The handoff_reader tool says it successfully processed the handoff_test_hello.md file, but the verification note says the file doesn't exist on disk. This needs to be fixed in your next update.
+[reasoning_loop] Next tick in 60.0s
+[reasoning_loop] Next tick in 60.0s
+[reasoning_loop] Next tick in 60.0s
+[reasoning_loop] Next tick in 60.0s
+[reasoning_loop] Next tick in 60.0s
+[reasoning_loop] Next tick in 60.0s
+[reasoning_loop] Next tick in 60.0s
+[reasoning_loop] Next tick in 60.0s
+[reasoning_loop] Next tick in 60.0s

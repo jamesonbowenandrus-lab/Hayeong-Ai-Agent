@@ -8,5 +8,10 @@
   "dev":       { "module": "toolbox.dev.hayeong_dev_tool",      "function": "run" },
   "comfyui":   { "module": "toolbox.comfyui.comfyui_tool",      "function": "run" },
   "ffmpeg":          { "module": "toolbox.ffmpeg.ffmpeg_tool",                    "function": "run" },
-  "handoff_reader":  { "module": "toolbox.handoff_reader.handoff_reader",         "function": "run" }
+  "handoff_reader":  { "module": "toolbox.handoff_reader.handoff_reader",         "function": "run" },
+  "self_check":      { "module": "toolbox.self_check.self_check",                 "function": "run" },
+  "sensor_tool":     { "module": "toolbox.sensor_tool.sensor_tool",               "function": "run" },
+  "finetune_curator": { "module": "toolbox.finetune_curator.finetune_curator",    "function": "run" },
+  "web_search":      { "module": "toolbox.web_search.web_search",                 "function": "run" },
+  "file_manager":    { "module": "toolbox.file_manager.file_manager",             "function": "run" }
 }

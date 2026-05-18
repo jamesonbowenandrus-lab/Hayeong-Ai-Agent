@@ -10,12 +10,7 @@
     "minecraft_last_event_detail": {},
     "minecraft_pending_action": null,
     "minecraft_voice_input": "",
-    "priority_flags": [
-      {
-        "flag": "Reasoning layer wrote a message for James over 2 minutes ago and it hasn't been delivered yet: 'Voice client status is unknown — unable to confirm if mic and audio are working. Do not claim voice is working.'",
-        "level": "urgent"
-      }
-    ],
+    "priority_flags": [],
     "pending_results": [],
     "commitments": [],
     "self_assessment": "",

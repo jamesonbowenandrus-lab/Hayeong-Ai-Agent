@@ -1,0 +1,3 @@
+Hello from Hayeong.
+This file confirms handoff_reader wrote to disk successfully.
+If you can read this, the pipeline is working.
