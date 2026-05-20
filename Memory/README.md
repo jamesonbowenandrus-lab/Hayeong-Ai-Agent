@@ -16,6 +16,9 @@ Everything Hayeong remembers and knows.
   - `toolknowledge\` — What Hayeong knows about her own tools:
     how to use them, their quirks, what works and what doesn't.
 
+- `backups\` — Timestamped backups of Hayeong's state and memory files.
+  Created automatically during updates. If something goes wrong, restore from here.
+
 ## What To Know
 
 memory.json and the chromadb store are the most frequently read/written

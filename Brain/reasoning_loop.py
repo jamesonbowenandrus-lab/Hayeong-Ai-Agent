@@ -302,7 +302,7 @@ def _check_commitments():
     Called every heartbeat tick.
     """
     try:
-        from commitment_manager import get_overdue
+        from brain.commitment_manager import get_overdue
         overdue = get_overdue()
         if not overdue:
             return
@@ -975,7 +975,7 @@ def _advance_active_task():
                     result=result.get("progress", "")[:400],
                 )
                 try:
-                    from commitment_manager import get_all_active, fulfill_commitment
+                    from brain.commitment_manager import get_all_active, fulfill_commitment
                     task_words = set(task.lower().split())
                     for cmt in get_all_active():
                         cmt_words = set(cmt["text"].lower().split())

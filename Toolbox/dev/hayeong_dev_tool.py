@@ -28,7 +28,7 @@ from pathlib import Path
 
 ROOT_DIR     = Path(__file__).parent.parent.parent
 HANDOFFS_DIR = ROOT_DIR / "handoffs"
-REVIEW_DIR   = ROOT_DIR / "pending_james_review"
+REVIEW_DIR   = ROOT_DIR / "logs" / "pending_james_review"
 LOG_FILE     = ROOT_DIR / "logs" / "dev_tool_log.json"
 PROMPT_HIST  = ROOT_DIR / "logs" / "prompt_history"
 

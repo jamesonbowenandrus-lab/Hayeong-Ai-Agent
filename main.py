@@ -341,6 +341,7 @@ PARAMS GUIDE — key names for common tools:
 - finetune_curator: {{"operation": "curate", "max_entries": 100}}
 - web_search     : {{"operation": "search", "query": "search terms", "max_results": 5}}
 - file_manager   : {{"operation": "read", "path": "relative/path/to/file.txt"}}
+- gaming         : {{"action": "move", "direction": "forward", "magnitude": 1.0, "duration": 0.3}}
 
 Always use exact key names shown above. "handoff_path" not "file_path" or "path".
 

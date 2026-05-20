@@ -13,5 +13,6 @@
   "sensor_tool":     { "module": "toolbox.sensor_tool.sensor_tool",               "function": "run" },
   "finetune_curator": { "module": "toolbox.finetune_curator.finetune_curator",    "function": "run" },
   "web_search":      { "module": "toolbox.web_search.web_search",                 "function": "run" },
-  "file_manager":    { "module": "toolbox.file_manager.file_manager",             "function": "run" }
+  "file_manager":    { "module": "toolbox.file_manager.file_manager",             "function": "run" },
+  "gaming":          { "module": "toolbox.gaming.gaming_tool",                    "function": "run" }
 }

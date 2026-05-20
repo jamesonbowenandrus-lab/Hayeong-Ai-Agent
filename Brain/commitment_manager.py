@@ -8,7 +8,7 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-COMMITMENTS_FILE = Path(__file__).parent / "Brain" / "state" / "commitments.json"
+COMMITMENTS_FILE = Path(__file__).parent / "state" / "commitments.json"
 
 
 def _load() -> list:
