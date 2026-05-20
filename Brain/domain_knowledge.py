@@ -9,7 +9,7 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-KNOWLEDGE_FILE = Path(__file__).parent / "Brain" / "state" / "domain_knowledge.json"
+KNOWLEDGE_FILE = Path(__file__).parent / "state" / "domain_knowledge.json"
 
 
 def _load() -> dict:

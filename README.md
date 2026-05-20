@@ -88,6 +88,7 @@ hayeong\
 │   ├── config.py            ← All paths, ports, model names. Change things here.
 │   ├── commitment_manager.py← Tracks commitments made during conversation.
 │   ├── identity.json        ← Who she is. Personality, values, relationship with James.
+│   ├── domain_knowledge\    ← Context that shapes reasoning by domain.
 │   ├── state\               ← Shared state bus. How her loops talk to each other.
 │   ├── vision\              ← How she receives awareness of the world.
 │   └── voice\               ← How she expresses herself to the world.
@@ -155,7 +156,6 @@ change it in `Brain\config.py`. Everything else imports from there.
 |----------|------|-------|------|-----------|
 | Presence & Reasoning | 11435 | qwen2.5:32b-instruct-q4_K_M | All thinking, planning, and responses | **Yes** |
 | DeepSeek Specialist | 11436 | deepseek-r1:latest | On-demand code tasks only — not auto-started | No (on-demand) |
-| Discord Bridge | 11434 | llama3.2:latest | Discord bot responses only | No (Discord only) |
 
 Start the presence LLM with `Brain\ollama_reasoning.bat` before running `main.py`.
 

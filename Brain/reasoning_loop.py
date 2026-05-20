@@ -617,7 +617,7 @@ def _decide_minecraft_action(state: dict, mc_state: dict, task: str):
     # Inject domain knowledge into the user prompt
     knowledge_ctx = ""
     try:
-        from domain_knowledge import format_for_prompt
+        from brain.domain_knowledge import format_for_prompt
         knowledge_ctx = format_for_prompt("minecraft", limit=10)
     except Exception:
         pass
@@ -737,7 +737,7 @@ def _update_domain_knowledge(domain: str, task: str, result: str, context: dict 
     """After a task action, ask the reasoning LLM what was learned.
     Writes new knowledge or reinforces/contradicts existing entries."""
     try:
-        from domain_knowledge import format_for_prompt, add_knowledge, reinforce_knowledge, contradict_knowledge
+        from brain.domain_knowledge import format_for_prompt, add_knowledge, reinforce_knowledge, contradict_knowledge
         existing = format_for_prompt(domain, limit=15)
     except Exception as e:
         print(f"[reasoning_loop] domain_knowledge import failed: {e}")
@@ -834,7 +834,7 @@ def _store_minecraft_session_summary(goal: str, actions: list, outcome: str):
 def _warm_knowledge_cache():
     """Load all domain knowledge into memory at startup."""
     try:
-        from domain_knowledge import get_all_domains, get_knowledge
+        from brain.domain_knowledge import get_all_domains, get_knowledge
         for domain in get_all_domains():
             _knowledge_cache[domain] = get_knowledge(domain)
         if _knowledge_cache:
@@ -936,7 +936,7 @@ def _advance_active_task():
                 break
         knowledge_ctx = ""
         try:
-            from domain_knowledge import format_for_prompt
+            from brain.domain_knowledge import format_for_prompt
             knowledge_ctx = format_for_prompt(domain, limit=8)
         except Exception:
             pass
