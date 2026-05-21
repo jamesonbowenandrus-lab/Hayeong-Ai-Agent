@@ -10,7 +10,7 @@ identity_constitutional.json
 identity_living.json
 Hayeong_Backstory.txt
 Memory/relationships/james.json
-memory/chromadb/chroma.sqlite3
+
 
 voice_prep/downloads/
 
@@ -21,3 +21,14 @@ voice_prep/downloads/
 *.mp3
 
 *.deb
+
+# ── Hayeong Private Runtime Data ──────────────────────────────────────
+# These files contain personal conversation history, memory embeddings,
+# and emotional state. They are generated at runtime and are private.
+# Do not commit them to the repository.
+
+Memory/chroma_db/chroma.sqlite3
+Memory/chroma_db/*.bin
+Memory/chroma_db/index/
+Memory/memory.json
+Brain/mood.json
