@@ -10,6 +10,7 @@ identity_constitutional.json
 identity_living.json
 Hayeong_Backstory.txt
 Memory/relationships/james.json
+memory/chromadb/chroma.sqlite3
 
 voice_prep/downloads/
 

@@ -69,3 +69,40 @@ Hayeong: There's a discrepancy here. The handoff_reader tool says it successfull
 [reasoning_loop] Next tick in 60.0s
 [reasoning_loop] Next tick in 60.0s
 [reasoning_loop] Next tick in 60.0s
+✅ Hayeong starting...
+   Session: f9cb4371
+   Warming presence model... ready.
+[reasoning_loop] Heartbeat started.   Reasoning loop started.
+
+   [plugins] Loaded: comfyui
+   [plugins] Loaded: gaming
+   [plugins] Loaded: minecraft
+   Plugins loaded.
+✅ Hayeong is ready.
+   Presence loop started.
+   Task loop started.
+   Input loop started.
+   Type your message and press Enter.
+
+[reasoning_loop] Presence LLM: reachable on port 11435.
+[reasoning_loop] Wake assessment: clean state — nothing to review.
+[reasoning_loop] Next tick in 60.0s
+[reasoning_loop] Next tick in 60.0s
+[reasoning_loop] Next tick in 60.0s
+[reasoning_loop] Next tick in 60.0s
+[reasoning_loop] Next tick in 60.0s
+[reasoning_loop] Next tick in 60.0s
+[reasoning_loop] Next tick in 60.0s
+[reasoning_loop] Next tick in 60.0s
+[reasoning_loop] Next tick in 60.0s
+[reasoning_loop] Next tick in 60.0s
+[reasoning_loop] Next tick in 60.0s
+[reasoning_loop] Next tick in 60.0s
+[reasoning_loop] Next tick in 60.0s
+[reasoning_loop] Next tick in 60.0s
+[reasoning_loop] Next tick in 60.0s
+[reasoning_loop] Next tick in 60.0s
+[reasoning_loop] Next tick in 60.0s
+[reasoning_loop] Next tick in 60.0s
+[reasoning_loop] Next tick in 60.0s
+[reasoning_loop] Next tick in 60.0s

@@ -1,3 +1,7 @@
 git add .
 git commit -m ”update to most of the readme files in the sub and tool folders, update to comfyui and voice pipeline”
 git push
+
+git rm --cached memory/chromadb/chroma.sqlite3.json                                                
+git rm --cached memory/chromadb/chroma.sqlite3.json                                                                  
+                                                                                                                                                                    
