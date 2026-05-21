@@ -51,7 +51,7 @@ def run(description: str, params: dict) -> str:
     try:
         return _run_pipeline(params)
     except Exception as e:
-        return f"ComfyUI tool error: {e}"
+        return f"[ERROR] ComfyUI tool: {e}"
 
 
 def _run_pipeline(params: dict) -> str:
@@ -60,22 +60,22 @@ def _run_pipeline(params: dict) -> str:
     output_prefix = params.get("output_prefix", "hayeong")
 
     if not prompt:
-        return "No prompt provided. Set prompt in task_params."
+        return "[ERROR] No prompt provided. Set prompt in task_params."
 
     # ── 1. Health check ───────────────────────────────────────────────
     if not _is_running():
         _log(f"Generation skipped — ComfyUI is not running | Prompt: {prompt}")
-        return "ComfyUI is not running. Start ComfyUI on the 7900 XTX before requesting image generation."
+        return "[ERROR] ComfyUI is not running. Start ComfyUI on the 7900 XTX before requesting image generation."
 
     # ── 2. Load workflow ──────────────────────────────────────────────
     workflow_path = WORKFLOW_DIR / f"{workflow_name}.json"
     if not workflow_path.exists():
-        return f"Workflow not found: {workflow_path}. Available: {_list_workflows()}"
+        return f"[ERROR] Workflow not found: {workflow_path}. Available: {_list_workflows()}"
 
     try:
         workflow = json.loads(workflow_path.read_text(encoding="utf-8"))
     except Exception as e:
-        return f"Failed to load workflow '{workflow_name}': {e}"
+        return f"[ERROR] Failed to load workflow '{workflow_name}': {e}"
 
     # ── 3. Inject params ──────────────────────────────────────────────
     workflow = _inject_params(workflow, params)
@@ -90,10 +90,10 @@ def _run_pipeline(params: dict) -> str:
         resp.raise_for_status()
         prompt_id = resp.json().get("prompt_id")
     except Exception as e:
-        return f"Failed to submit workflow to ComfyUI: {e}"
+        return f"[ERROR] Failed to submit workflow to ComfyUI: {e}"
 
     if not prompt_id:
-        return "ComfyUI did not return a prompt_id — submission may have failed."
+        return "[ERROR] ComfyUI did not return a prompt_id — submission may have failed."
 
     # ── 5. Poll for completion ────────────────────────────────────────
     start    = time.time()
@@ -117,9 +117,9 @@ def _run_pipeline(params: dict) -> str:
             break
 
         if status.get("status_str") == "error":
-            return f"ComfyUI reported generation error for prompt_id {prompt_id}."
+            return f"[ERROR] ComfyUI reported generation error for prompt_id {prompt_id}."
     else:
-        return f"ComfyUI generation timed out after {COMFYUI_TIMEOUT}s."
+        return f"[ERROR] ComfyUI generation timed out after {COMFYUI_TIMEOUT}s."
 
     # ── 6. Extract output images ──────────────────────────────────────
     images = []
@@ -128,7 +128,7 @@ def _run_pipeline(params: dict) -> str:
             images.append(img)
 
     if not images:
-        return f"ComfyUI completed prompt_id={prompt_id} but no output images found in history."
+        return f"[PARTIAL] ComfyUI completed prompt_id={prompt_id} but no output images found in history."
 
     # ── 7. Copy outputs ───────────────────────────────────────────────
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -164,7 +164,7 @@ def _run_pipeline(params: dict) -> str:
     output_line = saved_paths[0] if len(saved_paths) == 1 else str(saved_paths)
     cfg_val      = params.get("cfg", "?")
     return (
-        f"Image generated: {output_line}\n"
+        f"[SUCCESS] Image generated: {output_line}\n"
         f"Prompt: {prompt}\n"
         f"Workflow: {workflow_name} | Steps: {steps} | CFG: {cfg_val} | Seed: {seed_val}"
     )

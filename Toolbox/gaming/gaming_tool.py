@@ -40,62 +40,65 @@ from . import gamepad_state as gs
 
 def run(description: str, params: dict) -> str:
     """Entry point called by main.py task loop via registry."""
-    action = params.get("action", "").lower()
+    try:
+        action = params.get("action", "").lower()
 
-    if not action:
-        raise ValueError("No action specified in params.")
+        if not action:
+            return "[ERROR] No action specified in params."
 
-    if action == "status":
-        state = gs.read_state()
-        return f"Gamepad state: {state}"
+        if action == "status":
+            state = gs.read_state()
+            return f"[SUCCESS] Gamepad state: {state}"
 
-    if action == "move":
-        direction = params.get("direction", "")
-        magnitude = float(params.get("magnitude", 1.0))
-        duration  = float(params.get("duration", 0.3))
-        if not direction:
-            raise ValueError("move action requires 'direction' param.")
-        gp.move(direction, magnitude, duration)
-        result = f"Moved {direction} at magnitude {magnitude} for {duration}s"
+        if action == "move":
+            direction = params.get("direction", "")
+            magnitude = float(params.get("magnitude", 1.0))
+            duration  = float(params.get("duration", 0.3))
+            if not direction:
+                return "[ERROR] move action requires 'direction' param."
+            gp.move(direction, magnitude, duration)
+            result = f"Moved {direction} at magnitude {magnitude} for {duration}s"
 
-    elif action == "aim":
-        x        = float(params.get("x_delta", 0.0))
-        y        = float(params.get("y_delta", 0.0))
-        duration = float(params.get("duration", 0.15))
-        gp.aim(x, y, duration)
-        result = f"Aimed ({x}, {y}) for {duration}s"
+        elif action == "aim":
+            x        = float(params.get("x_delta", 0.0))
+            y        = float(params.get("y_delta", 0.0))
+            duration = float(params.get("duration", 0.15))
+            gp.aim(x, y, duration)
+            result = f"Aimed ({x}, {y}) for {duration}s"
 
-    elif action == "press":
-        action_name = params.get("action_name", "")
-        duration    = float(params.get("duration", 0.1))
-        if not action_name:
-            raise ValueError("press action requires 'action_name' param.")
-        gp.press(action_name, duration)
-        result = f"Pressed {action_name} for {duration}s"
+        elif action == "press":
+            action_name = params.get("action_name", "")
+            duration    = float(params.get("duration", 0.1))
+            if not action_name:
+                return "[ERROR] press action requires 'action_name' param."
+            gp.press(action_name, duration)
+            result = f"Pressed {action_name} for {duration}s"
 
-    elif action == "hold":
-        action_name = params.get("action_name", "")
-        if not action_name:
-            raise ValueError("hold action requires 'action_name' param.")
-        gp.hold(action_name)
-        result = f"Holding {action_name}"
+        elif action == "hold":
+            action_name = params.get("action_name", "")
+            if not action_name:
+                return "[ERROR] hold action requires 'action_name' param."
+            gp.hold(action_name)
+            result = f"Holding {action_name}"
 
-    elif action == "release":
-        action_name = params.get("action_name", "")
-        if not action_name:
-            raise ValueError("release action requires 'action_name' param.")
-        gp.release(action_name)
-        result = f"Released {action_name}"
+        elif action == "release":
+            action_name = params.get("action_name", "")
+            if not action_name:
+                return "[ERROR] release action requires 'action_name' param."
+            gp.release(action_name)
+            result = f"Released {action_name}"
 
-    elif action == "release_all":
-        gp.release_all()
-        result = "All inputs released"
+        elif action == "release_all":
+            gp.release_all()
+            result = "All inputs released"
 
-    else:
-        raise ValueError(
-            f"Unknown action: '{action}'. "
-            "Valid: move, aim, press, hold, release, release_all, status"
-        )
+        else:
+            return (
+                f"[ERROR] Unknown action: '{action}'. "
+                "Valid: move, aim, press, hold, release, release_all, status"
+            )
 
-    gs.write_state(action, params, result)
-    return result
+        gs.write_state(action, params, result)
+        return f"[SUCCESS] {result}"
+    except Exception as e:
+        return f"[ERROR] gaming_tool: {e}"

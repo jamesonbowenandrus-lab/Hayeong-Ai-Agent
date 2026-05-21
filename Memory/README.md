@@ -1,6 +1,8 @@
 # Memory\
 
-Everything Hayeong remembers and knows.
+Hayeong's persistent memory — what she remembers, who she knows, and what she
+has learned. Distinct from Brain\state\, which holds transient runtime signals.
+Memory accumulates over time; state resets each cycle.
 
 ## What Lives Here
 

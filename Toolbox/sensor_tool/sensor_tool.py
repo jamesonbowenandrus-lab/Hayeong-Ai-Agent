@@ -26,15 +26,15 @@ def run(description: str, params: dict) -> str:
         gpu       = params.get("gpu", "all").lower()
 
         if operation == "status":
-            return _full_status()
+            return f"[SUCCESS] {_full_status()}"
         elif operation == "check_gpu":
-            return _gpu_status(gpu)
+            return f"[SUCCESS] {_gpu_status(gpu)}"
         elif operation == "check_vram_headroom":
-            return _vram_headroom(gpu)
+            return f"[SUCCESS] {_vram_headroom(gpu)}"
         else:
-            return f"Unknown operation '{operation}'. Use: status, check_gpu, check_vram_headroom"
+            return f"[ERROR] Unknown operation '{operation}'. Use: status, check_gpu, check_vram_headroom"
     except Exception as e:
-        return f"sensor_tool error: {e}"
+        return f"[ERROR] sensor_tool: {e}"
 
 
 def _full_status() -> str:

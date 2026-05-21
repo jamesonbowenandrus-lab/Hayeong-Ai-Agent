@@ -34,9 +34,9 @@ def send_minecraft_command(command: str, params: dict = None) -> str:
             "issued_at": datetime.now().isoformat(),
         }
         _COMMAND_PATH.write_text(json.dumps(cmd, indent=2), encoding="utf-8")
-        return f"Command sent: {command}"
+        return f"[SUCCESS] Command sent: {command}"
     except Exception as e:
-        return f"Failed to send command: {e}"
+        return f"[ERROR] Failed to send command: {e}"
 
 
 def run(description: str, params: dict) -> str:
@@ -51,7 +51,7 @@ def run(description: str, params: dict) -> str:
             _spec.loader.exec_module(_mod)
             return _mod.run(description, params)
         except Exception as e:
-            return f"bot_update failed: {e}"
+            return f"[ERROR] bot_update failed: {e}"
 
     # If a "command" key is present, send a command to the already-running bot
     if "command" in params:
@@ -64,7 +64,7 @@ def run(description: str, params: dict) -> str:
     version = params.get("version", MINECRAFT_VERSION)
 
     if not _server_reachable(str(host), int(port)):
-        return f"Minecraft server not reachable at {host}:{port} — is the server running?"
+        return f"[ERROR] Minecraft server not reachable at {host}:{port} — is the server running?"
 
     try:
         proc = subprocess.Popen(
@@ -99,6 +99,6 @@ def run(description: str, params: dict) -> str:
                     pass
 
         threading.Thread(target=_pipe, args=(proc,), daemon=True).start()
-        return f"Minecraft bot started (PID {proc.pid}) connecting to {host}:{port}"
+        return f"[PENDING] Minecraft bot started (PID {proc.pid}) connecting to {host}:{port}"
     except Exception as e:
-        return f"Minecraft failed to start: {e}"
+        return f"[ERROR] Minecraft failed to start: {e}"

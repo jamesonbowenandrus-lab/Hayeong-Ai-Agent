@@ -12,7 +12,7 @@
   "self_check":      { "module": "toolbox.self_check.self_check",                 "function": "run" },
   "sensor_tool":     { "module": "toolbox.sensor_tool.sensor_tool",               "function": "run" },
   "finetune_curator": { "module": "toolbox.finetune_curator.finetune_curator",    "function": "run" },
-  "web_search":      { "module": "toolbox.web_search.web_search",                 "function": "run" },
+  "web_search":      { "module": "toolbox.web.web_search_tool",                   "function": "run", "description": "Search the web using DuckDuckGo. Modes: search (default), news, read (fetch full page text), fetch (specific URL). Params: query (str), mode (str), max_results (int, default 5), fetch_top (int, default 1), url (str for fetch mode)." },
   "file_manager":    { "module": "toolbox.file_manager.file_manager",             "function": "run" },
   "gaming":          { "module": "toolbox.gaming.gaming_tool",                    "function": "run" }
 }

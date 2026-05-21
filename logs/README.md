@@ -16,6 +16,9 @@ Everything recorded about Hayeong's activity.
 - `outputs\` — Things Hayeong creates: images, 3D models, documents, music.
   Organized by creation date and tool.
 
+- `finetune_datasets\` — Exported training datasets from the finetune_curator tool.
+  JSONL and Alpaca-format files ready for fine-tuning runs.
+
 - `dashboard\` — Logs specific to dashboard activity.
 
 - `handoffs\` — Claude Code handoff notes from development sessions.
@@ -27,6 +30,10 @@ Everything recorded about Hayeong's activity.
 - `notes\` — Roadmap notes and important project documents.
   Hayeong can write her own notes here — problem logs, update plans,
   things she wants to remember about the project.
+
+- `console.log` — Mirror of stdout/stderr from the main process. The _Tee class
+  in startup() writes every console line here so errors are preserved after
+  the terminal closes.
 
 ## What To Know
 

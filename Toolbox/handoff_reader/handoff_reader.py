@@ -61,19 +61,19 @@ def run(description: str, params: dict) -> str:
             dry_run = str(params.get("dry_run", "false")).lower() == "true"
             return _implement(path, dry_run)
         else:
-            return f"Unknown operation '{operation}'. Use: implement, read, list, status"
+            return f"[ERROR] Unknown operation '{operation}'. Use: implement, read, list, status"
     except Exception as e:
-        return f"handoff_reader error: {e}"
+        return f"[ERROR] handoff_reader: {e}"
 
 
 def _list_handoffs() -> str:
     """List all handoff files available for implementation."""
     if not HANDOFFS_DIR.exists():
-        return "No handoffs directory found."
+        return "[ERROR] No handoffs directory found."
     files = sorted(HANDOFFS_DIR.glob("*.md"))
     if not files:
-        return "No handoff files found in handoffs/"
-    lines = [f"Found {len(files)} handoff file(s):"]
+        return "[SUCCESS] No handoff files found in handoffs/"
+    lines = [f"[SUCCESS] Found {len(files)} handoff file(s):"]
     for f in files:
         size = f.stat().st_size
         lines.append(f"  - {f.name} ({size} bytes)")
@@ -84,12 +84,12 @@ def _read_handoff(path: str) -> str:
     """Read and summarize a handoff file."""
     resolved = _resolve_path(path)
     if not resolved:
-        return f"Handoff file not found: {path}"
+        return f"[ERROR] Handoff file not found: {path}"
     content = resolved.read_text(encoding="utf-8")
     summary = content[:2000]
     if len(content) > 2000:
         summary += f"\n\n[...truncated — {len(content)} total chars]"
-    return summary
+    return f"[SUCCESS] {summary}"
 
 
 def _resolve_path(path: str) -> Path | None:
@@ -215,7 +215,7 @@ def _implement(path: str, dry_run: bool = False) -> str:
     """
     resolved = _resolve_path(path)
     if not resolved:
-        return f"Cannot find handoff file: {path}"
+        return f"[ERROR] Cannot find handoff file: {path}"
 
     content   = resolved.read_text(encoding="utf-8")
     tool_name = _extract_tool_name(content)
@@ -223,13 +223,13 @@ def _implement(path: str, dry_run: bool = False) -> str:
 
     if not files:
         return (
-            f"Could not extract file specs from {resolved.name}. "
+            f"[PARTIAL] Could not extract file specs from {resolved.name}. "
             f"The handoff may need manual implementation. "
             f"Tool name detected: '{tool_name or 'unknown'}'"
         )
 
     if dry_run:
-        lines = [f"DRY RUN — {resolved.name}"]
+        lines = [f"[SUCCESS] DRY RUN — {resolved.name}"]
         lines.append(f"Tool name: {tool_name or 'unknown'}")
         lines.append(f"Files to create: {len(files)}")
         for f in files:
@@ -243,7 +243,7 @@ def _implement(path: str, dry_run: bool = False) -> str:
     try:
         from toolbox.dev.hayeong_dev_tool import hayeong_dev_tool
     except ImportError as e:
-        return f"Cannot import dev tool: {e}"
+        return f"[ERROR] Cannot import dev tool: {e}"
 
     for file_spec in files:
         file_path    = file_spec["path"]
@@ -287,8 +287,15 @@ def _implement(path: str, dry_run: bool = False) -> str:
 
     _log_run(resolved.name, tool_name, succeeded, failed, results)
 
+    if failed == 0:
+        prefix = "[SUCCESS]"
+    elif succeeded > 0:
+        prefix = "[PARTIAL]"
+    else:
+        prefix = "[ERROR]"
+
     summary = [
-        f"Implementation of '{tool_name}' from {resolved.name}:",
+        f"{prefix} Implementation of '{tool_name}' from {resolved.name}:",
         f"  {succeeded} file(s) created, {failed} routed/failed",
         "",
     ] + results
@@ -303,11 +310,11 @@ def _implement(path: str, dry_run: bool = False) -> str:
 def _implementation_status() -> str:
     """Report on recent implementation runs."""
     if not LOG_FILE.exists():
-        return "No implementation runs logged yet."
+        return "[SUCCESS] No implementation runs logged yet."
     try:
         log    = json.loads(LOG_FILE.read_text(encoding="utf-8"))
         recent = log[-5:] if len(log) > 5 else log
-        lines  = [f"Last {len(recent)} implementation run(s):"]
+        lines  = [f"[SUCCESS] Last {len(recent)} implementation run(s):"]
         for entry in reversed(recent):
             lines.append(
                 f"  [{entry['timestamp'][:10]}] {entry['tool_name']} — "
@@ -315,7 +322,7 @@ def _implementation_status() -> str:
             )
         return "\n".join(lines)
     except Exception as e:
-        return f"Could not read log: {e}"
+        return f"[ERROR] Could not read log: {e}"
 
 
 def _log_run(handoff_name: str, tool_name: str, succeeded: int,

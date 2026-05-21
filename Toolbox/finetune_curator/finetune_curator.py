@@ -32,19 +32,21 @@ def run(description: str, params: dict) -> str:
         operation = params.get("operation", "status").lower()
         if operation == "curate_recent":
             days = int(params.get("days_back", 7))
-            return _curate(days_back=days)
+            return f"[SUCCESS] {_curate(days_back=days)}"
         elif operation == "curate_all":
-            return _curate(days_back=None)
+            return f"[SUCCESS] {_curate(days_back=None)}"
         elif operation == "export_dataset":
             min_q  = params.get("min_quality", "high")
             fmt    = params.get("export_format", "jsonl")
-            return _export(min_quality=min_q, export_format=fmt)
+            result = _export(min_quality=min_q, export_format=fmt)
+            prefix = "[ERROR]" if result.startswith("No examples found") else "[SUCCESS]"
+            return f"{prefix} {result}"
         elif operation == "status":
-            return _status()
+            return f"[SUCCESS] {_status()}"
         else:
-            return f"Unknown operation '{operation}'. Use: curate_recent, curate_all, export_dataset, status"
+            return f"[ERROR] Unknown operation '{operation}'. Use: curate_recent, curate_all, export_dataset, status"
     except Exception as e:
-        return f"finetune_curator error: {e}"
+        return f"[ERROR] finetune_curator: {e}"
 
 
 def _load_logs(days_back) -> list:

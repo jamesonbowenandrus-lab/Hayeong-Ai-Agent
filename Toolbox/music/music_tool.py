@@ -49,17 +49,19 @@ if str(MUSIC_DIR) not in sys.path:
 
 
 def run(description: str, params: dict) -> str:
-    """Entry point called by main.py task loop via registry. Raises on error."""
-    mode = params.get("mode", "generate").strip().lower()
-
-    if mode == "generate":
-        return _generate(params)
-    elif mode == "analyze":
-        return _analyze(params)
-    elif mode == "pipeline":
-        return _pipeline(params)
-    else:
-        raise ValueError(f"Unknown music mode: '{mode}'. Use 'generate', 'analyze', or 'pipeline'.")
+    """Entry point called by main.py task loop via registry."""
+    try:
+        mode = params.get("mode", "generate").strip().lower()
+        if mode == "generate":
+            return _generate(params)
+        elif mode == "analyze":
+            return _analyze(params)
+        elif mode == "pipeline":
+            return _pipeline(params)
+        else:
+            return f"[ERROR] Unknown music mode: '{mode}'. Use 'generate', 'analyze', or 'pipeline'."
+    except Exception as e:
+        return f"[ERROR] music_tool: {e}"
 
 
 def _generate(params: dict) -> str:
@@ -82,7 +84,7 @@ def _generate(params: dict) -> str:
         duration=float(params.get("duration", 45.0)),
         steps=int(params.get("steps", 100)),
     )
-    return f"Music generated successfully. Output: {saved_path}"
+    return f"[SUCCESS] Music generated. Output: {saved_path}"
 
 
 def _analyze(params: dict) -> str:
@@ -98,7 +100,7 @@ def _analyze(params: dict) -> str:
 
     from music_analyze import analyze
     description = analyze(str(ref))
-    return f"Music analysis complete:\n{description}"
+    return f"[SUCCESS] Music analysis complete:\n{description}"
 
 
 def _pipeline(params: dict) -> str:
@@ -128,7 +130,7 @@ def _pipeline(params: dict) -> str:
         steps=int(params.get("steps", 100)),
     )
     return (
-        f"Music pipeline complete.\n"
+        f"[SUCCESS] Music pipeline complete.\n"
         f"Style description: {result['description']}\n"
         f"Output: {result['output_path']}"
     )

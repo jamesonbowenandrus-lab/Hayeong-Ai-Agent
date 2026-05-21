@@ -19,24 +19,27 @@ if str(VOICE_DIR) not in sys.path:
 
 
 def run(description: str, params: dict) -> str:
-    action  = params.get("action", "speak").strip().lower()
-    emotion = params.get("emotion", "neutral")
+    try:
+        action  = params.get("action", "speak").strip().lower()
+        emotion = params.get("emotion", "neutral")
 
-    if action == "speak":
-        text = params.get("text", "").strip()
-        if not text:
-            raise ValueError("No text provided for voice speak action.")
-        from toolbox.voice.voice_output import speak_streamed
-        speak_streamed(text, emotion=emotion)
-        return f"Speaking: {text[:80]}"
+        if action == "speak":
+            text = params.get("text", "").strip()
+            if not text:
+                return "[ERROR] No text provided for voice speak action."
+            from toolbox.voice.voice_output import speak_streamed
+            speak_streamed(text, emotion=emotion)
+            return f"[SUCCESS] Speaking: {text[:80]}"
 
-    elif action == "test":
-        from toolbox.voice.voice_output import speak_streamed
-        speak_streamed(
-            "Voice system check. If you can hear this, it is working.",
-            emotion="neutral",
-        )
-        return "Voice test triggered."
+        elif action == "test":
+            from toolbox.voice.voice_output import speak_streamed
+            speak_streamed(
+                "Voice system check. If you can hear this, it is working.",
+                emotion="neutral",
+            )
+            return "[SUCCESS] Voice test triggered."
 
-    else:
-        raise ValueError(f"Unknown voice action: '{action}'. Use 'speak' or 'test'.")
+        else:
+            return f"[ERROR] Unknown voice action: '{action}'. Use 'speak' or 'test'."
+    except Exception as e:
+        return f"[ERROR] voice_tool: {e}"

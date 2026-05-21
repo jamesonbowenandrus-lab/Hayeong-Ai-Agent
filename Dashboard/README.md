@@ -16,6 +16,7 @@ It is a monitoring tool, not a dependency.
 
 ## What To Know
 
-The dashboard reads from Brain\state\core.json and Logs\ — it does not
-write to them. It is read-only. Changes to the dashboard do not affect
-Hayeong's operation.
+The dashboard is a pure external observer. It reads from Brain\state\core.json
+and Logs\ but never writes to either. Hayeong's reasoning, memory, and tool
+execution are entirely unaffected by whether the dashboard is running.
+If the dashboard crashes or is closed, nothing downstream breaks.

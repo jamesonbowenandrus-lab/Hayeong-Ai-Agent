@@ -38,14 +38,14 @@ def run(description: str, params: dict) -> str:
     elif mode == "trim":
         result, error = _trim(params)
     else:
-        raise ValueError(
-            f"Unknown FFmpeg mode: '{mode}'. "
+        return (
+            f"[ERROR] Unknown FFmpeg mode: '{mode}'. "
             "Use: frames_to_video, audio_to_video, convert, concat, trim."
         )
 
     if error:
-        raise RuntimeError(error)
-    return result
+        return f"[ERROR] {error}"
+    return f"[SUCCESS] {result}"
 
 
 # ── frames_to_video ───────────────────────────────────────────────────────

@@ -28,8 +28,11 @@ from brain.config import BLENDER_PATH, BLENDER_OUTPUT, BLENDER_SCRIPTS
 
 
 def run(description: str, params: dict) -> str:
-    """Entry point called by main.py task loop via registry. Raises on error."""
-    return _run_pipeline(description, params)
+    """Entry point called by main.py task loop via registry."""
+    try:
+        return _run_pipeline(description, params)
+    except Exception as e:
+        return f"[ERROR] blender_tool: {e}"
 
 
 def _run_pipeline(description: str, params: dict) -> str:
@@ -92,7 +95,7 @@ def _run_pipeline(description: str, params: dict) -> str:
     # ── 9. Check output ───────────────────────────────────────────────
     if output_path.exists():
         size = output_path.stat().st_size
-        return f"Blender generation successful. Output: {output_path} ({size} bytes). Log: {log_path}"
+        return f"[SUCCESS] Blender generation complete. Output: {output_path} ({size} bytes). Log: {log_path}"
 
     error_tail = blender_log[-800:] if len(blender_log) > 800 else blender_log
     raise RuntimeError(
