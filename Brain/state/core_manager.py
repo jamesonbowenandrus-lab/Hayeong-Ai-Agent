@@ -35,6 +35,19 @@ def write_section(section: str, data: dict):
             print(f"[core_manager] Write failed: {e}")
 
 
+def set_listening_mode(mode: str, set_by: str = "james"):
+    """
+    Set the voice input listening mode.
+    mode: 'vad' | 'ptt' | 'muted'
+    set_by: 'james' | 'system' | 'hayeong'
+    """
+    write_section("voice_input", {
+        "listening_mode": mode,
+        "mode_set_at":    datetime.now().isoformat(),
+        "mode_set_by":    set_by,
+    })
+
+
 def clear_on_startup():
     """Clear volatile sections for a clean session."""
     write_section("situation", {
@@ -59,4 +72,9 @@ def clear_on_startup():
         "certainty":    "",
         "is_new":       False,
         "expressed_at": "",
+    })
+    write_section("voice_input", {
+        "listening_mode": "vad",
+        "mode_set_at":    "",
+        "mode_set_by":    "system",
     })

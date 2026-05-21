@@ -17,6 +17,7 @@ import sys
 import asyncio
 import json
 import time
+import threading
 import numpy as np
 
 try:
@@ -55,8 +56,66 @@ VAD_MAX_SECS         = 20      # Maximum single recording length
 VAD_CHUNK_SECS       = 0.1     # Smaller chunks = more responsive VAD
 VAD_SPEECH_MIN_SECS  = 0.3     # Minimum speech — filters out coughs/chair sounds
 
-USE_PTT = "--ptt" in sys.argv
-PTT_KEY = "right ctrl"
+# Hotkeys — change these constants if James wants different keys
+HOTKEY_MODE_TOGGLE = "F9"         # Toggle VAD ↔ PTT
+HOTKEY_MUTE_TOGGLE = "F10"        # Toggle muted on/off
+PTT_KEY            = "right ctrl" # Hold to speak in PTT mode
+
+
+class _ListenMode:
+    """Thread-safe listen mode state. Replaces the old USE_PTT bool."""
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._mode = "ptt" if "--ptt" in sys.argv else "vad"
+
+    @property
+    def mode(self) -> str:
+        with self._lock:
+            return self._mode
+
+    def set(self, mode: str):
+        with self._lock:
+            self._mode = mode
+        try:
+            from brain.state.core_manager import set_listening_mode
+            set_listening_mode(mode, set_by="james")
+        except Exception:
+            pass
+        print(f"\n[voice] Listening mode → {mode.upper()}")
+
+
+LISTEN_MODE = _ListenMode()
+
+
+def _hotkey_listener():
+    """Background thread: F9 toggles between VAD and PTT."""
+    import keyboard
+    while True:
+        try:
+            keyboard.wait(HOTKEY_MODE_TOGGLE)
+            current = LISTEN_MODE.mode
+            if current == "muted":
+                LISTEN_MODE.set("vad")
+            elif current == "vad":
+                LISTEN_MODE.set("ptt")
+            else:
+                LISTEN_MODE.set("vad")
+        except Exception:
+            time.sleep(0.5)
+
+
+def _mute_hotkey_listener():
+    """Background thread: F10 toggles mute on/off."""
+    import keyboard
+    while True:
+        try:
+            keyboard.wait(HOTKEY_MUTE_TOGGLE)
+            if LISTEN_MODE.mode == "muted":
+                LISTEN_MODE.set("vad")
+            else:
+                LISTEN_MODE.set("muted")
+        except Exception:
+            time.sleep(0.5)
 
 
 # ─────────────────────────────────────────────
@@ -212,18 +271,28 @@ async def _voice_loop(ws):
             await loop.run_in_executor(None, _play_audio, pcm_bytes)
 
     async def _record_and_send():
-        loop      = asyncio.get_event_loop()
-        record_fn = record_ptt if USE_PTT else record_until_silence
-        if USE_PTT:
-            print(f"[voice_io] PTT mode — hold [{PTT_KEY}] to speak")
-        else:
-            print(f"[voice_io] VAD mode — speak naturally")
+        loop = asyncio.get_event_loop()
+
+        # Start hotkey threads — stay alive as long as the voice client runs
+        threading.Thread(target=_hotkey_listener,      name="hotkey-mode", daemon=False).start()
+        threading.Thread(target=_mute_hotkey_listener, name="hotkey-mute", daemon=False).start()
+
+        print(f"[voice_io] Mode: {LISTEN_MODE.mode.upper()} | F9=toggle VAD/PTT | F10=mute")
 
         while True:
             # Don't start a new recording while server is responding
             await server_ready.wait()
 
-            audio = await loop.run_in_executor(None, record_fn)
+            mode = LISTEN_MODE.mode
+
+            if mode == "muted":
+                await asyncio.sleep(0.2)
+                continue
+            elif mode == "ptt":
+                audio = await loop.run_in_executor(None, record_ptt)
+            else:  # vad
+                audio = await loop.run_in_executor(None, record_until_silence)
+
             if audio is None:
                 await asyncio.sleep(0.05)
                 continue
@@ -288,12 +357,12 @@ async def run_voice_client():
 # ─────────────────────────────────────────────
 
 if __name__ == "__main__":
-    if USE_PTT:
-        try:
-            import keyboard
-        except ImportError:
-            print("[voice_io] PTT mode requires: pip install keyboard")
-            sys.exit(1)
+    try:
+        import keyboard
+    except ImportError:
+        print("[voice_io] 'keyboard' package required for hotkeys — run: pip install keyboard")
+        sys.exit(1)
+    if LISTEN_MODE.mode == "ptt":
         print("[voice_io] PTT mode — install confirmed")
 
     print("[voice_io] Voice client starting...")

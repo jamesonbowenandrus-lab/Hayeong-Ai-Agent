@@ -310,6 +310,60 @@ def _pcm_bytes_to_wav(pcm_bytes: bytes, sample_rate: int = 16000) -> str:
     return tmp.name
 
 
+def _correct_transcript(raw: str) -> str:
+    """
+    Send the raw Whisper transcript through a quick correction pass.
+    Fixes transcription errors while preserving meaning exactly.
+    Returns the corrected text, or the original if correction fails.
+    Best-effort — never blocks the pipeline.
+    """
+    import requests
+    try:
+        from brain.config import PRESENCE_URL, PRESENCE_MODEL
+    except ImportError:
+        return raw
+
+    prompt = (
+        "You are a speech transcription corrector. "
+        "Fix any transcription errors in the following text. "
+        "Preserve the speaker's meaning, intent, and phrasing exactly. "
+        "Do not add words, remove words, or change what they said. "
+        "Only fix clear transcription mistakes (wrong words that sound similar, "
+        "missing punctuation, garbled phrases). "
+        "If the transcript looks correct, return it unchanged. "
+        "Return only the corrected text. No explanation. No preamble.\n\n"
+        f"Transcript: {raw}"
+    )
+
+    try:
+        resp = requests.post(
+            PRESENCE_URL,
+            json={
+                "model":    PRESENCE_MODEL,
+                "messages": [{"role": "user", "content": prompt}],
+                "stream":   False,
+                "options": {
+                    "num_predict": 150,
+                    "temperature": 0.0,
+                    "num_ctx":     512,
+                },
+            },
+            timeout=8,
+        )
+        corrected = resp.json()["message"]["content"].strip()
+
+        # Guard against hallucinated long responses
+        if len(corrected) > len(raw) * 2.5:
+            log.warning("Correction returned suspiciously long output — using raw")
+            return raw
+
+        return corrected if corrected else raw
+
+    except Exception as e:
+        log.warning(f"Transcript correction failed (non-fatal): {e}")
+        return raw
+
+
 def _audio_to_pcm_chunks(audio: np.ndarray, chunk_size: int = 4096) -> list:
     """
     Split F5-TTS float32 audio into sendable binary chunks.
@@ -650,13 +704,19 @@ async def voice_ws(websocket: WebSocket):
                     audio_buffer = []
 
                     wav_path = _pcm_bytes_to_wav(pcm_bytes)
-                    text = await loop.run_in_executor(None, _transcribe_fn, wav_path)
+                    raw_text = await loop.run_in_executor(None, _transcribe_fn, wav_path)
 
-                    if not text or not text.strip():
+                    if not raw_text or not raw_text.strip():
                         log.info("Nothing transcribed — skipping")
                         continue
 
-                    log.info(f"Transcribed: {text!r}")
+                    log.info(f"Raw transcript: {raw_text!r}")
+
+                    # Correction pass — fix Whisper errors before sending to brain
+                    text = await loop.run_in_executor(None, _correct_transcript, raw_text)
+                    if text != raw_text:
+                        log.info(f"Corrected transcript: {text!r}")
+
                     await _send_json(websocket, {"type": "transcript", "text": text})
 
                     # Full pipeline — runs even if previous TTS is still generating

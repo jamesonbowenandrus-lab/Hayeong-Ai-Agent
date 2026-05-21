@@ -76,11 +76,15 @@ def get_state():
         if last_task.get("tool"):
             tool_status[last_task["tool"]] = last_task.get("status", "idle")
 
+        voice_input  = state.get("voice_input", {})
+        listen_mode  = voice_input.get("listening_mode", "vad")
+
         return JSONResponse({
             "llm_status":   _get_llm_status(),
             "tool_status":  tool_status,
             "hayeong_says": presence_out.get("for_james", ""),
             "sent_at":      presence_out.get("expressed_at", ""),
+            "listen_mode":  listen_mode,
             "log":          _startup_log[-100:],
         })
     except Exception as e:
@@ -297,6 +301,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     <div class="dot" id="dot-presence"></div>
     <span>Presence (qwen2.5:32b)</span>
   </div>
+  <div id="listen-mode" style="margin-left:auto;font-size:13px;color:#8b949e;">🎙 VAD</div>
 </div>
 
 <div id="main">
@@ -321,11 +326,12 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 </div>
 
 <script>
-  const convLog  = document.getElementById('conv-log');
-  const logLines = document.getElementById('log-lines');
-  const toolRows = document.getElementById('tool-rows');
-  const msgInput = document.getElementById('msg-input');
-  const sendBtn  = document.getElementById('send-btn');
+  const convLog    = document.getElementById('conv-log');
+  const logLines   = document.getElementById('log-lines');
+  const toolRows   = document.getElementById('tool-rows');
+  const msgInput   = document.getElementById('msg-input');
+  const sendBtn    = document.getElementById('send-btn');
+  const listenMode = document.getElementById('listen-mode');
 
   let lastHayeongMsg = "";
   let lastLogCount   = 0;
@@ -411,6 +417,13 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
       if (data.llm_status)  updateDots(data.llm_status);
       if (data.tool_status) updateTools(data.tool_status);
+      if (data.listen_mode !== undefined) {
+        const icons = { vad: '🎙 VAD', ptt: '⌨ PTT', muted: '🔇 MUTED' };
+        listenMode.textContent = icons[data.listen_mode] || data.listen_mode;
+        listenMode.style.color = data.listen_mode === 'muted' ? '#f85149'
+                                : data.listen_mode === 'ptt'  ? '#d29922'
+                                : '#3fb950';
+      }
 
       if (data.hayeong_says && data.hayeong_says !== lastHayeongMsg) {
         lastHayeongMsg = data.hayeong_says;
