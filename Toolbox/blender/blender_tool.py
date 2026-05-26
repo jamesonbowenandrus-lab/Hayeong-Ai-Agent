@@ -16,8 +16,8 @@ Params the reasoning LLM should provide:
     timeout         (int) — seconds before killing Blender, default 120
 
 Returns:
-    str   — success message with output file path
-    raises RuntimeError / ValueError on failure (caught by _execute_tool)
+    str   — [SUCCESS] message with output file path, or [ERROR] message on failure.
+             Never raises. All errors are returned as strings.
 """
 
 import subprocess
@@ -39,8 +39,8 @@ def _run_pipeline(description: str, params: dict) -> str:
     # ── 1. Validate Blender path ──────────────────────────────────────
     blender_exe = Path(BLENDER_PATH)
     if not blender_exe.exists():
-        raise FileNotFoundError(
-            f"Blender not found at {BLENDER_PATH}. "
+        return (
+            f"[ERROR] blender_tool: Blender not found at {BLENDER_PATH}. "
             "Update BLENDER_PATH in brain/config.py."
         )
 
@@ -51,9 +51,9 @@ def _run_pipeline(description: str, params: dict) -> str:
     timeout         = int(params.get("timeout", 120))
 
     if not blender_script:
-        raise ValueError(
-            "No blender_script provided in task_params. "
-            "The reasoning LLM must provide a bpy Python script string."
+        return (
+            "[ERROR] blender_tool: No blender_script provided in params. "
+            "Provide a bpy Python script string as 'blender_script'."
         )
 
     # ── 3. Ensure output directories exist ────────────────────────────
@@ -83,9 +83,9 @@ def _run_pipeline(description: str, params: dict) -> str:
             cwd=str(output_dir),
         )
     except subprocess.TimeoutExpired:
-        raise RuntimeError(f"Blender timed out after {timeout}s. Try a simpler scene or increase timeout.")
+        return f"[ERROR] blender_tool: Blender timed out after {timeout}s. Try a simpler scene or increase timeout param."
     except FileNotFoundError:
-        raise RuntimeError(f"Could not launch Blender at {blender_exe}. Check BLENDER_PATH in brain/config.py.")
+        return f"[ERROR] blender_tool: Could not launch Blender at {blender_exe}. Check BLENDER_PATH in brain/config.py."
 
     # ── 8. Write log ──────────────────────────────────────────────────
     blender_log = (proc.stdout or "") + (proc.stderr or "")
@@ -98,8 +98,8 @@ def _run_pipeline(description: str, params: dict) -> str:
         return f"[SUCCESS] Blender generation complete. Output: {output_path} ({size} bytes). Log: {log_path}"
 
     error_tail = blender_log[-800:] if len(blender_log) > 800 else blender_log
-    raise RuntimeError(
-        f"Blender ran but produced no output at {output_path}. "
+    return (
+        f"[ERROR] blender_tool: Blender ran but produced no output at {output_path}. "
         f"Return code: {proc.returncode}. Log tail:\n{error_tail}"
     )
 

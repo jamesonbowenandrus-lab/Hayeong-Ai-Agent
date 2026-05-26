@@ -1,14 +1,23 @@
 {
-  "connected": false,
+  "connected": true,
   "username": "Hayeong",
-  "position": {"x": null, "y": null, "z": null},
+  "position": {
+    "x": 27.6,
+    "y": 71,
+    "z": 12.3
+  },
   "health": 20,
-  "food": 20,
+  "food": 18,
   "dimension": "overworld",
   "nearby_players": [],
   "nearby_mobs": [],
-  "behavior": {"mode": "idle", "target": null, "position": null, "since": null},
+  "behavior": {
+    "mode": "escort",
+    "target": "hiplizard36",
+    "position": null,
+    "since": 1779574293150
+  },
   "current_action": "idle",
-  "last_event": "",
-  "updated_at": ""
+  "last_event": "follow failed: no players visible",
+  "updated_at": "2026-05-23T22:13:28.599Z"
 }

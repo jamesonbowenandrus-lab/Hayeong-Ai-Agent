@@ -34,6 +34,7 @@ from brain.state_manager import (
     pop_priority_flags,
     pop_pending_results,
 )
+from brain.state.core_manager import write_section
 
 # ─────────────────────────────────────────────
 # CONFIGURATION
@@ -1180,6 +1181,25 @@ def _heartbeat():
 
             # 4.5. Proactive self-checks — unconditional every tick
             _proactive_checks()
+
+            # 4.75. Session focus writer — keeps orientation block current
+            try:
+                reasoning_state = read_state().get("reasoning", {})
+                current_goal    = reasoning_state.get("current_goal", "")
+                active_task     = reasoning_state.get("active_task", "")
+                focus_parts = []
+                if current_goal:
+                    focus_parts.append(current_goal)
+                if active_task and active_task != current_goal:
+                    focus_parts.append(f"Active: {active_task}")
+                focus = ". ".join(focus_parts) if focus_parts else "No specific focus — idle."
+                write_section("session_context", {
+                    "current_focus": focus,
+                    "last_updated":  datetime.now().isoformat(),
+                    "open_threads":  [],
+                })
+            except Exception:
+                pass
 
             # 5. Adaptive sleep
             state    = read_state()

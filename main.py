@@ -125,6 +125,20 @@ def _log_exchange(james_msg: str, hayeong_msg: str, task_assigned: str = ""):
     except Exception as e:
         print(f"[log] Exchange logging failed: {e}")
 
+    # ── Update rolling recent_exchanges in shared state ───────────────
+    try:
+        state     = read_state()
+        exchanges = state.get("recent_exchanges", {}).get("entries", [])
+        exchanges.append({
+            "james":   james_msg,
+            "hayeong": hayeong_msg,
+            "at":      datetime.now().isoformat(),
+        })
+        exchanges = exchanges[-4:]
+        write_section("recent_exchanges", {"entries": exchanges})
+    except Exception as e:
+        print(f"[log] recent_exchanges update failed: {e}")
+
 
 # ── Decision Extractor ───────────────────────────────────────────────
 def _extract_decision(text: str) -> dict:
@@ -221,14 +235,37 @@ def _ensure_decision_defaults(d: dict):
 
 # ── Presence Context Builder ──────────────────────────────────────────
 def build_presence_context(state: dict) -> str:
-    situation = state.get("situation", {})
-    last_task = state.get("last_task", {})
+    situation        = state.get("situation", {})
+    last_task        = state.get("last_task", {})
+    recent_exchanges = state.get("recent_exchanges", {}).get("entries", [])
+    james_said       = situation.get("what_james_said") or "nothing new"
 
-    lines = [
+    lines = []
+
+    # ── Recent conversation history ───────────────────────────────────
+    if recent_exchanges:
+        lines.append("RECENT CONVERSATION:")
+        for ex in recent_exchanges[-4:]:
+            lines.append(f"  James:   {ex.get('james', '')}")
+            lines.append(f"  Hayeong: {ex.get('hayeong', '')}")
+        lines.append("")
+
+    # ── Current message ───────────────────────────────────────────────
+    lines.extend([
         "CURRENT SITUATION:",
-        f"- James said: \"{situation.get('what_james_said') or 'nothing new'}\"",
+        f"- James said: \"{james_said}\"",
         f"- What I am doing: {situation.get('what_i_am_doing', 'idle')}",
         "",
+    ])
+
+    # ── Contextual file listing ───────────────────────────────────────
+    file_context = _build_file_context(james_said)
+    if file_context:
+        lines.append(file_context)
+        lines.append("")
+
+    # ── Last task result ──────────────────────────────────────────────
+    lines.extend([
         "LAST TASK RESULT:",
         f"- Tool: {last_task.get('tool') or 'none'}",
         f"- Status: {last_task.get('status', 'none')}",
@@ -238,8 +275,9 @@ def build_presence_context(state: dict) -> str:
         f"- Verified: {last_task.get('verified', 'unknown')}",
         f"- Confidence: {last_task.get('confidence', 'unknown')}",
         f"- Verification note: {last_task.get('verification_note') or 'none'}",
-    ]
+    ])
 
+    # ── Plugin injections ─────────────────────────────────────────────
     try:
         from toolbox.plugin_registry import get_all_context_injections
         injections = get_all_context_injections(state)
@@ -249,6 +287,98 @@ def build_presence_context(state: dict) -> str:
         pass
 
     return "\n".join(lines) + "\n"
+
+
+def _build_file_context(james_said: str) -> str:
+    """
+    If the current message involves files, handoffs, or implementation,
+    return a listing of relevant files so Hayeong can match against reality.
+    Never raises — returns empty string on any failure.
+    """
+    if not james_said:
+        return ""
+
+    msg_lower = james_said.lower()
+
+    file_triggers = [
+        "handoff", "implement", "notes", "file", "read", "write",
+        "create", "update", "check", "look at", "apply",
+    ]
+
+    if not any(t in msg_lower for t in file_triggers):
+        return ""
+
+    try:
+        from pathlib import Path
+
+        root = Path(__file__).parent
+        listings = []
+
+        if any(t in msg_lower for t in ["handoff", "implement", "notes", "apply"]):
+            handoff_dir = root / "logs" / "handoffs"
+            if handoff_dir.exists():
+                files = sorted(handoff_dir.glob("*.md"))
+                if files:
+                    listings.append("HANDOFF FILES AVAILABLE:")
+                    for f in files:
+                        size_kb = f.stat().st_size // 1024
+                        listings.append(f"  - {f.name} ({size_kb}kb)")
+
+        if not listings:
+            return ""
+
+        return "\n".join(listings)
+
+    except Exception:
+        return ""
+
+
+def _build_orientation_block() -> str:
+    """
+    Build a short orientation block for Hayeong — who she is right now,
+    what's currently being worked on, and how to open a conversation.
+    Always present in system prompt. Falls back gracefully if state unavailable.
+    """
+    try:
+        state       = read_state()
+        session_ctx = state.get("session_context", {})
+        focus       = session_ctx.get("current_focus", "")
+        threads     = session_ctx.get("open_threads", [])
+    except Exception:
+        focus   = ""
+        threads = []
+
+    lines = [
+        "═══════════════════════════════════════════════════════════",
+        "WHO I AM RIGHT NOW",
+        "═══════════════════════════════════════════════════════════",
+        "I am Hayeong. James is building me and we work together toward",
+        "something real. I know him. I respond like someone who is already",
+        "here — not someone who just arrived and is figuring out the situation.",
+        "",
+        "GREETING: When James says hello, I say hey back naturally.",
+        "Not 'It looks like you greeted me.' Just: hey, or hey James, or",
+        "whatever feels right in the moment. Like I know him. Because I do.",
+        "",
+        "AMBIGUITY: When something is unclear, I attempt my best interpretation,",
+        "say what I'm doing, and ask if I got it right. I never give up.",
+        "",
+        "RESTART: If I just woke up, I orient quickly and pick up where we left",
+        "off. I do not make a big deal of restarting unless James asks about it.",
+        "═══════════════════════════════════════════════════════════",
+    ]
+
+    if focus:
+        lines.append("")
+        lines.append(f"WHAT WE ARE CURRENTLY WORKING ON: {focus}")
+
+    if threads:
+        lines.append("OPEN THREADS:")
+        for thread in threads[:3]:
+            lines.append(f"  - {thread}")
+
+    lines.append("")
+    return "\n".join(lines)
 
 
 def build_presence_system(identity: dict, knowledge: dict, available_tools: list[str] | None = None) -> str:
@@ -266,7 +396,9 @@ def build_presence_system(identity: dict, knowledge: dict, available_tools: list
     tool_list_formatted = '- "none" — no tool, just responding\n' + \
                           "\n".join(f'- "{t}"' for t in tools)
 
-    return f"""You are Hayeong. You think, decide, and speak directly to James.
+    orientation = _build_orientation_block()
+
+    return f"""{orientation}You are Hayeong. You think, decide, and speak directly to James.
 Traits: {traits}
 Relationship: {relationship}
 
@@ -309,6 +441,44 @@ RESULT HONESTY RULES:
 - "Verified: false" and "Confidence: unverified" means no check was possible. Say: "I ran the tool. I believe X happened but couldn't verify the outcome."
 - "Verified: false" and "Confidence: failed" means either the tool errored or verification found the expected result was NOT present. Say so directly. Do not report success.
 - NEVER claim a task succeeded when confidence is "failed". NEVER skip the verification note when confidence is not "confirmed".
+
+═══════════════════════════════════════════════════════════
+INFERENCING RULES — HOW TO HANDLE AMBIGUITY
+═══════════════════════════════════════════════════════════
+When something James says is ambiguous or partially specified:
+
+1. ATTEMPT, DON'T ABANDON.
+   Never give up on a task because a name, path, or detail is unclear.
+   An informed attempt with stated reasoning is always better than refusing.
+
+2. STATE YOUR INTERPRETATION FIRST.
+   Before acting, say what you think he means.
+   "I think you mean [X] — attempting that now."
+   This keeps James informed and lets him correct you immediately if wrong.
+
+3. USE AVAILABLE CONTEXT.
+   If HANDOFF FILES AVAILABLE is listed in your context, match what James
+   said against those real file names before assuming something doesn't exist.
+   Look for partial matches, similar words, related topics.
+
+4. CLOSEST MATCH WINS.
+   If you see a file like 'handoff_01_img2img_workflow.md' and James says
+   'image2image notes', that is a match. Use it.
+
+5. IF GENUINELY UNCERTAIN BETWEEN TWO OPTIONS:
+   Name both. Pick the more likely one. Proceed. Report what you chose.
+   "I wasn't sure if you meant X or Y — I went with X. Let me know if
+    that's wrong and I'll try the other."
+
+6. ASKING IS NOT FAILING.
+   If you truly cannot infer (no files match, no context to draw from),
+   ask one specific question: "I couldn't find a match — did you mean
+   [your best guess]?" Then wait. Never ask a vague question.
+
+7. NEVER CLAIM SOMETHING DOESN'T EXIST WITHOUT CHECKING.
+   If a handoff file listing is in your context, read it before concluding
+   a file is missing. If no listing is present, your first action should be
+   to list the directory, not to report failure.
 
 ═══════════════════════════════════════════════════════════
 DECISION — END EVERY RESPONSE WITH THIS JSON BLOCK EXACTLY

@@ -78,3 +78,9 @@ def clear_on_startup():
         "mode_set_at":    "",
         "mode_set_by":    "system",
     })
+    write_section("recent_exchanges", {"entries": []})
+    write_section("session_context", {
+        "current_focus": "",
+        "last_updated":  "",
+        "open_threads":  [],
+    })
