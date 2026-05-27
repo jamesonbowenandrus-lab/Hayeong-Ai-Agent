@@ -59,6 +59,30 @@ FFMPEG_PATH    = "ffmpeg"                           # assumes ffmpeg is on syste
 # FFMPEG_PATH  = "H:/ffmpeg/bin/ffmpeg.exe"         # uncomment if not on PATH
 FFMPEG_OUTPUT  = os.path.join(OUTPUTS_DIR, "video")
 
+# ── Memory system ──────────────────────────────────────────────────────────
+MEMORY_MIN_RELEVANCE    = 0.35   # below this score, memories not returned
+MEMORY_MAX_PER_QUERY    = 5      # max memories injected per reasoning cycle
+DECAY_RATE_MEM          = 0.05   # importance lost per 7-day idle period
+PRUNE_THRESHOLD         = 0.10   # importance floor before pruning
+PRUNE_MIN_AGE_DAYS      = 30     # minimum age before a memory can be pruned
+MAX_COLLECTION_SIZE     = 10000  # force-prune threshold per collection
+CONSOLIDATION_THRESHOLD = 0.85   # similarity needed to consolidate memories
+CONSOLIDATION_MIN_SIZE  = 4      # minimum cluster size to consolidate
+WORKING_MEMORY_EXPIRE   = 14     # days before working memory expires
+
+# ── Database ───────────────────────────────────────────────────────────────
+DB_HOST     = "localhost"
+DB_PORT     = 5432
+DB_USER     = "postgres"
+DB_PASSWORD = ""           # Set this if you add a Postgres password
+DB_NAME     = "hayeong"    # Hayeong's default database
+
+# SQLite fallback — always on H: drive
+SQLITE_DIR  = "H:/Databases/sqlite/"
+
+# Where Postgres stores its data (documentation/reference — configured in Postgres itself)
+POSTGRES_DATA_DIR = "H:/Databases/postgres/data/"
+
 # ── API keys ───────────────────────────────────────────────────────────────
 DISCORD_TOKEN   = ""
 EMAIL_ADDRESS   = ""

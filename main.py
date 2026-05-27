@@ -15,6 +15,7 @@ Tools cannot crash main. Tools return results or errors as strings.
 import sys
 import time
 import threading
+import traceback
 import requests
 import json
 import re
@@ -231,6 +232,43 @@ def _ensure_decision_defaults(d: dict):
     d.setdefault("emotion",          "calm")
     if not isinstance(d["params"], dict):
         d["params"] = {}
+
+    # Move file paths from description into params so they cannot be truncated.
+    _rescue_file_path(d)
+
+
+def _rescue_file_path(d: dict):
+    """
+    If a file path or filename appears in the description but not in params,
+    move it into params so it cannot be truncated.
+    File paths are precise data — they belong in params, not description prose.
+    """
+    desc   = d.get("description", "")
+    params = d.get("params", {})
+
+    # Already has explicit file params — nothing to rescue
+    if any(k in params for k in ("handoff_path", "path", "file_path", "filename")):
+        print(f"[rescue] params already has file key — skipping")
+        return
+
+    # Look for anything that looks like a filename (.md, .py, .json, .txt, .bat, etc.)
+    match = re.search(r'[\w\-/\\]+\.(?:md|py|json|txt|bat|yaml|yml|sh|js)', desc)
+    if not match:
+        print(f"[rescue] no filename found in: {desc[:80]}")
+        return
+
+    filename = match.group(0)
+    action   = d.get("action", "")
+    print(f"[rescue] rescued '{filename}' from description into params")
+
+    if action == "handoff_reader":
+        params["handoff_path"] = filename
+    elif action in ("file_manager", "script"):
+        params["path"] = filename
+    else:
+        params["file_path"] = filename
+
+    d["params"] = params
 
 
 # ── Presence Context Builder ──────────────────────────────────────────
@@ -684,9 +722,14 @@ def presence_loop():
                 })
                 print(f"[presence] Task assigned: {action} — {decision.get('description', '')[:60]}")
 
+        except KeyboardInterrupt:
+            print("[presence] Shutting down gracefully.")
+            break
         except Exception as e:
-            print(f"[presence] Error: {e}")
+            print(f"[presence] Unhandled error (continuing): {e}")
+            print(traceback.format_exc())
             time.sleep(2)
+            continue
 
 
 # ── Task Loop ─────────────────────────────────────────────────────────
@@ -759,9 +802,14 @@ def task_loop():
 
             print(f"[task] Done: {(result or error)[:80]}")
 
+        except KeyboardInterrupt:
+            print("[task] Shutting down gracefully.")
+            break
         except Exception as e:
-            print(f"[task] Error: {e}")
+            print(f"[task] Unhandled error (continuing): {e}")
+            print(traceback.format_exc())
             time.sleep(2)
+            continue
 
 
 _REGISTRY: dict = {}
@@ -806,9 +854,15 @@ def plugin_loop():
         try:
             from toolbox.plugin_registry import tick_all
             tick_all()
+            time.sleep(2)
+        except KeyboardInterrupt:
+            print("[plugins] Shutting down gracefully.")
+            break
         except Exception as e:
-            print(f"[plugins] Loop error: {e}")
-        time.sleep(2)
+            print(f"[plugins] Unhandled error (continuing): {e}")
+            print(traceback.format_exc())
+            time.sleep(2)
+            continue
 
 
 # ── Input Loop ────────────────────────────────────────────────────────
@@ -827,7 +881,8 @@ def input_loop():
         except (EOFError, KeyboardInterrupt):
             break
         except Exception as e:
-            print(f"[input] Error: {e}")
+            print(f"[input] Unhandled error (continuing): {e}")
+            print(traceback.format_exc())
 
 
 # ── Entry Point ───────────────────────────────────────────────────────

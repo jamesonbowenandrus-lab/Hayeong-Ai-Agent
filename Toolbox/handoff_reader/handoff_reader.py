@@ -25,10 +25,10 @@ from datetime import datetime
 from pathlib import Path
 
 ROOT_DIR     = Path(__file__).parent.parent.parent
-HANDOFFS_DIR = ROOT_DIR / "handoffs"
+HANDOFFS_DIR = ROOT_DIR / "logs" / "handoffs"
 TOOLBOX_DIR  = ROOT_DIR / "Toolbox"
 REGISTRY     = ROOT_DIR / "Toolbox" / "registry.json"
-LOG_FILE     = ROOT_DIR / "Logs" / "handoff_reader_log.json"
+LOG_FILE     = ROOT_DIR / "logs" / "handoff_reader_log.json"
 
 
 def run(description: str, params: dict) -> str:

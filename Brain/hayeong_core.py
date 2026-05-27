@@ -280,7 +280,7 @@ def build_prompt(identity: dict, memory: list, user_input: str,
         system_prompt = None
         try:
             from system_prompt_builder import build_system_prompt, detect_state_of_mind
-            from long_term_memory import recall_for_prompt
+            from memory.memory_retriever import recall_for_prompt
 
             mood          = mood_state or {}
             state_of_mind = detect_state_of_mind("casual", "home", mood)

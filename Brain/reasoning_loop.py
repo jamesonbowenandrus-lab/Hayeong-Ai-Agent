@@ -53,6 +53,77 @@ _startup_done         = False
 _wake_assessment_done = False
 
 # ─────────────────────────────────────────────
+# LOOP BREAKER — consecutive failure detection
+# ─────────────────────────────────────────────
+MAX_CONSECUTIVE_FAILURES    = 3
+_consecutive_failures: dict = {}   # { task_key: count }
+_last_seen_completed_at     = ""   # de-duplicates repeated reads of the same result
+
+def _get_task_key(tool: str, description: str) -> str:
+    """Short normalized key. First 40 chars catches near-identical retries even if wording shifts."""
+    return f"{tool}:{description.strip().lower()[:40]}"
+
+
+def _check_task_stuck():
+    """
+    Read last_task from shared state. Track consecutive failures per task key.
+    After MAX_CONSECUTIVE_FAILURES, write an escalation to context_for_communication
+    so the presence loop delivers it to James, then reset the counter.
+    Called from _proactive_checks() on every heartbeat tick.
+    """
+    global _last_seen_completed_at
+
+    state     = read_state()
+    last_task = state.get("last_task", {})
+
+    status       = last_task.get("status", "")
+    tool         = last_task.get("tool", "")
+    description  = last_task.get("description", "")
+    completed_at = last_task.get("completed_at", "")
+    result       = last_task.get("result", "")
+    error        = last_task.get("error", "")
+
+    if not tool or not completed_at:
+        return
+
+    # Don't count the same completed task twice across multiple heartbeat ticks
+    if completed_at == _last_seen_completed_at:
+        return
+    _last_seen_completed_at = completed_at
+
+    task_key = _get_task_key(tool, description)
+
+    is_failure = (
+        status == "failed"
+        or (status == "success" and (
+            result.startswith("[ERROR]") or result.startswith("[PARTIAL]")
+        ))
+    )
+
+    if is_failure:
+        count = _consecutive_failures.get(task_key, 0) + 1
+        _consecutive_failures[task_key] = count
+        print(f"[reasoning_loop] Failure #{count} for: {task_key[:60]}")
+
+        if count >= MAX_CONSECUTIVE_FAILURES:
+            _consecutive_failures.pop(task_key, None)
+            error_detail = (error or result)[:200]
+            escalation = (
+                f"James, I'm stuck. I've tried this {count} times and keep hitting the same wall. "
+                f"What I was doing: {description[:100]}. "
+                f"Error: {error_detail}. "
+                f"I need your help to move forward."
+            )
+            write_reasoning({"context_for_communication": escalation})
+            print(f"[reasoning_loop] ESCALATED to James after {count} failures: {task_key[:60]}")
+    else:
+        # Any success clears the failure streak for this task
+        if task_key in _consecutive_failures:
+            print(f"[reasoning_loop] Success — clearing failure streak: {task_key[:60]}")
+            _consecutive_failures.pop(task_key, None)
+
+
+# ─────────────────────────────────────────────
 # BOT STATE FILE READER
 # ─────────────────────────────────────────────
 
@@ -131,6 +202,39 @@ def _do_startup_check():
             print(f"[reasoning_loop] Presence LLM: port 11435 returned {resp.status_code}.")
     except Exception:
         print("[reasoning_loop] Presence LLM: not reachable on port 11435 — check Ollama.")
+
+    # ── Memory maintenance — runs once per session ──
+    try:
+        from memory.memory_decay import run_decay_cycle
+        summary = run_decay_cycle()
+        if summary.get("decayed") or summary.get("pruned"):
+            print(f"[reasoning_loop] Memory decay: {summary}")
+    except Exception as e:
+        print(f"[reasoning_loop] Memory decay startup error: {e}")
+
+    # ── Weekly consolidation ──
+    try:
+        from memory.memory_consolidator import should_consolidate, run_consolidation_cycle
+        if should_consolidate():
+            result = run_consolidation_cycle()
+            if result.get("clusters_found"):
+                print(f"[reasoning_loop] Memory consolidation: {result}")
+    except Exception as e:
+        print(f"[reasoning_loop] Memory consolidation startup error: {e}")
+
+    # ── Restore last session checkpoint if any ──
+    try:
+        from memory.working_memory import restore_session_checkpoint
+        checkpoint = restore_session_checkpoint()
+        if checkpoint:
+            write_section("session_context", {
+                "current_focus": checkpoint,
+                "last_updated":  datetime.now().isoformat(),
+                "open_threads":  [],
+            })
+            print(f"[reasoning_loop] Session checkpoint restored: {checkpoint[:80]}...")
+    except Exception as e:
+        print(f"[reasoning_loop] Session checkpoint restore error: {e}")
 
 
 def _do_wake_assessment():
@@ -818,11 +922,8 @@ def _store_minecraft_session_summary(goal: str, actions: list, outcome: str):
 
     if summary:
         try:
-            remember(
-                content=summary,
-                category=CATEGORY_MINECRAFT,
-                speaker="hayeong",
-            )
+            from memory.memory_manager import remember
+            remember(content=summary, category="minecraft", speaker="hayeong")
             print(f"[reasoning_loop] Minecraft session summary stored: {summary[:80]}...")
         except Exception as e:
             print(f"[reasoning_loop] Session summary store failed: {e}")
@@ -1078,6 +1179,13 @@ def _get_next_interval(state: dict) -> float:
     if flags:
         return 0.0
 
+    # Fast-poll when a task is actively failing — catch retry loops within 3 cycles
+    _lt = state.get("last_task", {})
+    if _lt.get("status") == "failed" or (
+        _lt.get("status") == "success" and _lt.get("result", "").startswith("[ERROR]")
+    ):
+        return 3.0
+
     if mc_active:
         urgency = reasoning.get("minecraft_urgency", "normal")
         if urgency == "danger":
@@ -1139,6 +1247,9 @@ def _proactive_checks():
         )
         if not is_substantive:
             write_reasoning({"context_for_communication": ""})
+
+    # 3. Consecutive failure check — escalate if same task keeps failing
+    _check_task_stuck()
 
 
 # ─────────────────────────────────────────────

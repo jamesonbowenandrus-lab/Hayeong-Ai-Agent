@@ -125,3 +125,51 @@ def to_prompt_block() -> str:
     if len(lines) <= 2:
         return ""
     return "\n".join(lines)
+
+
+# ─────────────────────────────────────────────
+# CROSS-SESSION CHECKPOINT
+# ─────────────────────────────────────────────
+
+def save_session_checkpoint():
+    """
+    Called on clean shutdown. Saves active task state to the working ChromaDB
+    collection so Hayeong can continue where she left off next session.
+    """
+    try:
+        from memory.memory_writer import write_working
+        data = _read()
+        if not data.get("current_topic") and not data.get("open_threads"):
+            return
+
+        content = (
+            f"Session ended with active context: "
+            f"Topic: {data.get('current_topic', 'none')}. "
+            f"Open threads: {', '.join(data.get('open_threads', []))}. "
+            f"Last intent: {data.get('last_james_intent', 'none')}."
+        )
+        task_id = f"session_checkpoint_{data.get('updated_at', '')[:10]}"
+        write_working(
+            content=content,
+            task_id=task_id,
+            task_type="session",
+            status="needs_continuation",
+        )
+    except Exception as e:
+        print(f"[working_memory] Checkpoint save failed: {e}")
+
+
+def restore_session_checkpoint() -> str:
+    """
+    Called on startup. Returns a string describing the last session's state
+    for injection into the first reasoning cycle.
+    Returns empty string if nothing to restore.
+    """
+    try:
+        from memory.memory_retriever import recall_working
+        checkpoints = recall_working(task_type="session")
+        if not checkpoints:
+            return ""
+        return f"[PREVIOUS SESSION] {checkpoints[-1]['content']}"
+    except Exception:
+        return ""
