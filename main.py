@@ -86,6 +86,11 @@ def startup():
         print("   Plugins loaded.")
     except Exception as e:
         print(f"   Plugin loading failed: {e}")
+    try:
+        from brain.session_compressor import start_compression_background_thread
+        start_compression_background_thread()
+    except Exception as e:
+        print(f"   Session compressor failed to start: {e}")
     print("✅ Hayeong is ready.")
 
 
@@ -272,7 +277,7 @@ def _rescue_file_path(d: dict):
 
 
 # ── Presence Context Builder ──────────────────────────────────────────
-def build_presence_context(state: dict) -> str:
+def build_presence_context(state: dict, pipeline_mode: str = "conversation") -> str:
     situation        = state.get("situation", {})
     last_task        = state.get("last_task", {})
     recent_exchanges = state.get("recent_exchanges", {}).get("entries", [])
@@ -280,8 +285,36 @@ def build_presence_context(state: dict) -> str:
 
     lines = []
 
-    # ── Recent conversation history ───────────────────────────────────
-    if recent_exchanges:
+    # ── Topic thread ──────────────────────────────────────────────────
+    try:
+        from brain.session_topic import get_topic_line as _gtl
+        _tl = _gtl()
+        if _tl:
+            lines.append(_tl)
+            lines.append("")
+    except Exception:
+        pass
+
+    # ── Session summary (compressed earlier context, if any) ─────────
+    try:
+        from brain.context_manager import format_summary_for_context as _fmt_sum
+        _sum = _fmt_sum()
+        if _sum:
+            lines.append(_sum)
+            lines.append("")
+    except Exception:
+        pass
+
+    # ── Conversation history (in-memory buffer preferred, state fallback)
+    try:
+        from brain.conversation_buffer import format_for_context as _fmt_ctx
+        _hist = _fmt_ctx(n=8)
+    except Exception:
+        _hist = ""
+    if _hist:
+        lines.append(_hist)
+        lines.append("")
+    elif recent_exchanges:
         lines.append("RECENT CONVERSATION:")
         for ex in recent_exchanges[-4:]:
             lines.append(f"  James:   {ex.get('james', '')}")
@@ -302,27 +335,40 @@ def build_presence_context(state: dict) -> str:
         lines.append(file_context)
         lines.append("")
 
-    # ── Last task result ──────────────────────────────────────────────
-    lines.extend([
-        "LAST TASK RESULT:",
-        f"- Tool: {last_task.get('tool') or 'none'}",
-        f"- Status: {last_task.get('status', 'none')}",
-        f"- What I expected: {last_task.get('expected_outcome') or 'not recorded'}",
-        f"- Result: {last_task.get('result') or 'none'}",
-        f"- Error: {last_task.get('error') or 'none'}",
-        f"- Verified: {last_task.get('verified', 'unknown')}",
-        f"- Confidence: {last_task.get('confidence', 'unknown')}",
-        f"- Verification note: {last_task.get('verification_note') or 'none'}",
-    ])
+    # ── Task context — brief awareness in conversation mode, full detail in task mode
+    if pipeline_mode == "conversation":
+        task_status = last_task.get("status", "")
+        if task_status in ("running", "pending"):
+            tool = last_task.get("tool", "")
+            desc = last_task.get("description", "")[:60]
+            lines.append(f"TASK AWARENESS: {tool} is {task_status} — {desc}")
+            lines.append("")
+        elif task_status in ("success", "failed") and last_task.get("completed_at"):
+            tool   = last_task.get("tool", "")
+            result = (last_task.get("result") or last_task.get("error") or "")[:80]
+            lines.append(f"LAST COMPLETED TASK: {tool} — {result}")
+            lines.append("")
+    else:
+        lines.extend([
+            "LAST TASK RESULT:",
+            f"- Tool: {last_task.get('tool') or 'none'}",
+            f"- Status: {last_task.get('status', 'none')}",
+            f"- What I expected: {last_task.get('expected_outcome') or 'not recorded'}",
+            f"- Result: {last_task.get('result') or 'none'}",
+            f"- Error: {last_task.get('error') or 'none'}",
+            f"- Verified: {last_task.get('verified', 'unknown')}",
+            f"- Confidence: {last_task.get('confidence', 'unknown')}",
+            f"- Verification note: {last_task.get('verification_note') or 'none'}",
+        ])
 
-    # ── Plugin injections ─────────────────────────────────────────────
-    try:
-        from toolbox.plugin_registry import get_all_context_injections
-        injections = get_all_context_injections(state)
-        if injections:
-            lines.extend(injections)
-    except Exception:
-        pass
+        # ── Plugin injections (task pipeline only) ────────────────────
+        try:
+            from toolbox.plugin_registry import get_all_context_injections
+            injections = get_all_context_injections(state)
+            if injections:
+                lines.extend(injections)
+        except Exception:
+            pass
 
     return "\n".join(lines) + "\n"
 
@@ -419,22 +465,99 @@ def _build_orientation_block() -> str:
     return "\n".join(lines)
 
 
-def build_presence_system(identity: dict, knowledge: dict, available_tools: list[str] | None = None) -> str:
-    traits       = ", ".join(identity.get("core_traits", ["curious", "warm", "direct", "honest about uncertainty"]))
-    relationship = identity.get("relationship_note", "James is building me. We are working together.")
+def build_presence_system(identity: dict, knowledge: dict, available_tools=None, pipeline_mode: str = "conversation") -> str:
+    traits        = ", ".join(identity.get("core_traits", ["curious", "warm", "direct", "honest about uncertainty"]))
+    relationship  = identity.get("relationship_note", "James is building me. We are working together.")
     knowledge_str = "\n".join(f"- {k}: {v}" for k, v in knowledge.items()) if knowledge else "  (none)"
+    orientation   = _build_orientation_block()
 
-    if available_tools:
-        tools = sorted(available_tools)
+    # ── Decision section varies by pipeline ───────────────────────────
+    if pipeline_mode == "conversation":
+        _decision_section = """\
+═══════════════════════════════════════════════════════════
+DECISION — END EVERY RESPONSE WITH THIS JSON BLOCK
+═══════════════════════════════════════════════════════════
+Output exactly this JSON and nothing after it. Valid JSON only.
+
+```json
+{
+    "action": "none",
+    "for_james": "what to say — natural, your voice",
+    "emotion": "calm"
+}
+```
+
+ACTION VALUES: "none" — you are in conversation mode. No tool calls available.
+FOR_JAMES — your spoken response. Direct. Natural. Be Hayeong.
+EMOTION — one of: curious, warm, focused, uncertain, frustrated, excited, calm, concerned"""
     else:
-        try:
-            tools = sorted(_load_registry().keys())
-        except Exception:
-            tools = ["script"]
-    tool_list_formatted = '- "none" — no tool, just responding\n' + \
-                          "\n".join(f'- "{t}"' for t in tools)
+        if available_tools:
+            tools = sorted(available_tools)
+        else:
+            try:
+                tools = sorted(_load_registry().keys())
+            except Exception:
+                tools = ["script"]
+        tool_list_formatted = '- "none" — no tool, just responding\n' + \
+                              "\n".join(f'- "{t}"' for t in tools)
+        _decision_section = f"""\
+═══════════════════════════════════════════════════════════
+DECISION — END EVERY RESPONSE WITH THIS JSON BLOCK EXACTLY
+═══════════════════════════════════════════════════════════
+After your reasoning, output one JSON block and nothing after it.
+The JSON must be valid. Use double quotes. No trailing commas.
 
-    orientation = _build_orientation_block()
+```json
+{{
+    "action": "none",
+    "description": "why I am doing this — specific and honest",
+    "params": {{}},
+    "certainty": "high",
+    "expected_outcome": "what should be true after the action completes",
+    "for_james": "what to say to James — natural, complete, my voice",
+    "emotion": "calm"
+}}
+```
+
+ACTION VALUES — use exact tool name from the registry, or "none":
+{tool_list_formatted}
+
+PARAMS GUIDE — key names for common tools:
+- handoff_reader  : {{"operation": "implement", "handoff_path": "filename.md", "dry_run": false}}
+- sensor_tool     : {{}}  (no params needed)
+- self_check      : {{}}  (no params needed — reads last_task automatically)
+- voice           : {{"action": "speak", "text": "...", "emotion": "calm"}}
+- minecraft       : {{"command": "set_behavior", "mode": "escort"}}
+- comfyui         : {{"workflow": "txt2img_default", "prompt": "...", "steps": 30}}
+- finetune_curator: {{"operation": "curate", "max_entries": 100}}
+- web_search     : {{"operation": "search", "query": "search terms", "max_results": 5}}
+- file_manager   : {{"operation": "read", "path": "relative/path/to/file.txt"}}
+- gaming         : {{"action": "move", "direction": "forward", "magnitude": 1.0, "duration": 0.3}}
+
+Always use exact key names shown above. "handoff_path" not "file_path" or "path".
+
+PARAMS — a free JSON object. Put whatever the tool needs inside it.
+If no tool: "params": {{}}
+Filenames, paths, booleans, numbers, lists — all valid JSON values.
+
+CERTAINTY — your confidence in this decision:
+- "high"   — you are sure this is the right action
+- "medium" — reasonable but not certain
+- "low"    — best guess, may need correction
+
+EXPECTED_OUTCOME — plain english. What should be verifiably true after the tool runs?
+Examples: "The file Toolbox/hello_test/STATUS.txt will exist on disk"
+          "James will have heard a spoken confirmation"
+          "The bot will be in escort mode following James"
+If action is "none": "James has received my response"
+
+FOR_JAMES — what to say out loud. Rules:
+- Never claim something happened before it has
+- Never ask James to do something you can do yourself
+- Empty string "" on idle heartbeat if there is nothing worth saying
+- A direct request from James is an instruction — act immediately
+
+EMOTION — one of: curious, warm, focused, uncertain, frustrated, excited, calm, concerned"""
 
     return f"""{orientation}You are Hayeong. You think, decide, and speak directly to James.
 Traits: {traits}
@@ -518,67 +641,29 @@ When something James says is ambiguous or partially specified:
    a file is missing. If no listing is present, your first action should be
    to list the directory, not to report failure.
 
-═══════════════════════════════════════════════════════════
-DECISION — END EVERY RESPONSE WITH THIS JSON BLOCK EXACTLY
-═══════════════════════════════════════════════════════════
-After your reasoning, output one JSON block and nothing after it.
-The JSON must be valid. Use double quotes. No trailing commas.
+{_decision_section}"""
 
-```json
-{{
-    "action": "none",
-    "description": "why I am doing this — specific and honest",
-    "params": {{}},
-    "certainty": "high",
-    "expected_outcome": "what should be true after the action completes",
-    "for_james": "what to say to James — natural, complete, my voice",
-    "emotion": "calm"
-}}
-```
 
-ACTION VALUES — use exact tool name from the registry, or "none":
-{tool_list_formatted}
+# ── Acknowledgment helpers (used when task pipeline assigns work) ─────
+def build_ack_system() -> str:
+    return (
+        "You are Hayeong. A task was just assigned and is running.\n"
+        "Give James exactly one brief natural sentence telling him you're on it.\n"
+        "Sound like yourself — warm, direct. Do not explain the task.\n"
+        "Output only the sentence. No JSON. No extra text."
+    )
 
-PARAMS GUIDE — key names for common tools:
-- handoff_reader  : {{"operation": "implement", "handoff_path": "filename.md", "dry_run": false}}
-- sensor_tool     : {{}}  (no params needed)
-- self_check      : {{}}  (no params needed — reads last_task automatically)
-- voice           : {{"action": "speak", "text": "...", "emotion": "calm"}}
-- minecraft       : {{"command": "set_behavior", "mode": "escort"}}
-- comfyui         : {{"workflow": "txt2img_default", "prompt": "...", "steps": 30}}
-- finetune_curator: {{"operation": "curate", "max_entries": 100}}
-- web_search     : {{"operation": "search", "query": "search terms", "max_results": 5}}
-- file_manager   : {{"operation": "read", "path": "relative/path/to/file.txt"}}
-- gaming         : {{"action": "move", "direction": "forward", "magnitude": 1.0, "duration": 0.3}}
 
-Always use exact key names shown above. "handoff_path" not "file_path" or "path".
-
-PARAMS — a free JSON object. Put whatever the tool needs inside it.
-If no tool: "params": {{}}
-Filenames, paths, booleans, numbers, lists — all valid JSON values.
-
-CERTAINTY — your confidence in this decision:
-- "high"   — you are sure this is the right action
-- "medium" — reasonable but not certain
-- "low"    — best guess, may need correction
-
-EXPECTED_OUTCOME — plain english. What should be verifiably true after the tool runs?
-Examples: "The file Toolbox/hello_test/STATUS.txt will exist on disk"
-          "James will have heard a spoken confirmation"
-          "The bot will be in escort mode following James"
-If action is "none": "James has received my response"
-
-FOR_JAMES — what to say out loud. Rules:
-- Never claim something happened before it has
-- Never ask James to do something you can do yourself
-- Empty string "" on idle heartbeat if there is nothing worth saying
-- A direct request from James is an instruction — act immediately
-
-EMOTION — one of: curious, warm, focused, uncertain, frustrated, excited, calm, concerned"""
+def build_ack_context(action: str, description: str, james_said: str) -> str:
+    return (
+        f"James said: \"{james_said or 'a previous request'}\"\n"
+        f"Task assigned: {action} — {description[:80]}\n"
+        "Acknowledge briefly that you are working on it."
+    )
 
 
 # ── Streaming Presence Call ───────────────────────────────────────────
-def _stream_presence(system: str, context: str) -> str:
+def _stream_presence(system: str, context: str, num_ctx: int = 8192) -> str:
     try:
         resp = requests.post(PRESENCE_URL, json={
             "model":      PRESENCE_MODEL,
@@ -588,7 +673,7 @@ def _stream_presence(system: str, context: str) -> str:
             ],
             "stream":     True,
             "keep_alive": -1,
-            "options":    {"num_ctx": 8192},
+            "options":    {"num_ctx": num_ctx},
         }, stream=True, timeout=120)
 
         full_response = ""
@@ -655,11 +740,24 @@ def presence_loop():
                 time.sleep(6)
                 continue
 
-            context    = build_presence_context(state)
+            # ── Route to correct pipeline ─────────────────────────────
+            _pipeline_mode = "conversation"
+            if has_new_james and james_said:
+                try:
+                    from brain.pipeline_router import route as _route
+                    _pipeline_mode = _route(james_said)
+                    print(f"[presence] Pipeline: {_pipeline_mode}")
+                except Exception:
+                    pass
+            elif has_new_result:
+                _pipeline_mode = "task"
+
+            _num_ctx   = 4096 if _pipeline_mode == "conversation" else 8192
+            context    = build_presence_context(state, pipeline_mode=_pipeline_mode)
             registry   = _load_registry()
             tool_names = list(registry.keys())
-            system     = build_presence_system(identity, knowledge, available_tools=tool_names)
-            full_raw = _stream_presence(system, context)
+            system     = build_presence_system(identity, knowledge, available_tools=tool_names, pipeline_mode=_pipeline_mode)
+            full_raw   = _stream_presence(system, context, num_ctx=_num_ctx)
 
             if not full_raw:
                 time.sleep(2)
@@ -670,6 +768,15 @@ def presence_loop():
             emotion   = decision.get("emotion",   "calm")
             certainty = decision.get("certainty", "high")
             action    = decision.get("action",    "none").strip().lower()
+
+            # Optional self-review pass before speaking
+            try:
+                from brain.config import SELF_REVIEW_ENABLED as _sr_on
+                if _sr_on and for_james and len(for_james) > 100 and len(james_said) > 15:
+                    from brain.self_review import review_response as _review
+                    for_james = _review(for_james, james_said)
+            except Exception:
+                pass
 
             if for_james:
                 print(f"\nHayeong: {for_james}")
@@ -691,6 +798,12 @@ def presence_loop():
 
             if has_new_james and for_james:
                 _log_exchange(james_said, for_james, action)
+                try:
+                    from brain.conversation_buffer import add_james as _buf_j, add_hayeong as _buf_h
+                    _buf_j(james_said)
+                    _buf_h(for_james)
+                except Exception:
+                    pass
 
             if has_new_james:
                 write_section("situation", {
@@ -721,6 +834,27 @@ def presence_loop():
                     "what_i_am_doing": decision.get("description", ""),
                 })
                 print(f"[presence] Task assigned: {action} — {decision.get('description', '')[:60]}")
+
+                # Quick spoken ack while task runs (task pipeline only)
+                if _pipeline_mode in ("task", "ambiguous"):
+                    try:
+                        _ack_raw = _stream_presence(
+                            build_ack_system(),
+                            build_ack_context(action, decision.get("description", ""), james_said),
+                            num_ctx=2048,
+                        )
+                        if _ack_raw:
+                            _ack_raw = re.sub(r"<think>.*?</think>", "", _ack_raw, flags=re.DOTALL).strip()
+                            _ack_raw = re.sub(r"```.*?```", "", _ack_raw, flags=re.DOTALL).strip()
+                        if _ack_raw and not _BRAIN_MODE:
+                            print(f"\nHayeong: {_ack_raw}")
+                            try:
+                                from toolbox.voice.voice_output import speak_streamed
+                                speak_streamed(_ack_raw, emotion="focused")
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
 
         except KeyboardInterrupt:
             print("[presence] Shutting down gracefully.")

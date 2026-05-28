@@ -83,6 +83,9 @@ SQLITE_DIR  = "H:/Databases/sqlite/"
 # Where Postgres stores its data (documentation/reference — configured in Postgres itself)
 POSTGRES_DATA_DIR = "H:/Databases/postgres/data/"
 
+# ── Self-review ────────────────────────────────────────────────────────────
+SELF_REVIEW_ENABLED = True   # second LLM pass to verify response quality; set False to reduce latency
+
 # ── API keys ───────────────────────────────────────────────────────────────
 DISCORD_TOKEN   = ""
 EMAIL_ADDRESS   = ""
