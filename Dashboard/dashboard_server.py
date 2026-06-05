@@ -98,15 +98,11 @@ async def send_message(request_data: dict):
     if not message:
         return JSONResponse({"ok": False, "error": "empty message"})
     try:
-        state = json.loads(CORE_FILE.read_text(encoding="utf-8"))
-        if "situation" not in state:
-            state["situation"] = {}
-        state["situation"]["what_james_said"] = message
-        state["situation"]["said_at"] = datetime.now().isoformat()
-        CORE_FILE.write_text(
-            json.dumps(state, indent=2, ensure_ascii=False),
-            encoding="utf-8"
-        )
+        from brain.state.core_manager import write_section
+        write_section("situation", {
+            "what_james_said": message,
+            "said_at":         datetime.now().isoformat(),
+        })
         return JSONResponse({"ok": True})
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)})

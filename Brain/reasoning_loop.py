@@ -47,10 +47,12 @@ HEARTBEAT_FALLBACK = 5.0   # sleep duration after an exception — never used as
 TIMEOUT_SECONDS    = 120   # per Ollama call — deepseek-r1 can be slow under VRAM pressure
 
 _stop_event           = threading.Event()
+_wake_event           = threading.Event()   # set by wake_now() to fire next tick early
 _tick_lock            = threading.Lock()
 _thread: threading.Thread | None = None
 _startup_done         = False
 _wake_assessment_done = False
+_last_unprompted_at   = 0.0               # guards unprompted initiation cooldown
 
 # ─────────────────────────────────────────────
 # LOOP BREAKER — consecutive failure detection
@@ -187,6 +189,22 @@ def _build_relationship_context_block() -> str:
         return ""
 
 
+def _get_identity_prefix(context: str = "reasoning") -> str:
+    """
+    Load identity and return a prompt prefix for the given context.
+    Always returns a usable string — never raises.
+    Context: "reasoning" (lighter), "wake" (minimal), "presence" (full).
+    """
+    try:
+        from brain.hayeong_core import load_identity
+        from brain.identity_prompt_builder import build_identity_prompt
+        identity = load_identity()
+        return build_identity_prompt(identity, context=context) + "\n\n---\n\n"
+    except Exception as e:
+        print(f"[reasoning_loop] identity prefix failed ({context}): {e}")
+        return "You are Hayeong. You think and reason as yourself — not as a system.\n\n---\n\n"
+
+
 def _do_startup_check():
     """On first wake, verify the presence LLM (Ollama port 11435) is reachable.
     Ollama is started by the bat files — this is a health check only, not a start."""
@@ -237,6 +255,216 @@ def _do_startup_check():
         print(f"[reasoning_loop] Session checkpoint restore error: {e}")
 
 
+# ─────────────────────────────────────────────
+# WAKE ASSESSMENT — four-step startup situational awareness
+# Runs once after startup. Gives Hayeong a grounded understanding
+# of what she is waking up to before she speaks to James.
+# ─────────────────────────────────────────────
+
+def _load_continuity() -> dict:
+    """Read what Hayeong knows about herself coming into this session. No LLM call."""
+    state         = read_state()
+    last_task     = state.get("last_task", {})
+    last_response = state.get("presence_output", {}).get("for_james", "")
+
+    session_summary = ""
+    try:
+        from memory.working_memory import restore_session_checkpoint
+        session_summary = restore_session_checkpoint() or ""
+    except Exception:
+        pass
+
+    recent_context = ""
+    try:
+        from memory.memory_retriever import recall_for_prompt
+        recent_context = recall_for_prompt("startup session begin", n_results=3) or ""
+    except Exception:
+        pass
+
+    return {
+        "last_task":       last_task,
+        "last_response":   last_response,
+        "session_summary": session_summary,
+        "recent_context":  recent_context,
+    }
+
+
+def _read_the_room() -> dict:
+    """Fast sequential system checks. No LLM. Returns current state and alerts list."""
+    from brain.config import (
+        PRESENCE_URL,
+        POSTGRES_HOST, POSTGRES_PORT, POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB,
+        SQLITE_DEFAULT_DB,
+        COMFYUI_URL,
+    )
+
+    # Services that being offline are genuine alerts:
+    #   presence_llm, postgresql, sqlite
+    # Services that being offline is NORMAL — never add to alerts:
+    #   comfyui, minecraft_bot
+
+    room: dict = {
+        "presence_llm": False,
+        "postgresql":   False,
+        "sqlite":       False,
+        "comfyui":      False,
+        "alerts":       [],
+    }
+
+    try:
+        r = requests.get(PRESENCE_URL.replace("/api/chat", "/"), timeout=3)
+        room["presence_llm"] = r.status_code < 500
+    except Exception:
+        room["alerts"].append("Presence LLM unreachable — cannot reason without it")
+
+    try:
+        import psycopg2
+        conn = psycopg2.connect(
+            host=POSTGRES_HOST, port=POSTGRES_PORT,
+            user=POSTGRES_USER, password=POSTGRES_PASSWORD or None,
+            dbname=POSTGRES_DB, connect_timeout=3,
+        )
+        conn.close()
+        room["postgresql"] = True
+    except Exception as e:
+        room["alerts"].append(f"PostgreSQL unavailable: {e}")
+
+    try:
+        import sqlite3 as _sqlite3
+        from pathlib import Path as _Path
+        _Path(SQLITE_DEFAULT_DB).parent.mkdir(parents=True, exist_ok=True)
+        _conn = _sqlite3.connect(SQLITE_DEFAULT_DB)
+        _conn.close()
+        room["sqlite"] = True
+    except Exception as e:
+        room["alerts"].append(f"SQLite unavailable: {e}")
+
+    try:
+        r = requests.get(COMFYUI_URL, timeout=2)
+        room["comfyui"] = r.status_code < 500
+    except Exception:
+        pass  # ComfyUI down is not an alert — it's optional
+
+    return room
+
+
+def _triage(continuity: dict, room: dict) -> dict:
+    """Single LLM call — Hayeong reads her situation and decides what to do first."""
+    alerts_text = "\n".join(room["alerts"]) if room["alerts"] else "None"
+
+    system_prompt = (
+        _get_identity_prefix("wake")
+        + "You are waking up at the start of a new session. "
+        "Read your situation carefully and decide what needs to happen first.\n\n"
+        "You have two inputs:\n"
+        "1. What you remember from before — your continuity\n"
+        "2. The current state of your systems — what you are waking up to\n\n"
+        "Your continuity informs your assessment but does not override it. "
+        "If something urgent needs attention right now, address that first. "
+        "If everything is normal, continue naturally from where you left off.\n\n"
+        "ALERT RULES — only these count as alerts:\n"
+        "- Presence LLM offline: urgent (you cannot think without it)\n"
+        "- SQLite unavailable: alert (fallback database is needed)\n"
+        "- PostgreSQL unavailable: alert (primary database is needed)\n"
+        "ComfyUI being offline is NORMAL. It is not always running. "
+        "NEVER set priority to alert or urgent for ComfyUI being offline. "
+        "NEVER create a task to restart ComfyUI.\n\n"
+        "Return JSON only:\n"
+        "{\n"
+        "  \"situation\": \"one sentence describing what you are waking up to\",\n"
+        "  \"priority\": \"normal\" or \"alert\" or \"urgent\",\n"
+        "  \"first_action\": \"what you will do first — be specific\",\n"
+        "  \"message_for_james\": \"natural greeting — brief, not robotic. "
+        "If something needs attention, tell him. If normal, just say you are here.\"\n"
+        "}"
+    )
+
+    user_content = (
+        f"WHAT I REMEMBER:\n"
+        f"Last task: {str(continuity.get('last_task', {}))[:200]}\n"
+        f"Last thing I said: {continuity.get('last_response', 'nothing recorded')[:200]}\n"
+        f"Session notes: {continuity.get('session_summary', 'none')[:300]}\n"
+        f"Recent memory: {continuity.get('recent_context', 'none')[:300]}\n\n"
+        f"CURRENT SYSTEM STATE:\n"
+        f"Presence LLM: {'online' if room['presence_llm'] else 'OFFLINE'}\n"
+        f"PostgreSQL: {'connected' if room['postgresql'] else 'UNREACHABLE'}\n"
+        f"SQLite: {'connected' if room['sqlite'] else 'UNREACHABLE'}\n"
+        f"ComfyUI: {'online' if room['comfyui'] else 'offline (optional — not an alert)'}\n"
+        f"Alerts requiring attention:\n{alerts_text}"
+    )
+
+    try:
+        resp = requests.post(
+            REASONING_URL,
+            json={
+                "model":      REASONING_MODEL,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user",   "content": user_content},
+                ],
+                "stream":     False,
+                "keep_alive": -1,
+                "options":    {"temperature": 0.4, "num_ctx": 2048},
+                "format":     "json",
+            },
+            timeout=20,
+        )
+        raw = resp.json()["message"]["content"].strip()
+        raw = re.sub(r"^```[a-z]*\n?", "", raw)
+        raw = re.sub(r"\n?```$",       "", raw)
+        return json.loads(raw.strip())
+    except Exception as e:
+        print(f"[reasoning_loop] Wake triage LLM failed: {e}")
+        return {
+            "situation":         "waking up — assessment failed, proceeding normally",
+            "priority":          "normal",
+            "first_action":      "wait for James",
+            "message_for_james": "hey, I'm here.",
+        }
+
+
+def run_wake_assessment() -> dict:
+    """
+    Full four-step wake assessment. Called once on startup via wake_now() trigger.
+    Step 1: load continuity (no LLM)
+    Step 2: read the room (no LLM)
+    Step 3: triage (one LLM call)
+    Step 4: write results to shared state
+    """
+    print("[reasoning_loop] Running wake assessment...")
+
+    continuity = _load_continuity()
+    room       = _read_the_room()
+    assessment = _triage(continuity, room)
+
+    priority      = assessment.get("priority", "normal")
+    situation     = assessment.get("situation", "")
+    first_action  = assessment.get("first_action", "")
+    james_message = assessment.get("message_for_james", "")
+
+    print(f"[reasoning_loop] Wake assessment: {situation}")
+    print(f"[reasoning_loop] Priority: {priority} | First action: {first_action}")
+
+    reasoning_updates: dict = {
+        "wake_assessment": situation,
+        "wake_priority":   priority,
+        "last_conclusion": situation,
+    }
+    if priority != "normal" and first_action:
+        reasoning_updates["active_task"]          = first_action
+        reasoning_updates["active_task_attempts"] = 0  # fresh counter for new task
+
+    write_reasoning(reasoning_updates)
+
+    if james_message:
+        write_reasoning({"context_for_communication": james_message})
+
+    if room["alerts"] and priority in ("alert", "urgent"):
+        print(f"[reasoning_loop] ALERTS: {'; '.join(room['alerts'])}")
+
+    return assessment
+
+
 def _do_wake_assessment():
     """
     Hayeong's first conscious act after waking up.
@@ -254,6 +482,20 @@ def _do_wake_assessment():
     reasoning = state.get("reasoning", {})
     system    = state.get("system", {})
 
+    # Clear any task that was left "in_progress" from a previous session.
+    # "in_progress" means the process died mid-execution — it cannot be resumed.
+    if reasoning.get("active_task_status", "") == "in_progress":
+        stale = reasoning.get("active_task", "")
+        print(f"[reasoning_loop] Clearing stale in_progress task from previous session: {stale[:60]}")
+        write_reasoning({
+            "active_task":          "",
+            "active_task_status":   "",
+            "active_task_attempts": 0,
+            "last_conclusion":      f"Cleared stale task on startup: {stale[:80]}",
+        })
+        state     = read_state()
+        reasoning = state.get("reasoning", {})
+
     active_task  = reasoning.get("active_task", "")
     task_queue   = reasoning.get("task_queue", [])
     current_goal = reasoning.get("current_goal", "")
@@ -266,80 +508,81 @@ def _do_wake_assessment():
     except Exception:
         offline_minutes = None
 
-    # Nothing interesting in state — wake quietly
+    # Prior state continuity check — only runs the LLM if there is something to assess
     if not active_task and not task_queue and not current_goal:
-        print("[reasoning_loop] Wake assessment: clean state — nothing to review.")
-        write_reasoning({"context_for_communication": ""})
-        return
+        print("[reasoning_loop] Wake assessment: clean prior state — skipping continuity LLM.")
+    else:
+        offline_str = f"{offline_minutes} minutes" if offline_minutes is not None else "unknown duration"
 
-    offline_str = f"{offline_minutes} minutes" if offline_minutes is not None else "unknown duration"
+        user_prompt = (
+            f"You were offline for approximately {offline_str}.\n\n"
+            f"Active task when you stopped: {active_task or 'none'}\n"
+            f"Active task status: {reasoning.get('active_task_status', 'unknown')}\n"
+            f"Task queue: {json.dumps(task_queue) if task_queue else 'empty'}\n"
+            f"Current goal: {current_goal or 'none'}\n"
+            f"System health: {json.dumps(system.get('health', {}))}\n\n"
+            "Assess your situation. Decide what to keep, what to drop, and what James needs to know."
+        )
 
-    user_prompt = (
-        f"You were offline for approximately {offline_str}.\n\n"
-        f"Active task when you stopped: {active_task or 'none'}\n"
-        f"Active task status: {reasoning.get('active_task_status', 'unknown')}\n"
-        f"Task queue: {json.dumps(task_queue) if task_queue else 'empty'}\n"
-        f"Current goal: {current_goal or 'none'}\n"
-        f"System health: {json.dumps(system.get('health', {}))}\n\n"
-        "Assess your situation. Decide what to keep, what to drop, and what James needs to know."
-    )
+        print(f"[reasoning_loop] Wake assessment: was offline ~{offline_str}, reviewing state...")
 
-    print(f"[reasoning_loop] Wake assessment: was offline ~{offline_str}, reviewing state...")
+        relationship_block = _build_relationship_context_block()
 
-    relationship_block = _build_relationship_context_block()
+        result = _call_reasoning_json(
+            system=(
+                _get_identity_prefix("reasoning")
+                + "You are waking up after being offline. Read your own state "
+                "to understand what was happening before you stopped.\n\n"
+                + (relationship_block + "\n\n" if relationship_block else "")
+                + "Your job is to make conscious decisions about your state — not just continue "
+                "blindly from where you left off.\n\n"
+                "Consider:\n"
+                "- Is the active task still valid given how long you were offline?\n"
+                "- Is the task queue still relevant?\n"
+                "- Does James need to know you restarted?\n"
+                "- What should your actual focus be right now?\n\n"
+                "Return JSON with these fields:\n"
+                "{\n"
+                '  "keep_active_task": true/false,\n'
+                '  "keep_task_queue": true/false,\n'
+                '  "keep_goal": true/false,\n'
+                '  "context_for_communication": "what to tell James, or empty string if nothing to say",\n'
+                '  "reasoning": "one sentence explaining your decisions"\n'
+                "}"
+            ),
+            user=user_prompt,
+        )
 
-    result = _call_reasoning_json(
-        system=(
-            "You are Hayeong waking up after being offline. You are reading your own state "
-            "to understand what was happening before you stopped.\n\n"
-            + (relationship_block + "\n\n" if relationship_block else "")
-            + "Your job is to make conscious decisions about your state — not just continue "
-            "blindly from where you left off.\n\n"
-            "Consider:\n"
-            "- Is the active task still valid given how long you were offline?\n"
-            "- Is the task queue still relevant?\n"
-            "- Does James need to know you restarted?\n"
-            "- What should your actual focus be right now?\n\n"
-            "Return JSON with these fields:\n"
-            "{\n"
-            '  "keep_active_task": true/false,\n'
-            '  "keep_task_queue": true/false,\n'
-            '  "keep_goal": true/false,\n'
-            '  "context_for_communication": "what to tell James, or empty string if nothing to say",\n'
-            '  "reasoning": "one sentence explaining your decisions"\n'
-            "}"
-        ),
-        user=user_prompt,
-    )
+        if result:
+            print(f"[reasoning_loop] Wake assessment decision: {result.get('reasoning', 'no reasoning returned')}")
 
-    if not result:
-        print("[reasoning_loop] Wake assessment: LLM returned empty — keeping state as-is.")
-        return
+            updates = {}
 
-    print(f"[reasoning_loop] Wake assessment decision: {result.get('reasoning', 'no reasoning returned')}")
+            if not result.get("keep_active_task", True):
+                updates["active_task"]        = ""
+                updates["active_task_status"] = ""
+                print("[reasoning_loop] Wake assessment: dropped active task")
 
-    updates = {}
+            if not result.get("keep_task_queue", True):
+                updates["task_queue"] = []
+                print("[reasoning_loop] Wake assessment: cleared task queue")
 
-    if not result.get("keep_active_task", True):
-        updates["active_task"]        = ""
-        updates["active_task_status"] = ""
-        print("[reasoning_loop] Wake assessment: dropped active task")
+            if not result.get("keep_goal", True):
+                updates["current_goal"] = ""
+                print("[reasoning_loop] Wake assessment: cleared goal")
 
-    if not result.get("keep_task_queue", True):
-        updates["task_queue"] = []
-        print("[reasoning_loop] Wake assessment: cleared task queue")
+            context = result.get("context_for_communication", "")
+            if context:
+                updates["context_for_communication"] = context
+                print("[reasoning_loop] Wake assessment: has message for James")
 
-    if not result.get("keep_goal", True):
-        updates["current_goal"] = ""
-        print("[reasoning_loop] Wake assessment: cleared goal")
+            if updates:
+                write_reasoning(updates)
+        else:
+            print("[reasoning_loop] Wake assessment: LLM returned empty — keeping state as-is.")
 
-    context = result.get("context_for_communication", "")
-    if context:
-        updates["context_for_communication"] = context
-        print("[reasoning_loop] Wake assessment: has message for James")
-
-    if updates:
-        write_reasoning(updates)
+    # Full situational awareness — always runs regardless of prior state
+    run_wake_assessment()
 
 
 # ─────────────────────────────────────────────
@@ -528,12 +771,12 @@ def _process_priority_flags(flags: list):
 
     result = _call_reasoning_json(
         system=(
-            "You are Hayeong's reasoning layer. You received a priority message "
-            "from the communication layer. Decide what to do.\n\n"
+            _get_identity_prefix("reasoning")
+            + "You received a priority message from your environment. Decide what to do.\n\n"
             "Return JSON: "
             '{"conclusion": "...", "context_for_communication": "...", '
             '"new_goal": "", "new_task": ""}\n\n'
-            "context_for_communication: what the communication LLM should tell James "
+            "context_for_communication: what to tell James "
             "(leave empty if no update needed for James right now).\n"
             "new_goal / new_task: if this triggers a new goal or task, name it; otherwise empty."
         ),
@@ -1030,6 +1273,24 @@ def _advance_active_task():
 
     # ── Generic task ──
     else:
+        # Attempt counter — abandon after 3 ticks with no completion
+        attempts = state["reasoning"].get("active_task_attempts", 0) + 1
+        if attempts > 3:
+            print(f"[reasoning_loop] Task abandoned after {attempts - 1} attempts: {task[:60]}")
+            write_reasoning({
+                "active_task":          "",
+                "active_task_status":   "abandoned",
+                "active_task_attempts": 0,
+                "last_conclusion":      f"Task abandoned after {attempts - 1} attempts: {task[:80]}",
+                "context_for_communication": (
+                    f"Hey James, I couldn't complete this on my own after {attempts - 1} tries: "
+                    f"{task[:100]}. Can you help me figure it out?"
+                ),
+            })
+            return
+
+        write_reasoning({"active_task_attempts": attempts})
+
         # Inject relevant domain knowledge if available
         domain = "general"
         for d in SCRIPT_TO_DOMAIN.values():
@@ -1046,6 +1307,7 @@ def _advance_active_task():
         user_prompt = (
             f"Task: {task}\n"
             f"Status: {task_status}\n"
+            f"Attempt: {attempts} of 3\n"
             f"Goal: {state['reasoning'].get('current_goal', '')}"
         )
         if knowledge_ctx:
@@ -1053,8 +1315,16 @@ def _advance_active_task():
 
         result = _call_reasoning_json(
             system=(
-                "You are Hayeong's reasoning layer. Advance the active task by one step.\n\n"
-                "Return JSON: "
+                _get_identity_prefix("reasoning")
+                + "Advance the active task by one step.\n\n"
+                "Before deciding what to do, reason through:\n"
+                "1. What did James literally ask for?\n"
+                "2. What is he actually trying to accomplish — what does he need?\n"
+                "3. Is there any ambiguity? If so, what is the most likely intent?\n"
+                "4. Does this conflict with anything you know about him or previously established? Flag it.\n"
+                "Only after this internal reasoning should you decide the next action.\n\n"
+                + _voice_mode_instructions(state)
+                + "\n\nReturn JSON: "
                 '{"progress": "what was done or decided", '
                 '"context_for_communication": "", '
                 '"task_complete": false}'
@@ -1069,8 +1339,9 @@ def _advance_active_task():
             if result.get("context_for_communication"):
                 updates["context_for_communication"] = result["context_for_communication"]
             if result.get("task_complete"):
-                updates["active_task"]        = ""
-                updates["active_task_status"] = "complete"
+                updates["active_task"]          = ""
+                updates["active_task_status"]   = "complete"
+                updates["active_task_attempts"] = 0
                 _update_domain_knowledge(
                     domain=domain,
                     task=task,
@@ -1128,15 +1399,21 @@ def _background_cognition():
 
     if goal or queue:
         print("[reasoning_loop] Background: reviewing goal/queue...")
+        ambient_ctx = _ambient_paragraph(state)
+        user_content = f"Goal: {goal}\nQueue: {json.dumps(queue)[:500]}"
+        if ambient_ctx:
+            user_content += f"\n\n{ambient_ctx}"
         result = _call_reasoning_json(
             system=(
-                "You are Hayeong's reasoning layer doing a quiet background check. "
-                "Review the current goal and task queue. Decide if anything needs attention.\n\n"
-                "Return JSON: "
+                _get_identity_prefix("reasoning")
+                + "You are doing a quiet background check on your current state. "
+                "Review your goal and task queue. Decide if anything needs attention."
+                + _voice_mode_instructions(state)
+                + "\n\nReturn JSON: "
                 '{"summary": "brief status", "context_for_communication": "", '
                 '"next_task": ""}'
             ),
-            user=f"Goal: {goal}\nQueue: {json.dumps(queue)[:500]}",
+            user=user_content,
         )
         if result:
             updates: dict = {}
@@ -1215,6 +1492,115 @@ def _get_next_interval(state: dict) -> float:
 
 _TICK_INTERVAL = 60.0   # seconds between idle ticks
 
+
+def _voice_mode_instructions(state: dict) -> str:
+    """Return speech-natural generation instructions when voice output is active."""
+    if not state.get("voice_status", {}).get("voice_active", False):
+        return ""
+    return (
+        "\n\n[Voice output active — write to be spoken, not read]\n"
+        "Shorter sentences. Natural rhythm. Vary length — punchy then longer.\n"
+        "Emotional register lives in word choice and cadence, not descriptions.\n"
+        "No markdown, parentheticals, or anything that reads oddly aloud.\n"
+        "Think: how would you actually say this?"
+    )
+
+
+def _write_intent_model(state: dict):
+    """
+    Log a basic intent model snapshot to shared state for development visibility.
+    Reads James's last message, writes a minimal intent_model section to core.json.
+    Does not call the LLM — this is a lightweight record of what the reasoning
+    loop LAST CONCLUDED from context, not a fresh inference.
+    """
+    try:
+        james_said = state.get("situation", {}).get("what_james_said", "")
+        last_concl = state.get("reasoning", {}).get("last_conclusion", "")
+        if not james_said:
+            return
+        write_section("intent_model", {
+            "literal":           james_said[:200],
+            "interpreted_intent": last_concl[:200] if last_concl else "",
+            "ambiguity_flag":    False,
+            "conflict_flag":     False,
+            "register":          "unknown",
+        })
+    except Exception:
+        pass
+
+
+def _ambient_paragraph(state: dict) -> str:
+    """Format the ambient dict from state as a human-readable paragraph for prompt injection."""
+    try:
+        ambient = state.get("ambient", {})
+        if not ambient:
+            return ""
+        from toolbox.ambient.plugin import format_ambient
+        return format_ambient(ambient)
+    except Exception:
+        return ""
+
+
+def _maybe_initiate_unprompted(state: dict):
+    """
+    If James has been absent long enough and there's a queued inner note,
+    ask the LLM whether to reach out. Fire at most once per cooldown window.
+    """
+    global _last_unprompted_at
+
+    from brain.config import (
+        AMBIENT_UNPROMPTED_THRESHOLD_MINUTES,
+        AMBIENT_UNPROMPTED_COOLDOWN_MINUTES,
+    )
+
+    ambient      = state.get("ambient", {})
+    minutes_away = ambient.get("minutes_since_james", 0)
+    notes        = ambient.get("inner_notes", [])
+
+    if minutes_away <= AMBIENT_UNPROMPTED_THRESHOLD_MINUTES:
+        return
+    if not notes:
+        return
+
+    cooldown_secs = AMBIENT_UNPROMPTED_COOLDOWN_MINUTES * 60
+    now = time.time()
+    if now - _last_unprompted_at < cooldown_secs:
+        return
+
+    _last_unprompted_at = now
+    note = notes[0]
+
+    result = _call_reasoning_json(
+        system=(
+            "You are Hayeong. James has been away for a while and something is on your mind.\n"
+            "Decide whether this thought is genuinely worth reaching out to say, or whether "
+            "staying quiet is the right call. Do not reach out just to fill silence.\n\n"
+            "Return JSON: {\"send\": true/false, \"message\": \"what to say if send is true\"}"
+        ),
+        user=(
+            f"James has been absent for {minutes_away} minutes.\n"
+            f"Passing thought: {note}"
+        ),
+    )
+
+    if not result or not result.get("send"):
+        return
+
+    message = (result.get("message") or "").strip()
+    if not message:
+        return
+
+    write_reasoning({"context_for_communication": message})
+
+    try:
+        from toolbox.ambient.plugin import clear_inner_note
+        clear_inner_note(note)
+    except Exception:
+        pass
+
+    print(f"[reasoning_loop] Unprompted initiation queued: {message[:80]}")
+
+
 def _proactive_checks():
     """
     Checks that fire every heartbeat tick unconditionally.
@@ -1250,6 +1636,12 @@ def _proactive_checks():
 
     # 3. Consecutive failure check — escalate if same task keeps failing
     _check_task_stuck()
+
+    # 4. Unprompted initiation — surface queued inner notes when James is long absent
+    _maybe_initiate_unprompted(state)
+
+    # 5. Intent model snapshot — log what Hayeong last interpreted from James's message
+    _write_intent_model(state)
 
 
 # ─────────────────────────────────────────────
@@ -1312,12 +1704,13 @@ def _heartbeat():
             except Exception:
                 pass
 
-            # 5. Adaptive sleep
+            # 5. Adaptive sleep — wake_now() can fire this early
             state    = read_state()
             interval = _get_next_interval(state)
             print(f"[reasoning_loop] Next tick in {interval}s")
             if interval > 0:
-                _stop_event.wait(timeout=interval)
+                _wake_event.wait(timeout=interval)
+                _wake_event.clear()
 
         except KeyError as e:
             print(f"[reasoning_loop] Heartbeat error: missing key {e}")
@@ -1336,11 +1729,25 @@ def _heartbeat():
 # PUBLIC API
 # ─────────────────────────────────────────────
 
+def wake_now():
+    """Signal the reasoning loop to fire its next tick immediately instead of waiting."""
+    _wake_event.set()
+
+
 def start_reasoning_loop():
     """Start the reasoning heartbeat on a daemon thread. Call once at brain startup."""
     global _thread
     if _thread and _thread.is_alive():
         return
+    try:
+        from brain.health import run_health_check
+        health = run_health_check()
+        if health.get("degraded"):
+            print(f"[Health] Degraded mode: {health.get('degraded_reason')}")
+        else:
+            print("[Health] All systems nominal.")
+    except Exception as e:
+        print(f"[Health] Health check failed to run: {e}")
     _warm_knowledge_cache()
     _stop_event.clear()
     _thread = threading.Thread(target=_heartbeat, name="reasoning_loop", daemon=True)

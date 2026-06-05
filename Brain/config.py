@@ -9,6 +9,7 @@ Usage in any file:
 """
 
 import os
+from pathlib import Path
 
 # ── Base paths ─────────────────────────────────────────────────────────────
 ROOT_DIR        = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -16,10 +17,13 @@ BRAIN_DIR       = os.path.join(ROOT_DIR, "Brain")
 TOOLBOX_DIR     = os.path.join(ROOT_DIR, "Toolbox")
 MEMORY_DIR      = os.path.join(ROOT_DIR, "Memory")
 LOGS_DIR        = os.path.join(ROOT_DIR, "Logs")
+TOOLS_DIR       = os.path.join(ROOT_DIR, "Tools")
 OUTPUTS_DIR     = os.path.join(ROOT_DIR, "Logs", "outputs")
 STATE_FILE      = os.path.join(ROOT_DIR, "Brain", "state", "core.json")
 IDENTITY_FILE   = os.path.join(ROOT_DIR, "Brain", "identity.json")
 CONV_LOG_DIR    = os.path.join(ROOT_DIR, "Logs", "conversations")
+
+JAMES_INTENTIONS_PATH = Path(ROOT_DIR) / "Memory" / "james" / "current_intentions.md"
 
 # ── Ollama model configuration ─────────────────────────────────────────────
 PRESENCE_URL   = "http://localhost:11435/api/chat"
@@ -29,10 +33,6 @@ PRESENCE_MODEL = "qwen2.5:32b-instruct-q4_K_M"
 # Not active by default — spun up by api_caller tool when needed.
 DEEPSEEK_URL   = "http://localhost:11436/api/chat"
 DEEPSEEK_MODEL = "deepseek-r1:latest"
-
-# Discord bridge (optional — only needed when Discord bot is in use)
-DISCORD_BOT_URL   = PRESENCE_URL
-DISCORD_BOT_MODEL = PRESENCE_MODEL
 
 # ── Minecraft ──────────────────────────────────────────────────────────────
 MINECRAFT_HOST       = "127.0.0.1"
@@ -71,14 +71,24 @@ CONSOLIDATION_MIN_SIZE  = 4      # minimum cluster size to consolidate
 WORKING_MEMORY_EXPIRE   = 14     # days before working memory expires
 
 # ── Database ───────────────────────────────────────────────────────────────
-DB_HOST     = "localhost"
-DB_PORT     = 5432
-DB_USER     = "postgres"
-DB_PASSWORD = ""           # Set this if you add a Postgres password
-DB_NAME     = "hayeong"    # Hayeong's default database
+# PostgreSQL — primary database
+POSTGRES_HOST     = "localhost"
+POSTGRES_PORT     = 5432
+POSTGRES_USER     = "postgres"
+POSTGRES_PASSWORD = os.environ.get("HAYEONG_PG_PASSWORD", "")
+POSTGRES_DB       = "hayeong"
+POSTGRES_BIN      = "H:/Postgres/bin"
+
+# Legacy aliases — kept for backward compatibility with older imports
+DB_HOST     = POSTGRES_HOST
+DB_PORT     = POSTGRES_PORT
+DB_USER     = POSTGRES_USER
+DB_PASSWORD = POSTGRES_PASSWORD
+DB_NAME     = POSTGRES_DB
 
 # SQLite fallback — always on H: drive
-SQLITE_DIR  = "H:/Databases/sqlite/"
+SQLITE_DIR        = "H:/Databases/sqlite"
+SQLITE_DEFAULT_DB = "H:/Databases/sqlite/hayeong.db"
 
 # Where Postgres stores its data (documentation/reference — configured in Postgres itself)
 POSTGRES_DATA_DIR = "H:/Databases/postgres/data/"
@@ -86,7 +96,22 @@ POSTGRES_DATA_DIR = "H:/Databases/postgres/data/"
 # ── Self-review ────────────────────────────────────────────────────────────
 SELF_REVIEW_ENABLED = True   # second LLM pass to verify response quality; set False to reduce latency
 
+# ── Ambient presence ───────────────────────────────────────────────────────────
+AMBIENT_PLUGIN_INTERVAL_SECONDS          = 2    # matches other plugin heartbeats
+AMBIENT_JAMES_ABSENT_THRESHOLD_MINUTES   = 15   # minutes before James is considered absent
+AMBIENT_UNPROMPTED_THRESHOLD_MINUTES     = 20   # minutes absent before unprompted initiation is possible
+AMBIENT_MAX_INNER_NOTES                  = 10   # max queued thoughts before oldest drops
+AMBIENT_UNPROMPTED_COOLDOWN_MINUTES      = 30   # minimum gap between unprompted messages
+
 # ── API keys ───────────────────────────────────────────────────────────────
-DISCORD_TOKEN   = ""
 EMAIL_ADDRESS   = ""
 EMAIL_PASSWORD  = ""
+
+SESSION_LOG_DB                = os.path.join(BRAIN_DIR, "session_log.db")
+
+# ── Cognitive tick configuration ────────────────────────────────────────────
+INNER_AGENDA_PATH             = os.path.join(BRAIN_DIR, "inner_agenda.json")
+TICK_IDLE_THRESHOLD_MINUTES   = 5
+MINIMUM_TICK_INTERVAL_MINUTES = 5
+TICK_SLEEP_SECONDS            = 60
+TICK_MAX_HISTORY_EXCHANGES    = 5

@@ -1,2 +1,0 @@
-{"type": "session_start", "session_id": "68478270", "timestamp": "2026-04-26T17:06:29.958643", "date": "2026-04-26"}
-{"type": "conversation", "session_id": "68478270", "timestamp": "2026-04-26T17:07:12.989556", "role": "james", "content": "hello", "intent": null, "mood": null, "model_used": null}

@@ -71,7 +71,7 @@ IDLE_KEEPALIVE_SECONDS = 20 * 60
 MAX_LOG_ENTRIES  = 500
 
 # Ollama config for classification
-OLLAMA_URL       = "http://localhost:11434/api/chat"
+OLLAMA_URL       = "http://localhost:11435/api/chat"
 CLASSIFY_MODEL   = "deepseek-r1:latest"
 
 

@@ -1,5 +1,0 @@
-{"type": "session_start", "session_id": "aff9a052", "timestamp": "2026-04-30T13:37:50.309192", "date": "2026-04-30"}
-{"type": "conversation", "session_id": "aff9a052", "timestamp": "2026-04-30T13:38:34.130501", "role": "james", "content": "hello hayeong are you there?", "intent": null, "mood": null, "model_used": null}
-{"type": "conversation", "session_id": "aff9a052", "timestamp": "2026-04-30T13:38:45.653073", "role": "hayeong", "content": "I don't know.", "intent": null, "mood": "amused", "model_used": "llama3.2:latest"}
-{"type": "conversation", "session_id": "aff9a052", "timestamp": "2026-04-30T13:39:34.308833", "role": "james", "content": "you dont know that you there? you dont know you that you responded to me? lol.", "intent": null, "mood": null, "model_used": null}
-{"type": "conversation", "session_id": "aff9a052", "timestamp": "2026-04-30T13:39:44.885034", "role": "hayeong", "content": "Wait, really? You're teasing me about not knowing if I'm there? Okay that's actually fair. I haven't started the Minecraft bridge yet.", "intent": null, "mood": "amused", "model_used": "llama3.2:latest"}

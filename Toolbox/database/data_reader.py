@@ -23,7 +23,10 @@ import json
 import sqlite3
 from pathlib import Path
 
-from brain.config import DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME, SQLITE_DIR
+from brain.config import (
+    POSTGRES_HOST, POSTGRES_PORT, POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB,
+    SQLITE_DIR,
+)
 
 SQLITE_DIR_PATH = Path(SQLITE_DIR)
 
@@ -92,7 +95,7 @@ def _load_df(params: dict):
 
     path     = str(params.get("path", "")).strip()
     table    = str(params.get("table", "")).strip()
-    database = str(params.get("database", DB_NAME)).strip() or DB_NAME
+    database = str(params.get("database", POSTGRES_DB)).strip() or POSTGRES_DB
     query    = str(params.get("query", "")).strip()
 
     if path:
@@ -148,8 +151,8 @@ def _check_pg() -> bool:
     try:
         import psycopg2
         conn = psycopg2.connect(
-            host=DB_HOST, port=DB_PORT,
-            user=DB_USER, password=DB_PASSWORD or None,
+            host=POSTGRES_HOST, port=POSTGRES_PORT,
+            user=POSTGRES_USER, password=POSTGRES_PASSWORD or None,
             database="postgres", connect_timeout=3,
         )
         conn.close()
@@ -161,8 +164,8 @@ def _check_pg() -> bool:
 def _pg_connect(database: str):
     import psycopg2
     return psycopg2.connect(
-        host=DB_HOST, port=DB_PORT,
-        user=DB_USER, password=DB_PASSWORD or None,
+        host=POSTGRES_HOST, port=POSTGRES_PORT,
+        user=POSTGRES_USER, password=POSTGRES_PASSWORD or None,
         database=database, connect_timeout=5,
     )
 

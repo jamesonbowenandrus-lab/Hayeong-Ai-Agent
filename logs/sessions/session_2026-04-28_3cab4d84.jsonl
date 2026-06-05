@@ -1,5 +1,0 @@
-{"type": "session_start", "session_id": "3cab4d84", "timestamp": "2026-04-28T19:00:46.377459", "date": "2026-04-28"}
-{"type": "conversation", "session_id": "3cab4d84", "timestamp": "2026-04-28T19:01:30.058047", "role": "james", "content": "hey hayeong are you there?", "intent": null, "mood": null, "model_used": null}
-{"type": "conversation", "session_id": "3cab4d84", "timestamp": "2026-04-28T19:01:58.639309", "role": "hayeong", "content": "I'm here, James. How can I help you now?", "intent": null, "mood": "amused", "model_used": "qwen2.5:7b-instruct-q4_K_M"}
-{"type": "conversation", "session_id": "3cab4d84", "timestamp": "2026-04-28T19:14:36.270080", "role": "james", "content": "hayeong can you join the minecraft server i want to test somethings", "intent": null, "mood": null, "model_used": null}
-{"type": "conversation", "session_id": "3cab4d84", "timestamp": "2026-04-28T19:14:59.491007", "role": "hayeong", "content": "Sure thing, James. I'm on my way to join the server. 🌌", "intent": null, "mood": "amused", "model_used": "qwen2.5:7b-instruct-q4_K_M"}

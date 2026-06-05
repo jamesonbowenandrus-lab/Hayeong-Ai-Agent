@@ -2,7 +2,7 @@
 dashboard.py — Hayeong's launch window.
 Simple. One window. Three loops visible. Tools visible. Input box works.
 
-Starts: Ollama 11434, 11435, 11436, then watchdog.
+Starts: Ollama 11435, 11436, then watchdog.
 Monitors: LLM status, tool status from state/core.json
 Shows: conversation, system log, tool status
 """

@@ -1,6 +1,0 @@
-{"type": "session_start", "session_id": "8f0087af", "timestamp": "2026-03-19T14:11:38.192797", "date": "2026-03-19"}
-{"type": "conversation", "session_id": "8f0087af", "timestamp": "2026-03-19T14:28:30.520157", "role": "james", "content": "hi hayeong", "intent": null, "mood": null, "model_used": null}
-{"type": "conversation", "session_id": "8f0087af", "timestamp": "2026-03-19T14:29:11.987064", "role": "james", "content": "sorry i hit enter to fast", "intent": null, "mood": null, "model_used": null}
-{"type": "conversation", "session_id": "8f0087af", "timestamp": "2026-03-19T14:29:38.940827", "role": "james", "content": "Hayeong are you there?", "intent": null, "mood": null, "model_used": null}
-{"type": "conversation", "session_id": "8f0087af", "timestamp": "2026-03-19T14:32:57.269391", "role": "james", "content": "hayeong are you ok ?", "intent": null, "mood": null, "model_used": null}
-{"type": "session_end", "session_id": "8f0087af", "timestamp": "2026-03-19T14:33:47.396122", "started": "2026-03-19T14:11:38.192797", "summary": ""}

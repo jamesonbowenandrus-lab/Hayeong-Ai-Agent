@@ -1,0 +1,26 @@
+{
+  "tool": "blender",
+  "version_note": "Blender 5.1.x bpy API",
+  "description": "Hayeong generates bpy scripts that blender_tool.py executes headless. She never adds export calls — blender_tool injects them from export_format param.",
+
+  "must_know": [
+    "Script must NOT contain export calls — blender_tool.py adds export automatically.",
+    "Always clear the default scene first: select_all('SELECT') + delete()",
+    "Always name objects: obj.name = 'Something'",
+    "Apply scale before GLB/STL export: bpy.ops.object.transform_apply(scale=True)",
+    "End script with print('HAYEONG_OK: ...')"
+  ],
+
+  "params": {
+    "blender_script":  "Full Python bpy script as a string",
+    "output_filename": "e.g. 'chair.glb'",
+    "export_format":   "glb (default), blend, stl, fbx",
+    "timeout":         "Seconds before killing Blender (default 120; use 300+ for complex scenes)"
+  },
+
+  "library_scripts": "H:/hayeong/Toolbox/blender/scripts/library/ — 10 reference scripts numbered 01–10",
+
+  "gpu": "RX 7900 XTX (ROCm). NEVER use the RTX 3090 — that GPU is LLM-only.",
+
+  "blender_exe": "H:/blender/blender.exe"
+}

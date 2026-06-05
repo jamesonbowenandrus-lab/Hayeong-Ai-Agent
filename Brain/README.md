@@ -1,39 +1,39 @@
-# Brain\
+# Brain
 
-This is where Hayeong thinks and who she is.
+The reasoning and identity layer. The LLM makes all decisions here.
+Everything else in the system executes what the Brain decides.
 
-## What Lives Here
+## Core Files
 
-- `config.py` — The single source of truth for all paths, ports, and model names.
-  Everything else imports from here. If a path or port changes, change it here only.
+| File | Purpose |
+|---|---|
+| config.py | Single source of truth for all paths, ports, model names |
+| hayeong_core.py | Core Brain orchestration |
+| reasoning_loop.py | Background reasoning heartbeat |
+| cognitive_tick.py | Idle cognition — fires every 5 min, one private LLM call |
+| agenda_manager.py | Read/write interface for inner_agenda.json |
+| identity_prompt_builder.py | Assembles identity layers into presence prompt |
+| inference_layer.py | LLM call abstraction |
+| session_logger.py | SQLite append-only session event log |
+| session_compressor.py | Conversation history compression |
+| uncertainty_patterns.py | Uncertainty expression patterns |
+| health.py | Brain health monitoring |
 
-- `identity.json` — Hayeong's personality, values, and relationship with James.
-  This is not configuration. This is who she is.
+## Identity Files (private, not tracked)
 
-- `state\` — The shared operational state bus. core.json is how the three main loops
-  (reasoning, communication, task) coordinate without blocking each other.
-  Do not write to core.json directly from tools — use the state interface.
-  This is runtime state, not memory — it reflects what is happening right now,
-  not what has happened over time.
+| File | Layer | Ownership |
+|---|---|---|
+| identity_constitutional.json | Constitutional | James-authored |
+| identity_behavioral.json | Behavioral | Deliberately updated |
+| identity_living.json | Living | Hayeong-authored |
 
-- `vision\` — Architecture placeholder for the vision layer coordination logic.
-  Current input handling (tool results, Minecraft packets) flows through the
-  reasoning loop directly. This folder expands when the workstation arrives
-  and screen-awareness becomes active. Implementation lives in Toolbox\vision_tools\.
+## State Files (private, not tracked)
 
-## State vs Memory
+All JSON files in Brain/state/ are runtime state — they change every session
+and contain live cognitive state. They are excluded from this repository.
+The Python files that manage them (core_manager.py, state_manager.py) are public.
 
-Brain\state\ and Memory\ serve different purposes:
+## Design Rule
 
-- `Brain\state\` — **What is happening now.** Loop coordination, active task,
-  current mood, plugin signals. Overwritten on every cycle. Ephemeral.
-- `Memory\` — **What has happened over time.** Conversations, learned facts,
-  emotional moments, domain knowledge. Persistent. Grows over time.
-
-Tools and plugins read from state. The reasoning loop reads from both.
-
-## What To Know
-
-config.py is imported by almost everything. Changes here have wide effect.
-Read it before changing it. Changes to identity.json touch who Hayeong is —
-bring these to James.
+Brain is tool-agnostic. If a file in Brain contains tool-specific logic,
+it is in the wrong place. Tool state belongs in Toolbox/[tool]/state/.

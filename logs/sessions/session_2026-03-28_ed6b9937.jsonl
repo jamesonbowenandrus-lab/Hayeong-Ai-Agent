@@ -1,3 +1,0 @@
-{"type": "session_start", "session_id": "ed6b9937", "timestamp": "2026-03-28T02:33:40.714081", "date": "2026-03-28"}
-{"type": "conversation", "session_id": "ed6b9937", "timestamp": "2026-03-28T02:54:32.511034", "role": "james", "content": "hey hayeong, how are you doing?", "intent": "conversation", "mood": null, "model_used": null}
-{"type": "session_end", "session_id": "ed6b9937", "timestamp": "2026-03-28T02:56:53.569443", "started": "2026-03-28T02:33:40.714081", "summary": ""}

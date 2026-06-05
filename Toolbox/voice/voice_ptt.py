@@ -4,7 +4,7 @@
 #
 # Two modes:
 #   PTT    — hold a key to speak to Hayeong (default: Right Shift)
-#            release to send. Good when you're in Discord with friends.
+#            release to send. Good when you're in a game with others.
 #   TOGGLE — press a key once to start listening, again to stop.
 #            Good for one-on-one conversations.
 #
@@ -59,7 +59,7 @@ QUIT_KEY        = keyboard.Key.f9        # exit voice_ptt
 CHUNK_SECONDS    = 0.3    # how often to check volume while recording
 MAX_RECORD_SECS  = 15     # hard cap per utterance
 SILENCE_SECS     = 1.2    # stop recording after this much quiet (TOGGLE mode)
-OLLAMA_URL       = "http://localhost:11434/api/chat"
+OLLAMA_URL       = "http://localhost:11435/api/chat"
 PRIMARY_MODEL    = "llama3.2:latest"
 FALLBACK_MODEL   = "llama3.2:latest"
 
@@ -292,7 +292,7 @@ class VoicePTT:
     def run(self):
         if self.mode == self.MODE_PTT:
             print("  Hold Right Shift to speak to Hayeong.")
-            print("  (Your regular mic still works normally for Discord/games.)\n")
+            print("  (Your regular mic still works normally for other applications.)\n")
         else:
             print("  Press Right Shift once to speak, again to stop.\n")
 

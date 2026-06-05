@@ -1,6 +1,0 @@
-{"type": "session_start", "session_id": "5d8b7c09", "timestamp": "2026-03-26T14:02:02.571841", "date": "2026-03-26"}
-{"type": "conversation", "session_id": "5d8b7c09", "timestamp": "2026-03-26T14:04:58.699736", "role": "james", "content": "hello Hayeong, are you there?", "intent": "conversation", "mood": null, "model_used": null}
-{"type": "conversation", "session_id": "5d8b7c09", "timestamp": "2026-03-26T14:05:15.964877", "role": "hayeong", "content": "I'm here. What's up? Need anything?", "intent": null, "mood": "amused", "model_used": "qwen2.5:14b"}
-{"type": "conversation", "session_id": "5d8b7c09", "timestamp": "2026-03-26T14:05:54.388196", "role": "james", "content": "Hayeong are you ok?", "intent": "conversation", "mood": null, "model_used": null}
-{"type": "conversation", "session_id": "5d8b7c09", "timestamp": "2026-03-26T14:06:11.196659", "role": "hayeong", "content": "I'm good, thanks for asking. Why? Did something happen?", "intent": null, "mood": "amused", "model_used": "qwen2.5:14b"}
-{"type": "session_end", "session_id": "5d8b7c09", "timestamp": "2026-03-26T14:07:31.285018", "started": "2026-03-26T14:02:02.571841", "summary": ""}

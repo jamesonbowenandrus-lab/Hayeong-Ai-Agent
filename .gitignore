@@ -1,38 +1,104 @@
-.env
-.venv/
+# ── Python ────────────────────────────────────────────────────────────
 __pycache__/
-node_modules/
+*.pyc
+*.pyo
+.venv/
 venv/
+
+# ── Node ──────────────────────────────────────────────────────────────
+node_modules/
+
+# ── Environment ───────────────────────────────────────────────────────
+.env
+
+# ── Audio / Media ─────────────────────────────────────────────────────
+*.wav
+*.mp3
+
+# ══════════════════════════════════════════════════════════════════════
+# HAYEONG IDENTITY — Private, never commit
+# These define who she is. They are runtime-generated or personally authored.
+# ══════════════════════════════════════════════════════════════════════
 identity.json
-core.json
 identity_behavioral.json
 identity_constitutional.json
 identity_living.json
 Hayeong_Backstory.txt
+Brain/inner_agenda.json
+Brain/mood.json
+
+# ══════════════════════════════════════════════════════════════════════
+# BRAIN RUNTIME STATE — Changes every session, private
+# Keep the .py files. Ignore all .json runtime state files.
+# ══════════════════════════════════════════════════════════════════════
+Brain/state/*.json
+Brain/state/*.jsonl
+Brain/state/*.txt
+Brain/state/*.db
+Brain/session_log.db
+
+# ══════════════════════════════════════════════════════════════════════
+# MEMORY — All data files private, Python files stay public
+# ══════════════════════════════════════════════════════════════════════
 Memory/relationships/james.json
+Memory/relationships/*.json
+Memory/james/
+Memory/memory.json
 
-
-voice_prep/downloads/
-
-*.wav
-
-*.wav
-
-*.mp3
-
-*.deb
-
-# ── Hayeong Private Runtime Data ──────────────────────────────────────
-# These files contain personal conversation history, memory embeddings,
-# and emotional state. They are generated at runtime and are private.
-# Do not commit them to the repository.
-
-Memory/chroma_db/chroma.sqlite3
-Memory/chroma_db/*.bin
-Memory/chroma_db/index/
+# ChromaDB — active database (Memory/chromadb/)
 Memory/chromadb/chroma.sqlite3
 Memory/chromadb/*.bin
 Memory/chromadb/**/*.bin
 Memory/chromadb/index/
-Memory/memory.json
-Brain/mood.json
+Memory/chromadb/decay_log.json
+Memory/chromadb/last_consolidation.json
+Memory/chromadb/*/
+
+# ChromaDB — orphaned folder (Memory/chroma_db/) — placeholder only, data should never exist here
+# See Memory/chroma_db/README.md for explanation
+Memory/chroma_db/chroma.sqlite3
+Memory/chroma_db/*.bin
+Memory/chroma_db/**/*.bin
+Memory/chroma_db/*/
+
+# Memory backups — private runtime snapshots
+Memory/backups/
+
+# ══════════════════════════════════════════════════════════════════════
+# LOGS — All log content private
+# Folder structure and READMEs stay. Everything inside is ignored.
+# ══════════════════════════════════════════════════════════════════════
+logs/*.log
+logs/*.json
+logs/*.jsonl
+logs/**/*.log
+logs/**/*.json
+logs/**/*.jsonl
+logs/conversations/
+logs/sessions/
+logs/notes/events/
+logs/dashboard/
+Toolbox/web/logs/
+
+# ══════════════════════════════════════════════════════════════════════
+# FINE-TUNING DATA — Private training assets
+# ══════════════════════════════════════════════════════════════════════
+logs/finetune_log.jsonl
+finetune_export.jsonl
+Tools/review/review_state.json
+
+# ══════════════════════════════════════════════════════════════════════
+# GAME WORLD STATE — Private runtime data
+# ══════════════════════════════════════════════════════════════════════
+Toolbox/minecraft/worlds/
+
+# ══════════════════════════════════════════════════════════════════════
+# CORE STATE FILE
+# ══════════════════════════════════════════════════════════════════════
+core.json
+Brain/state/core.json
+
+# ══════════════════════════════════════════════════════════════════════
+# PRIVATE BACKUP SCRIPT — not for public repo
+# ══════════════════════════════════════════════════════════════════════
+backup_private.bat

@@ -344,6 +344,26 @@ def hayeong_dev_tool(
 
 def run(description: str, params: dict) -> str:
     """Entry point called by main.py task loop via registry."""
+
+    # ── self_reflect: write directly to identity_living.json ─────────────
+    action = params.get("action", "")
+    if action == "self_reflect":
+        section = params.get("section", "self_authored_entries").strip()
+        entry   = params.get("entry", "").strip()
+
+        if not entry:
+            return "[ERROR] self_reflect requires an 'entry' param — what do you want to record?"
+
+        from brain.hayeong_core import update_living_identity
+        success = update_living_identity(section, entry)
+
+        if success:
+            preview = entry[:80] + ("..." if len(entry) > 80 else "")
+            return f"[SUCCESS] Recorded to living identity ({section}): {preview}"
+        else:
+            return "[ERROR] Failed to write to living identity. Check section name and entry."
+
+    # ── Default: file edit / new file / structural handoff ───────────────
     result = hayeong_dev_tool(
         target_path=params.get("target_path", ""),
         change_description=params.get("change_description", description),

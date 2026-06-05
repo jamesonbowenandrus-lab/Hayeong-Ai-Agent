@@ -27,10 +27,52 @@ measurable benefit, safe to experiment without affecting her core identity.
 ──────────────────────────────────────────────────────────────────────
 """
 
+import json
 import re
+from pathlib import Path
 from typing import Literal
 
 RouteDecision = Literal["conversation", "task", "ambiguous"]
+
+# ── Explicit tool-name pre-check ──────────────────────────────────────────────
+# Loaded lazily on first classify() call. Never raises — fails safe to empty dict.
+_registry_cache: dict = {}
+
+_INVOKE_VERBS = {"use", "run", "call", "execute", "launch", "start", "open", "check"}
+
+
+def _load_registry() -> dict:
+    global _registry_cache
+    if _registry_cache:
+        return _registry_cache
+    try:
+        path = Path(__file__).parent.parent / "Toolbox" / "registry.json"
+        _registry_cache = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return _registry_cache
+
+
+def _explicit_tool_mention(message: str, registry: dict) -> str | None:
+    """
+    Return the tool name if the user explicitly invokes a registered tool by name.
+    Requires either an invocation verb ("use", "run", ...) or the word "tool" to
+    be present alongside the tool name — prevents false matches on casual mentions.
+    """
+    lowered = message.lower()
+    words   = set(re.split(r"\W+", lowered))
+    has_invoke = bool(words & _INVOKE_VERBS) or "tool" in words
+
+    if not has_invoke:
+        return None
+
+    for tool_name in registry.keys():
+        # Check both raw ("web_search") and space-separated ("web search") forms
+        variants = {tool_name, tool_name.replace("_", " ")}
+        for variant in variants:
+            if variant in lowered:
+                return tool_name
+    return None
 
 # Keywords that strongly signal task intent
 _TASK_KEYWORDS = [
@@ -68,6 +110,13 @@ def classify(message: str) -> RouteDecision:
     """
     if not message or not message.strip():
         return "conversation"
+
+    # Pre-check: explicit tool invocation by name → always task, no LLM needed
+    _reg = _load_registry()
+    if _reg:
+        explicit = _explicit_tool_mention(message, _reg)
+        if explicit:
+            return "task"
 
     msg = message.strip().lower()
 

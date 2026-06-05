@@ -246,7 +246,7 @@ def _try_vision_model(image_bytes: bytes, window_title: str, narration: str) -> 
     try:
         data = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(
-            "http://localhost:11434/api/generate",
+            "http://localhost:11435/api/generate",
             data=data,
             headers={"Content-Type": "application/json"},
         )
@@ -277,7 +277,6 @@ def _heuristic_analysis(window_title: str, narration: str) -> dict:
         "Minecraft": ["minecraft"],
         "Chrome": ["chrome", "google chrome"],
         "Firefox": ["firefox"],
-        "Discord": ["discord"],
         "Photoshop": ["photoshop"],
         "Terminal": ["terminal", "cmd", "powershell", "bash"],
         "Explorer": ["file explorer", "windows explorer"],

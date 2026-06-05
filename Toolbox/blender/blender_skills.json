@@ -1,0 +1,97 @@
+{
+  "last_updated": "2026-06-03T00:00:00",
+  "current_level": "basic_shapes",
+  "progression_ladder": [
+    {
+      "level": "basic_shapes",
+      "label": "Basic Shapes",
+      "description": "Primitive objects with basic materials. Single object scenes.",
+      "required_skills": [
+        "scene clear",
+        "primitive creation (cube, sphere, cylinder)",
+        "basic material assignment",
+        "GLB export"
+      ],
+      "demonstrated": true,
+      "demonstrated_at": "2026-06-03T00:00:00",
+      "example_asset_ids": []
+    },
+    {
+      "level": "complex_shapes",
+      "label": "Complex Shapes",
+      "description": "Multi-object scenes, modifiers, lighting, camera setup.",
+      "required_skills": [
+        "multiple objects in one scene",
+        "modifiers (subdivision, bevel, solidify)",
+        "basic lighting (area, sun)",
+        "camera placement and tracking"
+      ],
+      "demonstrated": false,
+      "demonstrated_at": null,
+      "example_asset_ids": []
+    },
+    {
+      "level": "realistic_models",
+      "label": "Realistic Models",
+      "description": "Organic shapes, UV unwrapping, PBR materials, render output.",
+      "required_skills": [
+        "organic mesh construction",
+        "UV unwrapping",
+        "PBR material setup",
+        "render to image output"
+      ],
+      "demonstrated": false,
+      "demonstrated_at": null,
+      "example_asset_ids": []
+    },
+    {
+      "level": "rigging_movement",
+      "label": "Rigging & Movement",
+      "description": "Armatures, bone hierarchy, weight painting, basic animation.",
+      "required_skills": [
+        "armature creation",
+        "bone parenting and hierarchy",
+        "weight painting",
+        "keyframe animation",
+        "action export"
+      ],
+      "demonstrated": false,
+      "demonstrated_at": null,
+      "example_asset_ids": []
+    },
+    {
+      "level": "texturing_rendering",
+      "label": "Texturing & Rendering",
+      "description": "Texture painting, node-based materials, full scene rendering.",
+      "required_skills": [
+        "texture painting",
+        "node material networks",
+        "HDRI lighting",
+        "render settings (Cycles/EEVEE)",
+        "render output pipeline"
+      ],
+      "demonstrated": false,
+      "demonstrated_at": null,
+      "example_asset_ids": []
+    },
+    {
+      "level": "production_pipeline",
+      "label": "Production Pipeline",
+      "description": "Full character pipeline: model → rig → animate → render → export.",
+      "required_skills": [
+        "full character creation",
+        "character rigging",
+        "scene composition",
+        "animation sequencing",
+        "video render output"
+      ],
+      "demonstrated": false,
+      "demonstrated_at": null,
+      "example_asset_ids": []
+    }
+  ],
+  "attempted_skills": [],
+  "failed_attempts": [],
+  "james_quality_notes": [],
+  "hayeong_self_assessment": []
+}

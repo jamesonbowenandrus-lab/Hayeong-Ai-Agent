@@ -72,7 +72,7 @@ def _get_ddgs():
 
 DDGS_AVAILABLE = _check_ddgs()
 
-OLLAMA_URL      = "http://localhost:11434/api/chat"
+OLLAMA_URL      = "http://localhost:11435/api/chat"
 QUERY_MODEL     = "llama3.2:latest"   # Query extraction — comm model, always loaded
 
 

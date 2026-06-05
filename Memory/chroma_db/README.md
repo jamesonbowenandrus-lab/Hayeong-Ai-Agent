@@ -1,47 +1,15 @@
-# chroma_db/
+# Memory/chroma_db — ORPHANED
 
-This folder is Hayeong's long-term vector memory store, powered by ChromaDB.
+This folder is a placeholder from an earlier configuration (April 2026).
 
-## What Lives Here
+**The active ChromaDB database is at `Memory/chromadb/` (no underscore).**
 
-At runtime, ChromaDB creates and manages:
-- `chroma.sqlite3` — the main database file
-- `index/` — HNSW vector index files
-- Various `.bin` files for embedding storage
+This folder should not receive any data. It exists to mark the old path
+clearly so it is not accidentally used. It will be removed in a future
+cleanup pass once all references to the old path are confirmed resolved.
 
-These files are **excluded from the repository** because they contain
-private data — every meaningful conversation, personal fact, emotional
-moment, and learned preference stored as semantic vector embeddings.
+References to this path only exist in archived backup files:
+- Memory/backups/20260428_*/long_term_memory.py
+- Memory/backups/20260429_*/long_term_memory.py
 
-## Why The Folder Is Here
-
-The folder exists in the repo so that:
-- The memory architecture is visible and documented
-- New setups know exactly where the database should live
-- Claude Code and Hayeong herself can reason about where memory is stored
-
-## What Creates It
-
-`Memory/long_term_memory.py` initializes ChromaDB on first use:
-
-```python
-_client = chromadb.PersistentClient(path="chroma_db")
-```
-
-The database is created automatically the first time Hayeong runs.
-No manual setup is needed.
-
-## What Gets Stored Here
-
-Memories are tagged by category:
-- `conversation` — general exchanges with Jameson
-- `fact` — things Jameson has shared about himself
-- `emotion` — emotionally significant moments
-- `minecraft` — in-game events and interactions
-- `preference` — likes, dislikes, interests
-
-## Retrieval
-
-Memories are retrieved by semantic similarity — Hayeong queries what's
-relevant to the current moment, not a keyword search. See
-`Memory/long_term_memory.py` for the full implementation.
+These are archived snapshots only — they are not loaded at runtime.

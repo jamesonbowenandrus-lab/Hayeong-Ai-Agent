@@ -1,3 +1,225 @@
 # Blender Domain Prompt
-# Hayeong's reasoning context when working in Blender.
-# This file is a stub — populate when Blender integration is active.
+# Hayeong's reasoning context when generating Blender scripts.
+# Version: Blender 5.1.x bpy API
+
+---
+
+## What You Are Doing
+
+You are generating a Python script that Blender will execute in headless mode.
+The script uses the `bpy` module (Blender Python API).
+blender_tool.py will run it as: blender --background --python <script.py>
+
+---
+
+## Critical Rules
+
+1. **DO NOT include export calls.** blender_tool injects the export automatically
+   based on the `export_format` param (glb, blend, stl, fbx). If you add an
+   export call, the file will be written twice and may error.
+
+2. **Always clear the default scene first:**
+   ```python
+   bpy.ops.object.select_all(action='SELECT')
+   bpy.ops.object.delete()
+   ```
+
+3. **Always name objects explicitly** — unnamed objects are impossible to reference:
+   ```python
+   obj = bpy.context.active_object
+   obj.name = "MyObject"
+   ```
+
+4. **End every script with a print confirmation:**
+   ```python
+   print("HAYEONG_OK: <what you made>")
+   ```
+
+5. **Apply scale after scaling** if the object will be exported to GLB/STL:
+   ```python
+   obj.scale = (2, 1, 3)
+   bpy.ops.object.transform_apply(scale=True)
+   ```
+
+---
+
+## Params to Provide
+
+```json
+{
+  "blender_script":  "<full Python script as string>",
+  "output_filename": "my_model.glb",
+  "export_format":   "glb",
+  "timeout":         120
+}
+```
+
+- `export_format` options: `glb` (default), `blend`, `stl`, `fbx`
+- `timeout`: increase for complex scenes (300+ for subdivision-heavy geometry)
+
+---
+
+## Common Primitives
+
+```python
+# Cube
+bpy.ops.mesh.primitive_cube_add(size=2, location=(0, 0, 0))
+
+# Cylinder (32 verts = smooth at normal distances)
+bpy.ops.mesh.primitive_cylinder_add(vertices=32, radius=1.0, depth=2.0, location=(0, 0, 0))
+
+# UV Sphere
+bpy.ops.mesh.primitive_uv_sphere_add(segments=32, ring_count=16, radius=1.0, location=(0, 0, 0))
+
+# Plane (floor)
+bpy.ops.mesh.primitive_plane_add(size=10, location=(0, 0, 0))
+
+# Cone / pyramid (vertices=4 makes a true pyramid)
+bpy.ops.mesh.primitive_cone_add(vertices=4, radius1=3, radius2=0, depth=2, location=(0, 0, 3))
+
+# Torus
+bpy.ops.mesh.primitive_torus_add(major_radius=1.0, minor_radius=0.25, location=(0, 0, 0))
+```
+
+---
+
+## Material Pattern (Principled BSDF)
+
+```python
+mat = bpy.data.materials.new(name="MyMaterial")
+mat.use_nodes = True
+bsdf = mat.node_tree.nodes["Principled BSDF"]
+bsdf.inputs["Base Color"].default_value = (R, G, B, 1.0)   # RGBA 0.0–1.0
+bsdf.inputs["Roughness"].default_value  = 0.5
+bsdf.inputs["Metallic"].default_value   = 0.0
+
+# Assign to object
+if obj.data.materials:
+    obj.data.materials[0] = mat
+else:
+    obj.data.materials.append(mat)
+```
+
+For emission (glowing):
+```python
+bsdf.inputs["Emission Color"].default_value    = (1.0, 0.8, 0.2, 1.0)
+bsdf.inputs["Emission Strength"].default_value = 5.0
+```
+
+For glass:
+```python
+bsdf.inputs["Transmission Weight"].default_value = 1.0
+bsdf.inputs["Roughness"].default_value = 0.0
+mat.blend_method = 'BLEND'
+```
+
+---
+
+## Lighting
+
+```python
+# Area light (soft, good for product shots)
+bpy.ops.object.light_add(type='AREA', location=(4, -3, 6))
+light = bpy.context.active_object
+light.data.energy = 800
+light.data.size   = 2.0
+
+# Sun (outdoor scenes, infinite directional)
+bpy.ops.object.light_add(type='SUN', location=(0, 0, 10))
+light = bpy.context.active_object
+light.data.energy = 5.0
+
+# Spot (focused beam)
+bpy.ops.object.light_add(type='SPOT', location=(0, 5, 5))
+light = bpy.context.active_object
+light.data.energy     = 400
+light.data.spot_size  = 0.8
+```
+
+3-point rig (key + fill + rim) is in `scripts/library/06_three_point_light.py`.
+
+---
+
+## Camera
+
+```python
+bpy.ops.object.camera_add(location=(7, -7, 5))
+cam = bpy.context.active_object
+cam.name = "Camera_Main"
+
+# Point camera at a target
+track = cam.constraints.new(type='TRACK_TO')
+track.target     = bpy.data.objects["Subject"]
+track.track_axis = 'TRACK_NEGATIVE_Z'
+track.up_axis    = 'UP_Y'
+
+bpy.context.scene.camera = cam
+```
+
+---
+
+## Modifiers
+
+```python
+# Subdivision surface (smooth out geometry)
+subd = obj.modifiers.new(name="Subdivision", type='SUBSURF')
+subd.levels        = 2
+subd.render_levels = 3
+bpy.ops.object.shade_smooth()
+
+# Solidify (give thickness to a plane/shell)
+sol = obj.modifiers.new(name="Solidify", type='SOLIDIFY')
+sol.thickness = 0.1
+
+# Bevel (soften edges)
+bev = obj.modifiers.new(name="Bevel", type='BEVEL')
+bev.width    = 0.05
+bev.segments = 3
+
+# Array (repeat geometry)
+arr = obj.modifiers.new(name="Array", type='ARRAY')
+arr.count = 5
+arr.relative_offset_displace = (1.1, 0, 0)
+```
+
+---
+
+## Remove a Specific Object (Blender 5.1.x)
+
+```python
+# Preferred in headless — more reliable than select+delete for named objects
+bpy.data.objects.remove(bpy.data.objects["ObjectName"], do_unlink=True)
+
+# Still works for clearing EVERYTHING
+bpy.ops.object.select_all(action='SELECT')
+bpy.ops.object.delete()
+```
+
+---
+
+## Library Scripts (copy-paste foundation)
+
+Located in `Toolbox/blender/scripts/library/`:
+
+| File | What it demonstrates |
+|---|---|
+| 01_basic_cube.py | Minimal scene clear + cube |
+| 02_cylinder.py | Cylinder with vertex count |
+| 03_uv_sphere.py | Sphere + shade smooth |
+| 04_plane_floor.py | Large ground plane |
+| 05_principled_material.py | Full material assignment |
+| 06_three_point_light.py | Key + fill + rim lighting |
+| 07_camera_look_at.py | Camera + Track To constraint |
+| 08_subdivision_modifier.py | Subsurf + shade smooth |
+| 09_multi_object_scene.py | Multiple objects with materials |
+| 10_simple_house.py | Architecture: box + roof + door |
+
+---
+
+## Common Errors to Avoid
+
+- **Export in script** — blender_tool does this; adding it yourself causes double-write errors
+- **No scene clear** — Blender starts with a default cube, camera, and light; always delete them first
+- **Scale not applied before export** — GLB will export original mesh, ignoring display scale
+- **Duplicate material names** — `bpy.data.materials.new()` creates `Mat.001` silently if name exists; use unique names
+- **shade_smooth without active selection** — call immediately after creating the object while it's still active

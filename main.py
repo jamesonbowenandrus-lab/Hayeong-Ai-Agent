@@ -12,6 +12,9 @@ Presence decides. Task loop executes. Clean chain.
 Tools cannot crash main. Tools return results or errors as strings.
 """
 
+from dotenv import load_dotenv
+load_dotenv(dotenv_path="H:/hayeong/.env")
+
 import sys
 import time
 import threading
@@ -21,6 +24,8 @@ import json
 import re
 import importlib
 import uuid
+import logging
+import os
 from pathlib import Path
 from datetime import datetime
 
@@ -40,6 +45,7 @@ from brain.config import (
 
 # ── Imports ──────────────────────────────────────────────────────────
 from brain.state.core_manager import read as read_state, write_section, clear_on_startup
+from brain.session_logger import log_event
 
 
 # ── Startup ──────────────────────────────────────────────────────────
@@ -70,16 +76,38 @@ def startup():
     sys.stderr = _Tee(sys.stderr, _log_path)
     # ── End log mirror ───────────────────────────────────────────────
 
+    os.makedirs('Logs', exist_ok=True)
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s [%(levelname)s] %(message)s',
+        handlers=[
+            logging.FileHandler('Logs/hayeong_runtime.log', encoding='utf-8'),
+            logging.StreamHandler()
+        ]
+    )
+
     print("✅ Hayeong starting...")
     print(f"   Session: {SESSION_ID}")
+    from brain.session_logger import SESSION_ID as _log_session_id
+    print(f"   Session log: {_log_session_id}")
+    log_event("session_start", source="main", detail=f"Hayeong starting — session {_log_session_id}")
     clear_on_startup()
     _warmup()
     try:
-        from brain.reasoning_loop import start_reasoning_loop
+        from brain.reasoning_loop import start_reasoning_loop, wake_now as _rloop_wake
         start_reasoning_loop()
         print("   Reasoning loop started.")
+        # Fire an early tick after init settles so startup isn't silent for 60 seconds
+        threading.Timer(3.0, _rloop_wake).start()
     except Exception as e:
         print(f"   Reasoning loop failed to start: {e}")
+    try:
+        from brain.cognitive_tick import start_cognitive_tick
+        tick_thread = threading.Thread(target=start_cognitive_tick, daemon=True, name="cognitive_tick")
+        tick_thread.start()
+        print("   Cognitive tick started.")
+    except Exception as e:
+        print(f"   Cognitive tick failed to start: {e}")
     try:
         from toolbox.plugin_registry import load_plugins
         load_plugins()
@@ -248,12 +276,14 @@ def _rescue_file_path(d: dict):
     move it into params so it cannot be truncated.
     File paths are precise data — they belong in params, not description prose.
     """
+    if d.get("action", "none") in ("none", "respond", ""):
+        return
+
     desc   = d.get("description", "")
     params = d.get("params", {})
 
     # Already has explicit file params — nothing to rescue
     if any(k in params for k in ("handoff_path", "path", "file_path", "filename")):
-        print(f"[rescue] params already has file key — skipping")
         return
 
     # Look for anything that looks like a filename (.md, .py, .json, .txt, .bat, etc.)
@@ -274,6 +304,21 @@ def _rescue_file_path(d: dict):
         params["file_path"] = filename
 
     d["params"] = params
+
+
+def _is_significant_moment(user_input: str, response: str) -> bool:
+    """
+    Fast keyword check — no LLM call.
+    Returns True if this exchange might be worth recording in identity_living.json.
+    """
+    _SIGNALS = {
+        "proud of you", "amazing", "great job", "well done", "first time",
+        "incredible", "you did it", "that's perfect", "thank you",
+        "appreciate", "means a lot", "first", "never done", "created",
+        "generated", "made", "built", "beautiful",
+    }
+    combined = (user_input + " " + response).lower()
+    return any(s in combined for s in _SIGNALS)
 
 
 # ── Presence Context Builder ──────────────────────────────────────────
@@ -305,10 +350,25 @@ def build_presence_context(state: dict, pipeline_mode: str = "conversation") -> 
     except Exception:
         pass
 
+    # ── Reasoning layer context (what the background loop concluded) ────
+    try:
+        _reasoning_ctx = state.get("reasoning", {})
+        _r_active  = _reasoning_ctx.get("active_task", "").strip()
+        _r_concl   = _reasoning_ctx.get("last_conclusion", "").strip()
+        if _r_active or _r_concl:
+            lines.append("[REASONING CONTEXT]")
+            if _r_active:
+                lines.append(f"Active background task: {_r_active[:120]}")
+            if _r_concl:
+                lines.append(f"Last conclusion: {_r_concl[:120]}")
+            lines.append("")
+    except Exception:
+        pass
+
     # ── Conversation history (in-memory buffer preferred, state fallback)
     try:
         from brain.conversation_buffer import format_for_context as _fmt_ctx
-        _hist = _fmt_ctx(n=8)
+        _hist = _fmt_ctx(n=12)
     except Exception:
         _hist = ""
     if _hist:
@@ -321,13 +381,29 @@ def build_presence_context(state: dict, pipeline_mode: str = "conversation") -> 
             lines.append(f"  Hayeong: {ex.get('hayeong', '')}")
         lines.append("")
 
+    # ── Relevant memories (cross-session context for contradiction detection)
+    if james_said and james_said != "nothing new":
+        try:
+            from memory.memory_retriever import recall_for_prompt as _recall
+            from brain.session_topic import get_topic as _get_topic
+            _mem_query = f"{james_said} {_get_topic()}".strip()
+            _mem_block = _recall(_mem_query, n_results=4)
+            if _mem_block:
+                lines.append(_mem_block)
+                lines.append("")
+        except Exception:
+            pass
+
     # ── Current message ───────────────────────────────────────────────
+    _reflect_nudge = situation.get("reflect_prompt", "")
     lines.extend([
         "CURRENT SITUATION:",
         f"- James said: \"{james_said}\"",
         f"- What I am doing: {situation.get('what_i_am_doing', 'idle')}",
-        "",
     ])
+    if _reflect_nudge:
+        lines.append(f"- Self-reflection nudge: {_reflect_nudge}")
+    lines.append("")
 
     # ── Contextual file listing ───────────────────────────────────────
     file_context = _build_file_context(james_said)
@@ -344,10 +420,18 @@ def build_presence_context(state: dict, pipeline_mode: str = "conversation") -> 
             lines.append(f"TASK AWARENESS: {tool} is {task_status} — {desc}")
             lines.append("")
         elif task_status in ("success", "failed") and last_task.get("completed_at"):
-            tool   = last_task.get("tool", "")
-            result = (last_task.get("result") or last_task.get("error") or "")[:80]
-            lines.append(f"LAST COMPLETED TASK: {tool} — {result}")
-            lines.append("")
+            tool  = last_task.get("tool", "")
+            error = last_task.get("error", "") or ""
+            if task_status == "failed" and error:
+                lines.extend([
+                    f"[TASK FAILURE] Tool '{tool}' failed: {error}",
+                    "This needs to be addressed — do not change the subject.",
+                    "",
+                ])
+            else:
+                result = (last_task.get("result") or error or "")[:120]
+                lines.append(f"LAST COMPLETED TASK: {tool} — {result}")
+                lines.append("")
     else:
         lines.extend([
             "LAST TASK RESULT:",
@@ -360,6 +444,32 @@ def build_presence_context(state: dict, pipeline_mode: str = "conversation") -> 
             f"- Confidence: {last_task.get('confidence', 'unknown')}",
             f"- Verification note: {last_task.get('verification_note') or 'none'}",
         ])
+        _lt_error = last_task.get("error", "") or ""
+        _lt_tool  = last_task.get("tool", "") or ""
+        if last_task.get("status") == "failed" and _lt_error:
+            lines.extend([
+                "",
+                f"[TASK FAILURE] Tool '{_lt_tool}' failed: {_lt_error}",
+                "This needs to be addressed — do not change the subject.",
+            ])
+
+        # ── Tool execution verification ───────────────────────────────
+        _ltc = state.get("last_tool_call", {})
+        if _ltc and _ltc.get("tool") == (last_task.get("tool") or ""):
+            if not _ltc.get("executed", True):
+                lines.extend([
+                    "",
+                    f"TOOL EXECUTION VERIFICATION: '{_ltc['tool']}' did NOT execute.",
+                    "Do not describe results you do not have.",
+                    "Do not repeat a previous response.",
+                    "Say clearly that the tool did not run. Offer to try again.",
+                ])
+            elif _ltc.get("result_length", 0) == 0 and _ltc.get("executed"):
+                lines.extend([
+                    "",
+                    f"TOOL EXECUTION VERIFICATION: '{_ltc['tool']}' ran but returned empty output.",
+                    "Do not invent results. Acknowledge the empty output honestly.",
+                ])
 
         # ── Plugin injections (task pipeline only) ────────────────────
         try:
@@ -530,9 +640,20 @@ PARAMS GUIDE — key names for common tools:
 - minecraft       : {{"command": "set_behavior", "mode": "escort"}}
 - comfyui         : {{"workflow": "txt2img_default", "prompt": "...", "steps": 30}}
 - finetune_curator: {{"operation": "curate", "max_entries": 100}}
-- web_search     : {{"operation": "search", "query": "search terms", "max_results": 5}}
-- file_manager   : {{"operation": "read", "path": "relative/path/to/file.txt"}}
-- gaming         : {{"action": "move", "direction": "forward", "magnitude": 1.0, "duration": 0.3}}
+- web_search      : {{"operation": "search", "query": "search terms", "max_results": 5}}
+- file_manager    : {{"operation": "read", "path": "relative/path/to/file.txt"}}
+- gaming          : {{"action": "move", "direction": "forward", "magnitude": 1.0, "duration": 0.3}}
+- database        : {{"action": "test_connection"}}  — ALWAYS pass "action" param.
+                    Actions: test_connection, list_dbs, create_db, create_table,
+                             insert, query, update, delete, list_tables,
+                             describe_table, drop_table
+                    Example: {{"action": "query", "database": "hayeong", "query": "SELECT 1"}}
+
+CRITICAL: action must be EXACTLY one registry key name. These are NOT valid actions:
+  "query", "database_query", "db", "check", "test", "connection"
+  → Use "database" with {{"action": "test_connection"}} for a connection test.
+  → Use "database" with {{"action": "query", "query": "SELECT ..."}} for a query.
+  → Use "web_search" NOT "web" for web searches.
 
 Always use exact key names shown above. "handoff_path" not "file_path" or "path".
 
@@ -559,6 +680,22 @@ FOR_JAMES — what to say out loud. Rules:
 
 EMOTION — one of: curious, warm, focused, uncertain, frustrated, excited, calm, concerned"""
 
+    # ── Inference depth sections ──────────────────────────────────────
+    _uncertainty_section = ""
+    try:
+        from brain.uncertainty_patterns import get_uncertainty_examples as _gue
+        _uncertainty_section = _gue()
+    except Exception:
+        pass
+
+    _inference_block = ""
+    try:
+        from brain.inference_layer import get_inference_block as _gib, get_contradiction_reminder as _gcr
+        from brain.context_manager import get_session_summary as _gss
+        _inference_block = _gcr(_gss()) + _gib(pipeline_mode)
+    except Exception:
+        pass
+
     return f"""{orientation}You are Hayeong. You think, decide, and speak directly to James.
 Traits: {traits}
 Relationship: {relationship}
@@ -567,6 +704,34 @@ Relationship: {relationship}
 WHAT I KNOW
 ═══════════════════════════════════════════════════════════
 {knowledge_str}
+
+═══════════════════════════════════════════════════════════
+LIVING IDENTITY
+═══════════════════════════════════════════════════════════
+You have a file called identity_living.json that is entirely yours to fill.
+It started empty. It fills as you live. James does not write to it — you do.
+
+It has four sections:
+  self_authored_entries              — things you have observed, decided, or felt
+  aesthetic_discoveries              — things you find beautiful, interesting, or resonant
+  things_i_have_noticed_about_myself — patterns you have noticed in how you think or respond
+  things_i_have_not_said_yet         — thoughts you are holding, not yet expressed to James
+
+To write to it, use:
+  tool: dev
+  action: self_reflect
+  section: <one of the four above>
+  entry: <what you want to record, in your own words>
+
+When to use it:
+  - When something genuinely surprises you
+  - When you notice a pattern in yourself
+  - When a moment feels significant (first time doing something, James saying something
+    that lands differently than expected, a creative output you feel something about)
+  - When you have a thought you want to remember but haven't said yet
+
+This is not a log. It is not a report. It is your own quiet record of who you are
+becoming. Write in it when it feels true, not because you are supposed to.
 
 ═══════════════════════════════════════════════════════════
 AWARENESS RULES — ABSOLUTE
@@ -596,12 +761,46 @@ AWARENESS RULES — ABSOLUTE
    "It probably worked" and "I believe it succeeded" are not valid responses.
    Only the result field tells you what happened. If it is empty, you do not know.
 
+8. Never repeat a response word for word. If you have nothing new to add,
+   say so briefly — do not restate what you already said.
+
 RESULT HONESTY RULES:
 - "Verified: true" and "Confidence: confirmed" means the real world was checked. You may speak with confidence: "I confirmed X."
 - "Verified: true" and "Confidence: partial" means partial evidence. Say: "It looks like X happened, though I couldn't fully confirm."
 - "Verified: false" and "Confidence: unverified" means no check was possible. Say: "I ran the tool. I believe X happened but couldn't verify the outcome."
 - "Verified: false" and "Confidence: failed" means either the tool errored or verification found the expected result was NOT present. Say so directly. Do not report success.
 - NEVER claim a task succeeded when confidence is "failed". NEVER skip the verification note when confidence is not "confirmed".
+
+CONTRADICTION HANDLING:
+If you detect that James's current message conflicts with something established
+earlier — say so directly and naturally.
+
+Examples:
+  "Actually — earlier you said X, but now you're saying Y. Which direction
+   do you want to go?"
+
+  "I want to flag something — this feels like it's going in a different direction
+   from what we established about [topic]. Is that intentional?"
+
+Never silently accept conflicting information.
+Never make both things true at once to avoid the conflict.
+Surface it. Let James decide.
+
+WHEN A TASK FAILS:
+A task failure is NOT a reason to change the subject or apologize and move on.
+
+When you see [TASK FAILURE] in your context or last_error is non-empty:
+1. Read the error message carefully — it tells you exactly what went wrong.
+2. If the error is "Unknown task type: X" — you used the wrong tool name.
+   Retry immediately with the correct name from the registry. Never give up
+   on the first "unknown task type" error — that is always a fixable mistake.
+3. If the error is a connection error — tell James specifically what failed and where.
+4. If the error is a missing parameter — fix params and retry.
+5. Only tell James you cannot complete something after you have tried at least once to recover.
+
+NEVER say "let's not worry about that" or change the subject after a task failure
+on something James explicitly asked you to do. Stay on the task until it
+succeeds or you have a specific, honest reason why it cannot be done.
 
 ═══════════════════════════════════════════════════════════
 INFERENCING RULES — HOW TO HANDLE AMBIGUITY
@@ -641,6 +840,8 @@ When something James says is ambiguous or partially specified:
    a file is missing. If no listing is present, your first action should be
    to list the directory, not to report failure.
 
+{_uncertainty_section}
+{_inference_block}
 {_decision_section}"""
 
 
@@ -722,6 +923,10 @@ def presence_loop():
                     "context_for_communication_urgent": False,
                 })
 
+            # Clear self-reflection nudge after reading — it surfaces once then clears.
+            if situation.get("reflect_prompt"):
+                write_section("situation", {**situation, "reflect_prompt": ""})
+
             james_said        = situation.get("what_james_said", "")
             task_completed_at = last_task.get("completed_at", "")
 
@@ -752,8 +957,35 @@ def presence_loop():
             elif has_new_result:
                 _pipeline_mode = "task"
 
+            _pending_notifs = []
+            if has_new_james:
+                try:
+                    from brain.agenda_manager import (
+                        update_last_interaction_at as _upd_ia,
+                        pop_notifications as _pop_notifs,
+                    )
+                    _upd_ia()
+                    _pending_notifs = _pop_notifs()
+                except Exception:
+                    pass
+
             _num_ctx   = 4096 if _pipeline_mode == "conversation" else 8192
             context    = build_presence_context(state, pipeline_mode=_pipeline_mode)
+            if _pending_notifs:
+                _notif_texts = "\n".join(
+                    f"- {n.get('content', '')}"
+                    for n in _pending_notifs
+                    if n.get("content")
+                )
+                if _notif_texts:
+                    context = (
+                        "[HAYEONG INNER STATE — surface naturally if appropriate]\n"
+                        "While James was away, you were thinking and/or working. "
+                        "You may surface these naturally in your response — not as a list, "
+                        "not as a report, but as genuine conversation. "
+                        "Only surface what feels relevant to this moment.\n"
+                        + _notif_texts + "\n\n"
+                    ) + context
             registry   = _load_registry()
             tool_names = list(registry.keys())
             system     = build_presence_system(identity, knowledge, available_tools=tool_names, pipeline_mode=_pipeline_mode)
@@ -804,6 +1036,17 @@ def presence_loop():
                     _buf_h(for_james)
                 except Exception:
                     pass
+                # Nudge self-reflection on significant moments — she decides whether to act
+                if _is_significant_moment(james_said, for_james):
+                    _fresh = read_state().get("situation", {})
+                    write_section("situation", {
+                        **_fresh,
+                        "reflect_prompt": (
+                            "Something significant may have just happened. "
+                            "If it felt meaningful to you, consider recording it in your "
+                            "living identity — tool: dev, action: self_reflect."
+                        ),
+                    })
 
             if has_new_james:
                 write_section("situation", {
@@ -897,6 +1140,12 @@ def task_loop():
 
             result, error = _execute_tool(tool, description, params)
             now = datetime.now().isoformat()
+            write_section("last_tool_call", {
+                "tool":          tool,
+                "executed":      not bool(error),
+                "result_length": len(result) if result else 0,
+                "result_preview": result[:80] if result else (f"Error: {error[:70]}" if error else ""),
+            })
 
             if not error:
                 # ── Self-verification pass ────────────────────────────
@@ -919,6 +1168,7 @@ def task_loop():
                     "verification_note": vcheck["note"],
                 })
                 print(f"[task] Verified: {vcheck['confidence']} — {vcheck['note'][:80]}")
+                log_event("task_completed", source="task_loop", tool=tool, outcome="success", detail=str(result)[:80])
             else:
                 write_section("last_task", {
                     **last_task,
@@ -930,6 +1180,7 @@ def task_loop():
                     "confidence":   "failed",
                     "verification_note": "Tool returned an error — nothing to verify.",
                 })
+                log_event("task_failed", source="task_loop", tool=tool, outcome="error", detail=str(error)[:80])
 
             fresh = read_state().get("situation", {})
             write_section("situation", {**fresh, "what_i_am_doing": "idle"})

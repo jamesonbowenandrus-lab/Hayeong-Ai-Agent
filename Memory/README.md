@@ -1,34 +1,34 @@
-# Memory\
+# Memory
 
-Hayeong's persistent memory — what she remembers, who she knows, and what she
-has learned. Distinct from Brain\state\, which holds transient runtime signals.
-Memory accumulates over time; state resets each cycle.
+Hayeong's episodic memory, relationship data, and personal knowledge.
 
-## What Lives Here
+## Structure
 
-- `memory.json` — Active memory state. Current context, recent events,
-  active goals. Read by the reasoning loop each cycle.
+```
+Memory/
+  chromadb/         Active ChromaDB vector store (private — not tracked)
+  chroma_db/        Orphaned placeholder — do not use (see note below)
+  relationships/    Relationship memory files (private — not tracked)
+  james/            Personal documents from James to Hayeong (private — not tracked)
+  backups/          Periodic state snapshots (private — not tracked)
+```
 
-- `chromadb\` — Vector memory store. Long-term searchable memory.
-  Hayeong stores and retrieves memories here by semantic similarity.
+## Active Database
 
-- `knowledge\` — Accumulated knowledge organized by domain.
-  This grows over time as Hayeong learns and experiences things.
+`Memory/chromadb/` is the active ChromaDB instance.
+Managed by `memory/memory_manager.py`, `memory_decay.py`, `memory_consolidator.py`.
+Path set in `memory_manager.py`: `Path(__file__).parent / "chromadb"`
 
-  - `toolknowledge\` — What Hayeong knows about her own tools:
-    how to use them, their quirks, what works and what doesn't.
+## Orphaned Folder Note
 
-- `backups\` — Timestamped backups of Hayeong's state and memory files.
-  Created automatically during updates. If something goes wrong, restore from here.
+`Memory/chroma_db/` (with underscore) is an orphaned placeholder from an earlier
+path configuration used in April 2026 backup files. It contains only `.gitkeep`
+and this note. The active code does not reference it.
+Do not put data here. Do not delete it until a deliberate cleanup pass confirms
+all references are resolved.
 
-## What To Know
+## Privacy
 
-memory.json and the chromadb store are the most frequently read/written
-files in the system. If something seems wrong with memory, check for
-stale .lock files in the root — delete them if Hayeong isn't running.
-
-Knowledge files are Hayeong's own — she builds them through experience
-and inference. They are not pre-loaded databases. They grow as she learns.
-
-Minecraft knowledge (once she starts playing) will live in:
-`knowledge\minecraft\` with separate files per server instance or mod profile.
+All memory data files are private and excluded from the public repository.
+The Python files managing this layer are public to demonstrate the architecture.
+Personal data is backed up to a private repository.

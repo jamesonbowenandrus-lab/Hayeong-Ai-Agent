@@ -11,6 +11,7 @@ echo.
 cd /d H:\hayeong
 call H:\hayeong\.venv\Scripts\activate.bat
 
+
 :: STEP 1: Start Presence LLM
 echo [1/4] Starting Presence LLM (port 11435)...
 start "Hayeong - Presence LLM" /min H:\hayeong\brain\ollama_reasoning.bat

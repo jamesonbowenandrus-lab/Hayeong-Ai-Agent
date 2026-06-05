@@ -32,7 +32,7 @@ TRIGGERS (intent detection):
 INSTALL:
   pip install Pillow   (already in requirements.txt)
 """
-
+1111111
 import os
 import base64
 import requests
@@ -59,7 +59,7 @@ PILLOW_AVAILABLE = _check_pillow()
 # CONFIG
 # ─────────────────────────────────────────────
 
-OLLAMA_URL         = "http://localhost:11434/api/chat"
+OLLAMA_URL         = "http://localhost:11435/api/chat"
 VISION_FAST        = "moondream:latest"   # Quick screen reads — very fast
 VISION_DEEP        = "llava:13b"          # Detailed analysis — ~15s on 7900 XTX
 BASE_DIR           = Path(__file__).parent

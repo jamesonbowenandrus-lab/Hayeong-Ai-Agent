@@ -1,11 +1,10 @@
 """
 hayeong_core.py
 ───────────────
-Lightweight shared utilities used by both main.py and discord_hayeong.py.
+Lightweight shared utilities used by main.py.
 
 IMPORTANT: This file must NOT import sounddevice, voice, TTS, or any
-audio library. It is the safe shared layer between the main process
-and the Discord bot process.
+audio library.
 
 Provides:
   - JSON load/save helpers
@@ -170,6 +169,61 @@ def load_relationship_context(who: str = "james") -> dict:
         return {}
 
 
+def update_living_identity(section: str, entry: str) -> bool:
+    """
+    Allows Hayeong to write to her own living identity layer.
+    Append-only — entries are never deleted or replaced, only added.
+
+    Valid sections (must match keys in identity_living.json):
+      self_authored_entries              — general self-observations
+      aesthetic_discoveries              — things she finds beautiful or interesting
+      things_i_have_noticed_about_myself — patterns she has noticed in herself
+      things_i_have_not_said_yet         — thoughts she is holding, not yet expressed
+    """
+    VALID_SECTIONS = {
+        "self_authored_entries",
+        "aesthetic_discoveries",
+        "things_i_have_noticed_about_myself",
+        "things_i_have_not_said_yet",
+    }
+
+    if section not in VALID_SECTIONS:
+        print(f"[LivingIdentity] Invalid section '{section}'. Valid: {VALID_SECTIONS}")
+        return False
+
+    if not entry or not entry.strip():
+        print("[LivingIdentity] Entry cannot be empty.")
+        return False
+
+    try:
+        lock = FileLock(str(_IDENTITY_LIVING) + ".lock", timeout=10)
+        with lock:
+            data = load_json(_IDENTITY_LIVING, {})
+
+            if section not in data:
+                data[section] = []
+
+            record = {
+                "entry":       entry.strip(),
+                "recorded_at": datetime.datetime.now().isoformat(),
+            }
+            data[section].append(record)
+
+            # Write directly inside the lock — do not call save_json() which has its own lock
+            _IDENTITY_LIVING.parent.mkdir(parents=True, exist_ok=True)
+            with open(_IDENTITY_LIVING, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+
+            if section != "things_i_have_not_said_yet":
+                # Keep this section private — no console log
+                print(f"[LivingIdentity] Recorded to '{section}': {entry[:60]}...")
+            return True
+
+    except Exception as e:
+        print(f"[LivingIdentity] Write failed: {e}")
+        return False
+
+
 def update_relationship_context(who: str, section: str, key: str, value) -> bool:
     """
     Allows Hayeong to update her own relationship record.
@@ -260,24 +314,28 @@ def build_prompt(identity: dict, memory: list, user_input: str,
                  domain: str = None) -> list:
     """
     Returns a messages list ready for Ollama /api/chat.
-    Safe to call from Discord — no audio dependencies.
+    Safe to call without audio dependencies.
     Pass domain="minecraft" (or any Toolbox folder name) to inject the
     domain prompt as the outermost layer of the system prompt.
     """
+    system_prompt = None
 
-    # ── Domain path: use prompt_layer_manager when domain is specified ──
-    if domain:
-        try:
-            from brain.prompt_layer_manager import build_layered_system_prompt
-            system_prompt = build_layered_system_prompt(
-                identity=identity, domain=domain, mood=mood_state,
-            )
-        except Exception:
-            domain = None  # fall through to standard path
+    # ── Primary path: full layered prompt (domain AND standard) ────────────
+    # user_input is passed through so memory retrieval is relevant to what James said.
+    try:
+        from brain.prompt_layer_manager import build_layered_system_prompt
+        system_prompt = build_layered_system_prompt(
+            identity=identity,
+            domain=domain,
+            mood=mood_state,
+            context="presence",
+            user_input=user_input,
+        )
+    except Exception as e:
+        print(f"[build_prompt] prompt_layer_manager failed: {e}")
 
-    # ── Standard path: system_prompt_builder + identity fallback ──
-    if not domain:
-        system_prompt = None
+    # ── Fallback: old system_prompt_builder path ────────────────────────────
+    if not system_prompt:
         try:
             from system_prompt_builder import build_system_prompt, detect_state_of_mind
             from memory.memory_retriever import recall_for_prompt
@@ -293,24 +351,24 @@ def build_prompt(identity: dict, memory: list, user_input: str,
             if long_term_context:
                 system_prompt = long_term_context + "\n\n" + system_prompt
 
-        except Exception:
-            name        = identity.get("name", "Hayeong")
-            personality = identity.get("personality", "")
-            mood        = mood_state or {}
-            mood_str    = ", ".join(f"{k}: {v}" for k, v in mood.items()) if mood else ""
-            traits_str  = ""
-            if dynamic_traits:
-                traits_str = "\n".join(f"  {k}: {v}" for k, v in dynamic_traits.items())
+        except Exception as e:
+            print(f"[build_prompt] system_prompt_builder fallback failed: {e}")
 
-            system_prompt = f"You are {name}."
-            if personality:
-                system_prompt += f"\n\n{personality}"
-            if mood_str:
-                system_prompt += f"\n\nCurrent mood — {mood_str}."
-            if traits_str:
-                system_prompt += f"\n\nPersonality traits:\n{traits_str}"
+    # ── Hard fallback: bare minimum ─────────────────────────────────────────
+    if not system_prompt:
+        name        = identity.get("name", "Hayeong")
+        personality = identity.get("personality", {})
+        core        = personality.get("core", "") if isinstance(personality, dict) else ""
+        mood        = mood_state or {}
+        mood_str    = ", ".join(f"{k}: {v}" for k, v in mood.items()) if mood else ""
 
-    # ── Assemble messages ──
+        system_prompt = f"You are {name}."
+        if core:
+            system_prompt += f"\n\n{core}"
+        if mood_str:
+            system_prompt += f"\n\nCurrent mood — {mood_str}."
+
+    # ── Assemble messages ───────────────────────────────────────────────────
     messages = [{"role": "system", "content": system_prompt}]
     for entry in memory[-10:]:
         role = "user" if entry.get("role") == "user" else "assistant"

@@ -90,14 +90,23 @@ def _stream_speak(text: str, emotion: str, stop: threading.Event):
         print(f"[voice_output] Import error: {e}")
         return
 
+    # Clean text before splitting — strip markdown, bracketed directions, URLs
+    try:
+        from toolbox.voice.tts_cleaner import clean_for_tts, get_prosody_from_state
+        text    = clean_for_tts(text)
+        prosody = get_prosody_from_state()
+        speed   = prosody["speed"]
+    except Exception:
+        speed = get_voice_modulation(emotion)["speed"]
+
     sentences   = split_sentences(text)
-    speed       = get_voice_modulation(emotion)["speed"]
     sample_rate = 24000
 
     for i, sentence in enumerate(sentences):
         if stop.is_set():
             break
-        if not sentence.strip():
+        sentence = sentence.strip()
+        if not sentence:
             continue
 
         audio = _synthesize_sentence(

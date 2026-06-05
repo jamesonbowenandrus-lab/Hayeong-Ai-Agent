@@ -3,7 +3,7 @@
 #
 # Handles sending and reading from hayeong.agent@gmail.com
 # Each agent identifies itself via a subject prefix:
-#   [Hayeong] Task completed: fix discord voice
+#   [Hayeong] Task completed: deploy voice update
 #   [Kai]     Daily summary ready
 #
 # Gmail requires an App Password (not your regular password):

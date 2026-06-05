@@ -1,0 +1,16 @@
+@echo off
+echo Backing up Hayeong private data...
+git add -f Memory/chromadb/ 2>nul
+git add -f Memory/relationships/ 2>nul
+git add -f Memory/james/ 2>nul
+git add -f Memory/backups/ 2>nul
+git add -f Brain/inner_agenda.json 2>nul
+git add -f Brain/state/*.json 2>nul
+git add -f logs/conversations/ 2>nul
+git add -f logs/sessions/ 2>nul
+git add -f logs/notes/events/ 2>nul
+git add -f Brain/session_log.db 2>nul
+git commit -m "Private data backup %date% %time%" 2>nul
+git push private master
+echo Backup complete.
+pause

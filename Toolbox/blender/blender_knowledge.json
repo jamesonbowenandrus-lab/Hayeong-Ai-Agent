@@ -1,0 +1,108 @@
+{
+  "version_note": "Blender 5.1.x bpy API",
+
+  "rules": [
+    "NEVER include export calls in blender_script — blender_tool.py injects the export automatically based on export_format param.",
+    "Always clear the default scene at the start: bpy.ops.object.select_all(action='SELECT') + bpy.ops.object.delete()",
+    "To remove a specific named object use bpy.data.objects.remove(bpy.data.objects['Name'], do_unlink=True) — more reliable headless than select+delete.",
+    "Always name objects explicitly: obj.name = 'SomeName' — unnamed objects are hard to reference later.",
+    "Apply modifiers before exporting to GLB/STL or the mesh may not reflect them.",
+    "Smooth shading: bpy.ops.object.shade_smooth() — call AFTER selecting the object.",
+    "Track To constraint requires track_axis='TRACK_NEGATIVE_Z' and up_axis='UP_Y' for standard camera pointing.",
+    "Scale a cube by setting obj.scale then calling bpy.ops.object.transform_apply(scale=True) for true mesh dimensions.",
+    "bpy.context.active_object is the object just created by the last primitive_*_add call.",
+    "Lights: use type='AREA' for soft, type='SPOT' for directional, type='SUN' for outdoor scenes.",
+    "print('HAYEONG_OK: ...') at the end of the script — used to confirm execution in logs."
+  ],
+
+  "primitives": {
+    "cube":     "bpy.ops.mesh.primitive_cube_add(size=2, location=(0, 0, 0))",
+    "cylinder": "bpy.ops.mesh.primitive_cylinder_add(vertices=32, radius=1.0, depth=2.0, location=(0, 0, 0))",
+    "uv_sphere":"bpy.ops.mesh.primitive_uv_sphere_add(segments=32, ring_count=16, radius=1.0, location=(0, 0, 0))",
+    "ico_sphere":"bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=3, radius=1.0, location=(0, 0, 0))",
+    "cone":     "bpy.ops.mesh.primitive_cone_add(vertices=32, radius1=1.0, radius2=0.0, depth=2.0, location=(0, 0, 0))",
+    "plane":    "bpy.ops.mesh.primitive_plane_add(size=10, location=(0, 0, 0))",
+    "torus":    "bpy.ops.mesh.primitive_torus_add(major_radius=1.0, minor_radius=0.25, location=(0, 0, 0))",
+    "camera":   "bpy.ops.object.camera_add(location=(7, -7, 5))",
+    "area_light":"bpy.ops.object.light_add(type='AREA', location=(4, -3, 6))",
+    "spot_light":"bpy.ops.object.light_add(type='SPOT', location=(0, 5, 5))",
+    "sun_light": "bpy.ops.object.light_add(type='SUN', location=(0, 0, 10))"
+  },
+
+  "materials": {
+    "pattern": [
+      "mat = bpy.data.materials.new(name='MaterialName')",
+      "mat.use_nodes = True",
+      "bsdf = mat.node_tree.nodes['Principled BSDF']",
+      "bsdf.inputs['Base Color'].default_value = (R, G, B, 1.0)",
+      "bsdf.inputs['Roughness'].default_value  = 0.5",
+      "bsdf.inputs['Metallic'].default_value   = 0.0",
+      "obj.data.materials.append(mat)  # or obj.data.materials[0] = mat if slot exists"
+    ],
+    "emission_extra": [
+      "bsdf.inputs['Emission Color'].default_value = (1.0, 0.8, 0.2, 1.0)",
+      "bsdf.inputs['Emission Strength'].default_value = 5.0"
+    ],
+    "glass_extra": [
+      "bsdf.inputs['Transmission Weight'].default_value = 1.0",
+      "bsdf.inputs['Roughness'].default_value = 0.0",
+      "mat.blend_method = 'BLEND'"
+    ]
+  },
+
+  "modifiers": {
+    "subdivision": [
+      "subd = obj.modifiers.new(name='Subdivision', type='SUBSURF')",
+      "subd.levels = 2",
+      "subd.render_levels = 3"
+    ],
+    "solidify": [
+      "sol = obj.modifiers.new(name='Solidify', type='SOLIDIFY')",
+      "sol.thickness = 0.1"
+    ],
+    "bevel": [
+      "bev = obj.modifiers.new(name='Bevel', type='BEVEL')",
+      "bev.width = 0.05",
+      "bev.segments = 3"
+    ],
+    "array": [
+      "arr = obj.modifiers.new(name='Array', type='ARRAY')",
+      "arr.count = 5",
+      "arr.relative_offset_displace = (1.1, 0, 0)"
+    ],
+    "mirror": [
+      "mir = obj.modifiers.new(name='Mirror', type='MIRROR')",
+      "mir.use_axis[0] = True  # X axis"
+    ]
+  },
+
+  "common_errors": {
+    "no_active_object": "Call select_all + delete before adding primitives, or set bpy.context.view_layer.objects.active = obj explicitly.",
+    "context_override": "In headless mode bpy.ops.* may fail with 'context is incorrect'. Prefer bpy.data.* and bpy.context.* for non-operator operations.",
+    "export_already_in_script": "NEVER add export calls — blender_tool injects them. Double-export causes errors.",
+    "scale_not_applied": "GLB/STL may look wrong if scale is not applied. Always transform_apply(scale=True) after scaling.",
+    "object_not_found": "bpy.data.objects['Name'] raises KeyError if the name doesn't exist. Check obj.name assignments.",
+    "shade_smooth_no_selection": "bpy.ops.object.shade_smooth() requires the object to be active AND selected.",
+    "duplicate_material_name": "bpy.data.materials.new() does NOT overwrite existing materials — it creates 'Mat.001' etc. Use unique names per run."
+  },
+
+  "progression": [
+    "Level 1 — single primitive, no material: 01_basic_cube.py, 02_cylinder.py, 03_uv_sphere.py",
+    "Level 2 — primitive + material: 05_principled_material.py",
+    "Level 3 — lighting + camera: 06_three_point_light.py, 07_camera_look_at.py",
+    "Level 4 — modifiers: 08_subdivision_modifier.py",
+    "Level 5 — multi-object scene: 09_multi_object_scene.py",
+    "Level 6 — architecture / structured geometry: 10_simple_house.py"
+  ],
+
+  "print_scale": {
+    "note": "1 Blender unit = 1 meter. For 3D printing, always think in meters. 50mm = 0.05, 100mm = 0.1, 200mm = 0.2. A typical small figurine (100mm tall) = 0.1 units height. When James specifies a size in mm, convert to meters before setting dimensions.",
+    "common_sizes": {
+      "50mm": 0.05,
+      "75mm": 0.075,
+      "100mm": 0.1,
+      "150mm": 0.15,
+      "200mm": 0.2
+    }
+  }
+}

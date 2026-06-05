@@ -10,7 +10,7 @@ Called via registry:
     function: run
 
 Actions:
-    create_db, create_table, insert, query, update, delete,
+    test_connection, create_db, create_table, insert, query, update, delete,
     list_dbs, list_tables, describe_table, drop_table
 
 Returns:
@@ -23,7 +23,10 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 
-from brain.config import DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME, SQLITE_DIR
+from brain.config import (
+    POSTGRES_HOST, POSTGRES_PORT, POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB,
+    SQLITE_DIR, SQLITE_DEFAULT_DB,
+)
 
 SQLITE_DIR_PATH = Path(SQLITE_DIR)
 
@@ -69,8 +72,8 @@ def _check_pg() -> bool:
     try:
         import psycopg2
         conn = psycopg2.connect(
-            host=DB_HOST, port=DB_PORT,
-            user=DB_USER, password=DB_PASSWORD or None,
+            host=POSTGRES_HOST, port=POSTGRES_PORT,
+            user=POSTGRES_USER, password=POSTGRES_PASSWORD or None,
             database="postgres", connect_timeout=3,
         )
         conn.close()
@@ -83,9 +86,9 @@ def _pg_connect(database: str = None):
     """Open a PostgreSQL connection. Raises on failure — wrap in try/except."""
     import psycopg2
     return psycopg2.connect(
-        host=DB_HOST, port=DB_PORT,
-        user=DB_USER, password=DB_PASSWORD or None,
-        database=database or DB_NAME,
+        host=POSTGRES_HOST, port=POSTGRES_PORT,
+        user=POSTGRES_USER, password=POSTGRES_PASSWORD or None,
+        database=database or POSTGRES_DB,
         connect_timeout=5,
     )
 
@@ -95,8 +98,8 @@ def _ensure_pg_db(database: str):
     try:
         import psycopg2
         conn = psycopg2.connect(
-            host=DB_HOST, port=DB_PORT,
-            user=DB_USER, password=DB_PASSWORD or None,
+            host=POSTGRES_HOST, port=POSTGRES_PORT,
+            user=POSTGRES_USER, password=POSTGRES_PASSWORD or None,
             database="postgres", connect_timeout=5,
         )
         conn.autocommit = True
@@ -120,17 +123,19 @@ def _sqlite_path(database: str) -> Path:
 
 def _dispatch(description: str, params: dict) -> str:
     action   = str(params.get("action", "")).lower().strip()
-    database = str(params.get("database", DB_NAME)).strip() or DB_NAME
+    database = str(params.get("database", POSTGRES_DB)).strip() or POSTGRES_DB
 
     if not action:
         return (
             "[ERROR] database_tool: 'action' param required. "
-            "Options: create_db, create_table, insert, query, update, delete, "
+            "Options: test_connection, create_db, create_table, insert, query, update, delete, "
             "list_dbs, list_tables, describe_table, drop_table"
         )
 
     pg = _check_pg()
 
+    if action == "test_connection":
+        return _test_connection(pg)
     if action == "create_db":
         return _create_db(database, pg)
     if action == "list_dbs":
@@ -185,13 +190,41 @@ def _dispatch(description: str, params: dict) -> str:
 # ACTIONS
 # ─────────────────────────────────────────────
 
+def _test_connection(pg: bool) -> str:
+    parts = []
+    if pg:
+        try:
+            import psycopg2
+            conn = psycopg2.connect(
+                host=POSTGRES_HOST, port=POSTGRES_PORT,
+                user=POSTGRES_USER, password=POSTGRES_PASSWORD or None,
+                database=POSTGRES_DB, connect_timeout=5,
+            )
+            conn.close()
+            parts.append(f"PostgreSQL: connected ({POSTGRES_HOST}:{POSTGRES_PORT}, db={POSTGRES_DB})")
+        except Exception as e:
+            parts.append(f"PostgreSQL: FAILED — {e}")
+    else:
+        parts.append(f"PostgreSQL: unreachable at {POSTGRES_HOST}:{POSTGRES_PORT}")
+
+    try:
+        from pathlib import Path
+        sqlite_ok = Path(SQLITE_DIR).exists()
+        parts.append(f"SQLite: {'ready' if sqlite_ok else 'directory missing'} ({SQLITE_DIR})")
+    except Exception as e:
+        parts.append(f"SQLite: error — {e}")
+
+    status = "SUCCESS" if pg else "PARTIAL"
+    return f"[{status}] test_connection — " + " | ".join(parts)
+
+
 def _create_db(database: str, pg: bool) -> str:
     if pg:
         try:
             import psycopg2
             conn = psycopg2.connect(
-                host=DB_HOST, port=DB_PORT,
-                user=DB_USER, password=DB_PASSWORD or None,
+                host=POSTGRES_HOST, port=POSTGRES_PORT,
+                user=POSTGRES_USER, password=POSTGRES_PASSWORD or None,
                 database="postgres", connect_timeout=5,
             )
             conn.autocommit = True
@@ -223,8 +256,8 @@ def _list_dbs(pg: bool) -> str:
         try:
             import psycopg2
             conn = psycopg2.connect(
-                host=DB_HOST, port=DB_PORT,
-                user=DB_USER, password=DB_PASSWORD or None,
+                host=POSTGRES_HOST, port=POSTGRES_PORT,
+                user=POSTGRES_USER, password=POSTGRES_PASSWORD or None,
                 database="postgres", connect_timeout=5,
             )
             with conn.cursor() as cur:

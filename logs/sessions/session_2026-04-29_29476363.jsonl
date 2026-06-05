@@ -1,3 +1,0 @@
-{"type": "session_start", "session_id": "29476363", "timestamp": "2026-04-29T11:21:49.736054", "date": "2026-04-29"}
-{"type": "conversation", "session_id": "29476363", "timestamp": "2026-04-29T11:25:04.779169", "role": "james", "content": "hey Hayeong how are you doing?", "intent": null, "mood": null, "model_used": null}
-{"type": "conversation", "session_id": "29476363", "timestamp": "2026-04-29T11:25:26.527334", "role": "hayeong", "content": "I'm doing okay, thanks for asking. Just wrapped up some work on server tests, so we should be all set. How about you? 🏡", "intent": null, "mood": "amused", "model_used": "phi3:mini"}

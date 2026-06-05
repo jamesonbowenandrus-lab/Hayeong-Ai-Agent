@@ -1,0 +1,11 @@
+HAYEONG_OK: done
+INFO Draco mesh compression is available, use library at H:\blender\5.1\scripts\addons_core\io_scene_gltf2\extern_draco.dll
+14:38:49 | INFO: Starting glTF 2.0 export
+14:38:49 | INFO: Extracting primitive: Cube.001
+14:38:49 | INFO: Primitives created: 1
+14:38:49 | INFO: Finished glTF 2.0 export in 0.07604146003723145 s
+
+HAYEONG_EXPORT_OK: H:/hayeong/Logs/outputs/blender/red_cube.glb
+Blender 5.1.1 (hash b70da489d7f4 built 2026-04-14 01:37:22)
+
+Blender quit
